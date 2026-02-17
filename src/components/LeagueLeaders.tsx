@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { useSortableTable } from "@/hooks/useSortableTable";
 
 type StatCategory = "Goals" | "GoldenSnitchCatches" | "KeeperSaves" | "GamesPlayed";
 
@@ -44,6 +45,11 @@ export function LeagueLeaders() {
     });
   }, []);
 
+  const { sorted, sortKey, sortDir, requestSort } = useSortableTable(leaders, category, "desc");
+
+  const thClass = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground cursor-pointer hover:text-foreground select-none";
+  const sortIndicator = (key: string) => sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
+
   return (
     <div className="border border-border rounded overflow-hidden">
       <div className="bg-table-header px-3 py-2">
@@ -55,15 +61,15 @@ export function LeagueLeaders() {
         <table className="w-full text-sm font-sans">
           <thead>
             <tr className="bg-secondary">
-              <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">#</th>
-              <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Player</th>
-              <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</th>
-              <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pos</th>
-              <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{statLabels[category]}</th>
+              <th className={`${thClass} text-left`}>#</th>
+              <th className={`${thClass} text-left`} onClick={() => requestSort("PlayerName")}>Player{sortIndicator("PlayerName")}</th>
+              <th className={`${thClass} text-left`} onClick={() => requestSort("FullName")}>Team{sortIndicator("FullName")}</th>
+              <th className={`${thClass} text-left`} onClick={() => requestSort("Position")}>Pos{sortIndicator("Position")}</th>
+              <th className={`${thClass} text-right`} onClick={() => requestSort(category)}>{statLabels[category]}{sortIndicator(category)}</th>
             </tr>
           </thead>
           <tbody>
-            {leaders.map((row, i) => {
+            {sorted.map((row, i) => {
               const pid = row.PlayerName ? playerMap[row.PlayerName] : null;
               return (
                 <tr

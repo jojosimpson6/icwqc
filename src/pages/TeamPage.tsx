@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
+import { useSortableTable } from "@/hooks/useSortableTable";
 
 interface Team {
   TeamID: number;
@@ -48,28 +49,21 @@ export default function TeamPage() {
     if (!name) return;
     const teamName = decodeURIComponent(name);
 
-    supabase.from("teams").select("*").eq("FullName", teamName).single().then(({ data }) => {
-      if (data) {
-        setTeam(data);
-        supabase.from("leagues").select("LeagueName").eq("LeagueID", data.LeagueID).single().then(({ data: ld }) => {
+    Promise.all([
+      supabase.from("teams").select("*").eq("FullName", teamName).single(),
+      supabase.from("stats").select("*").eq("FullName", teamName).order("Goals", { ascending: false }),
+      supabase.from("standings").select("*").eq("FullName", teamName).single(),
+      supabase.from("players").select("PlayerID, PlayerName"),
+    ]).then(([{ data: teamData }, { data: statsData }, { data: standData }, { data: playerData }]) => {
+      if (teamData) {
+        setTeam(teamData);
+        supabase.from("leagues").select("LeagueName").eq("LeagueID", teamData.LeagueID).single().then(({ data: ld }) => {
           if (ld) setLeagueName(ld.LeagueName || "");
         });
       }
-    });
-
-    // Get player stats for this team
-    supabase.from("stats").select("*").eq("FullName", teamName).order("Goals", { ascending: false }).then(({ data }) => {
-      if (data) setRoster(data as StatLine[]);
-    });
-
-    // Get standings for this team
-    supabase.from("standings").select("*").eq("FullName", teamName).single().then(({ data }) => {
-      if (data) setStanding(data as StandingRow);
-    });
-
-    // Get player IDs for linking
-    supabase.from("players").select("PlayerID, PlayerName").then(({ data }) => {
-      if (data) setPlayers(data);
+      if (statsData) setRoster(statsData as StatLine[]);
+      if (standData) setStanding(standData as StandingRow);
+      if (playerData) setPlayers(playerData);
     });
   }, [name]);
 
@@ -78,6 +72,19 @@ export default function TeamPage() {
     const found = players.find((p) => p.PlayerName === playerName);
     return found?.PlayerID || null;
   };
+
+  // Sort roster by position for display
+  const posOrder: Record<string, number> = { Chaser: 1, Beater: 2, Keeper: 3, Seeker: 4 };
+  const defaultSorted = [...roster].sort((a, b) => (posOrder[a.Position || ""] || 5) - (posOrder[b.Position || ""] || 5));
+  const { sorted: sortedRoster, sortKey, sortDir, requestSort } = useSortableTable(defaultSorted, "Position", "asc");
+
+  // Stat leaders
+  const topScorer = [...roster].filter((r) => r.Position === "Chaser").sort((a, b) => (b.Goals || 0) - (a.Goals || 0))[0];
+  const topGSC = [...roster].filter((r) => r.Position === "Seeker").sort((a, b) => (b.GoldenSnitchCatches || 0) - (a.GoldenSnitchCatches || 0))[0];
+  const topSaves = [...roster].filter((r) => r.Position === "Keeper").sort((a, b) => (b.KeeperSaves || 0) - (a.KeeperSaves || 0))[0];
+
+  const thClass = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground cursor-pointer hover:text-foreground select-none";
+  const sortIndicator = (key: string) => sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
   if (!team) {
     return (
@@ -88,15 +95,6 @@ export default function TeamPage() {
       </div>
     );
   }
-
-  // Sort roster by position for display
-  const posOrder: Record<string, number> = { Chaser: 1, Beater: 2, Keeper: 3, Seeker: 4 };
-  const sortedRoster = [...roster].sort((a, b) => (posOrder[a.Position || ""] || 5) - (posOrder[b.Position || ""] || 5));
-
-  // Stat leaders
-  const topScorer = [...roster].filter((r) => r.Position === "Chaser").sort((a, b) => (b.Goals || 0) - (a.Goals || 0))[0];
-  const topGSC = [...roster].filter((r) => r.Position === "Seeker").sort((a, b) => (b.GoldenSnitchCatches || 0) - (a.GoldenSnitchCatches || 0))[0];
-  const topSaves = [...roster].filter((r) => r.Position === "Keeper").sort((a, b) => (b.KeeperSaves || 0) - (a.KeeperSaves || 0))[0];
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -118,18 +116,18 @@ export default function TeamPage() {
             {/* Roster */}
             <div className="border border-border rounded overflow-hidden">
               <div className="bg-table-header px-3 py-2">
-                <h3 className="font-display text-sm font-bold text-table-header-foreground">1995 Roster & Statistics</h3>
+                <h3 className="font-display text-sm font-bold text-table-header-foreground">1994-1995 Roster & Statistics</h3>
               </div>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm font-sans">
                   <thead>
                     <tr className="bg-secondary">
-                      <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Player</th>
-                      <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pos</th>
-                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GP</th>
-                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Goals</th>
-                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GSC</th>
-                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Saves</th>
+                      <th className={`${thClass} text-left`} onClick={() => requestSort("PlayerName")}>Player{sortIndicator("PlayerName")}</th>
+                      <th className={`${thClass} text-left`} onClick={() => requestSort("Position")}>Pos{sortIndicator("Position")}</th>
+                      <th className={`${thClass} text-right`} onClick={() => requestSort("GamesPlayed")}>GP{sortIndicator("GamesPlayed")}</th>
+                      <th className={`${thClass} text-right`} onClick={() => requestSort("Goals")}>Goals{sortIndicator("Goals")}</th>
+                      <th className={`${thClass} text-right`} onClick={() => requestSort("GoldenSnitchCatches")}>GSC{sortIndicator("GoldenSnitchCatches")}</th>
+                      <th className={`${thClass} text-right`} onClick={() => requestSort("KeeperSaves")}>Saves{sortIndicator("KeeperSaves")}</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -156,11 +154,10 @@ export default function TeamPage() {
 
           {/* Sidebar */}
           <div className="space-y-6">
-            {/* Team standing */}
             {standing && (
               <div className="border border-border rounded overflow-hidden">
                 <div className="bg-table-header px-3 py-2">
-                  <h3 className="font-display text-sm font-bold text-table-header-foreground">1995 Season Summary</h3>
+                  <h3 className="font-display text-sm font-bold text-table-header-foreground">1994-1995 Season Summary</h3>
                 </div>
                 <div className="bg-card p-3 space-y-2 text-sm font-sans">
                   <div className="flex justify-between"><span className="text-muted-foreground">Games Played</span><span className="font-mono font-bold">{standing.totalgamesplayed}</span></div>
@@ -183,19 +180,31 @@ export default function TeamPage() {
                 {topScorer && (
                   <div>
                     <p className="text-xs text-muted-foreground uppercase tracking-wide">Top Scorer</p>
-                    <p className="font-medium text-accent">{topScorer.PlayerName} — {topScorer.Goals} goals</p>
+                    <p className="font-medium text-accent hover:underline">
+                      {getPlayerId(topScorer.PlayerName) ? (
+                        <Link to={`/player/${getPlayerId(topScorer.PlayerName)}`}>{topScorer.PlayerName}</Link>
+                      ) : topScorer.PlayerName} — {topScorer.Goals} goals
+                    </p>
                   </div>
                 )}
                 {topGSC && (
                   <div>
                     <p className="text-xs text-muted-foreground uppercase tracking-wide">Snitch Catches</p>
-                    <p className="font-medium text-accent">{topGSC.PlayerName} — {topGSC.GoldenSnitchCatches} catches</p>
+                    <p className="font-medium text-accent hover:underline">
+                      {getPlayerId(topGSC.PlayerName) ? (
+                        <Link to={`/player/${getPlayerId(topGSC.PlayerName)}`}>{topGSC.PlayerName}</Link>
+                      ) : topGSC.PlayerName} — {topGSC.GoldenSnitchCatches} catches
+                    </p>
                   </div>
                 )}
                 {topSaves && (
                   <div>
                     <p className="text-xs text-muted-foreground uppercase tracking-wide">Keeper Saves</p>
-                    <p className="font-medium text-accent">{topSaves.PlayerName} — {topSaves.KeeperSaves} saves</p>
+                    <p className="font-medium text-accent hover:underline">
+                      {getPlayerId(topSaves.PlayerName) ? (
+                        <Link to={`/player/${getPlayerId(topSaves.PlayerName)}`}>{topSaves.PlayerName}</Link>
+                      ) : topSaves.PlayerName} — {topSaves.KeeperSaves} saves
+                    </p>
                   </div>
                 )}
               </div>
