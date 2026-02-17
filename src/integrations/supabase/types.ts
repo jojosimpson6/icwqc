@@ -246,6 +246,7 @@ export type Database = {
           FullName: string
           LeagueID: number
           Nickname: string | null
+          State: string | null
           TeamID: number
           ValidFromDt: string
           ValidToDt: string
@@ -256,6 +257,7 @@ export type Database = {
           FullName: string
           LeagueID: number
           Nickname?: string | null
+          State?: string | null
           TeamID: number
           ValidFromDt: string
           ValidToDt: string
@@ -266,6 +268,7 @@ export type Database = {
           FullName?: string
           LeagueID?: number
           Nickname?: string | null
+          State?: string | null
           TeamID?: number
           ValidFromDt?: string
           ValidToDt?: string
@@ -280,6 +283,17 @@ export type Database = {
           new_elo: number | null
           player_name: string | null
           previous_elo: number | null
+        }
+        Relationships: []
+      }
+      schedule: {
+        Row: {
+          away_team: string | null
+          home_team: string | null
+          LeagueID: number | null
+          Matchday: string | null
+          SeasonID: number | null
+          site: string | null
         }
         Relationships: []
       }
