@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { getLeagueTierLabel } from "@/lib/helpers";
+import { useSortableTable } from "@/hooks/useSortableTable";
 
 interface League {
   LeagueID: number;
@@ -26,6 +27,21 @@ interface StandingRow {
   GoalsFor: number | null;
   GoalsAgainst: number | null;
   totalgsc: number | null;
+  homepoints: number | null;
+  awaypoints: number | null;
+  homegamesplayed: number | null;
+  awaygamesplayed: number | null;
+  homegoalsfor: number | null;
+  homegoalsagainst: number | null;
+  homegsc: number | null;
+  awaygoalsfor: number | null;
+  awaygoalsagainst: number | null;
+  awaygsc: number | null;
+  neutralpoints: number | null;
+  neutralgamesplayed: number | null;
+  neutralgoalsfor: number | null;
+  neutralgoalsagainst: number | null;
+  neutralgsc: number | null;
 }
 
 export default function LeaguePage() {
@@ -33,26 +49,48 @@ export default function LeaguePage() {
   const [league, setLeague] = useState<League | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
   const [standings, setStandings] = useState<StandingRow[]>([]);
+  const [view, setView] = useState<"total" | "home" | "away" | "neutral">("total");
 
   useEffect(() => {
     if (!id) return;
     const lid = parseInt(id);
 
-    supabase.from("leagues").select("*").eq("LeagueID", lid).single().then(({ data }) => {
-      if (data) setLeague(data);
+    Promise.all([
+      supabase.from("leagues").select("*").eq("LeagueID", lid).single(),
+      supabase.from("teams").select("*").eq("LeagueID", lid).order("FullName"),
+      supabase.from("standings").select("*").order("totalpoints", { ascending: false }),
+    ]).then(([{ data: leagueData }, { data: teamData }, { data: standingsData }]) => {
+      if (leagueData) setLeague(leagueData);
+      if (teamData) setTeams(teamData);
+      if (standingsData && teamData) {
+        const teamNames = new Set(teamData.map((t) => t.FullName));
+        setStandings((standingsData as StandingRow[]).filter((s) => teamNames.has(s.FullName || "")));
+      }
     });
-
-    supabase.from("teams").select("*").eq("LeagueID", lid).order("FullName").then(({ data }) => {
-      if (data) setTeams(data);
-    });
-
-    // Standings view is filtered by league in the view itself - get all and filter by team names
-    if (lid === 1) {
-      supabase.from("standings").select("*").order("totalpoints", { ascending: false }).then(({ data }) => {
-        if (data) setStandings(data as StandingRow[]);
-      });
-    }
   }, [id]);
+
+  const getViewData = () => {
+    return standings.map((s) => {
+      switch (view) {
+        case "home":
+          return { ...s, _gp: s.homegamesplayed, _pts: s.homepoints, _gf: s.homegoalsfor, _ga: s.homegoalsagainst, _gsc: s.homegsc };
+        case "away":
+          return { ...s, _gp: s.awaygamesplayed, _pts: s.awaypoints, _gf: s.awaygoalsfor, _ga: s.awaygoalsagainst, _gsc: s.awaygsc };
+        case "neutral":
+          return { ...s, _gp: s.neutralgamesplayed, _pts: s.neutralpoints, _gf: s.neutralgoalsfor, _ga: s.neutralgoalsagainst, _gsc: s.neutralgsc };
+        default:
+          return { ...s, _gp: s.totalgamesplayed, _pts: s.totalpoints, _gf: s.GoalsFor, _ga: s.GoalsAgainst, _gsc: s.totalgsc };
+      }
+    });
+  };
+
+  const viewData = getViewData();
+  const { sorted, sortKey, sortDir, requestSort } = useSortableTable(viewData, "_pts", "desc");
+
+  const hasNeutral = standings.some((s) => (s.neutralgamesplayed || 0) > 0);
+
+  const thClass = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground cursor-pointer hover:text-foreground select-none";
+  const sortIndicator = (key: string) => sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
   if (!league) {
     return (
@@ -75,39 +113,53 @@ export default function LeaguePage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
-            {/* Standings */}
             {standings.length > 0 && (
               <div className="border border-border rounded overflow-hidden">
-                <div className="bg-table-header px-3 py-2">
-                  <h3 className="font-display text-sm font-bold text-table-header-foreground">Standings — 1995</h3>
+                <div className="bg-table-header px-3 py-2 flex items-center justify-between flex-wrap gap-2">
+                  <h3 className="font-display text-sm font-bold text-table-header-foreground">Standings — 1994-1995</h3>
+                  <div className="flex gap-1">
+                    {(["total", "home", "away", ...(hasNeutral ? ["neutral" as const] : [])] as const).map((v) => (
+                      <button
+                        key={v}
+                        onClick={() => setView(v)}
+                        className={`text-xs px-2 py-0.5 rounded font-sans capitalize ${
+                          view === v
+                            ? "bg-accent text-accent-foreground"
+                            : "text-table-header-foreground/70 hover:text-table-header-foreground"
+                        }`}
+                      >
+                        {v}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm font-sans">
                     <thead>
                       <tr className="bg-secondary">
-                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">#</th>
-                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</th>
-                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GP</th>
-                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pts</th>
-                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GF</th>
-                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GA</th>
-                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GD</th>
-                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GSC</th>
+                        <th className={`${thClass} text-left`}>#</th>
+                        <th className={`${thClass} text-left`} onClick={() => requestSort("FullName")}>Team{sortIndicator("FullName")}</th>
+                        <th className={`${thClass} text-right`} onClick={() => requestSort("_gp")}>GP{sortIndicator("_gp")}</th>
+                        <th className={`${thClass} text-right`} onClick={() => requestSort("_pts")}>Pts{sortIndicator("_pts")}</th>
+                        <th className={`${thClass} text-right`} onClick={() => requestSort("_gf")}>GF{sortIndicator("_gf")}</th>
+                        <th className={`${thClass} text-right`} onClick={() => requestSort("_ga")}>GA{sortIndicator("_ga")}</th>
+                        <th className={`${thClass} text-right`}>GD</th>
+                        <th className={`${thClass} text-right`} onClick={() => requestSort("_gsc")}>GSC{sortIndicator("_gsc")}</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {standings.map((team, i) => (
+                      {sorted.map((team, i) => (
                         <tr key={team.FullName} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
                           <td className="px-3 py-1.5 font-mono text-muted-foreground">{i + 1}</td>
                           <td className="px-3 py-1.5 font-medium text-accent hover:underline">
                             <Link to={`/team/${encodeURIComponent(team.FullName || "")}`}>{team.FullName}</Link>
                           </td>
-                          <td className="px-3 py-1.5 text-right font-mono">{team.totalgamesplayed}</td>
-                          <td className="px-3 py-1.5 text-right font-mono font-bold">{team.totalpoints}</td>
-                          <td className="px-3 py-1.5 text-right font-mono">{team.GoalsFor}</td>
-                          <td className="px-3 py-1.5 text-right font-mono">{team.GoalsAgainst}</td>
-                          <td className="px-3 py-1.5 text-right font-mono">{((team.GoalsFor || 0) - (team.GoalsAgainst || 0))}</td>
-                          <td className="px-3 py-1.5 text-right font-mono">{team.totalgsc}</td>
+                          <td className="px-3 py-1.5 text-right font-mono">{team._gp}</td>
+                          <td className="px-3 py-1.5 text-right font-mono font-bold">{team._pts}</td>
+                          <td className="px-3 py-1.5 text-right font-mono">{team._gf}</td>
+                          <td className="px-3 py-1.5 text-right font-mono">{team._ga}</td>
+                          <td className="px-3 py-1.5 text-right font-mono">{((team._gf || 0) - (team._ga || 0))}</td>
+                          <td className="px-3 py-1.5 text-right font-mono">{team._gsc}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -121,25 +173,8 @@ export default function LeaguePage() {
               <div className="bg-table-header px-3 py-2">
                 <h3 className="font-display text-sm font-bold text-table-header-foreground">League History</h3>
               </div>
-              <div className="bg-card p-4 text-sm font-sans text-muted-foreground">
-                <table className="w-full">
-                  <thead>
-                    <tr className="bg-secondary">
-                      <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
-                      <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Champion</th>
-                      <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Runner-Up</th>
-                      <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Awards</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr className="border-t border-border">
-                      <td className="px-3 py-1.5 font-mono">1995</td>
-                      <td className="px-3 py-1.5 italic text-muted-foreground">To be populated</td>
-                      <td className="px-3 py-1.5 italic text-muted-foreground">To be populated</td>
-                      <td className="px-3 py-1.5 italic text-muted-foreground">To be populated</td>
-                    </tr>
-                  </tbody>
-                </table>
+              <div className="bg-card p-4 text-sm font-sans text-muted-foreground italic">
+                League placement history and awards to be populated.
               </div>
             </div>
           </div>
