@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 
 interface GameScore {
@@ -68,11 +69,11 @@ export function ScoreTicker() {
               </div>
               <div className="px-3 py-2 space-y-1">
                 <div className={`flex justify-between text-sm font-sans ${(game.AwayTeamScore) > (game.HomeTeamScore) ? "font-bold" : ""}`}>
-                  <span className="truncate mr-2">{game.away_team}</span>
-                  <span className="font-mono">{game.AwayTeamScore}</span>
-                </div>
-                <div className={`flex justify-between text-sm font-sans ${(game.HomeTeamScore) > (game.AwayTeamScore) ? "font-bold" : ""}`}>
-                  <span className="truncate mr-2">{game.home_team}</span>
+                   <Link to={`/team/${encodeURIComponent(game.away_team)}`} className="truncate mr-2 hover:underline">{game.away_team}</Link>
+                   <span className="font-mono">{game.AwayTeamScore}</span>
+                 </div>
+                 <div className={`flex justify-between text-sm font-sans ${(game.HomeTeamScore) > (game.AwayTeamScore) ? "font-bold" : ""}`}>
+                   <Link to={`/team/${encodeURIComponent(game.home_team)}`} className="truncate mr-2 hover:underline">{game.home_team}</Link>
                   <span className="font-mono">{game.HomeTeamScore}</span>
                 </div>
               </div>
