@@ -24,22 +24,24 @@ interface StatRow {
 export function LeagueLeaders() {
   const [leaders, setLeaders] = useState<StatRow[]>([]);
   const [category, setCategory] = useState<StatCategory>("Goals");
+  const [playerMap, setPlayerMap] = useState<Record<string, number>>({});
 
   useEffect(() => {
-    // Pick a random stat category
     const cats: StatCategory[] = ["Goals", "GoldenSnitchCatches", "KeeperSaves", "GamesPlayed"];
     const picked = cats[Math.floor(Math.random() * cats.length)];
     setCategory(picked);
 
-    supabase
-      .from("stats")
-      .select("*")
-      .not(picked, "is", null)
-      .order(picked, { ascending: false })
-      .limit(10)
-      .then(({ data }) => {
-        if (data) setLeaders(data as StatRow[]);
-      });
+    Promise.all([
+      supabase.from("stats").select("*").not(picked, "is", null).order(picked, { ascending: false }).limit(10),
+      supabase.from("players").select("PlayerID, PlayerName"),
+    ]).then(([{ data: statsData }, { data: playersData }]) => {
+      if (statsData) setLeaders(statsData as StatRow[]);
+      if (playersData) {
+        const map: Record<string, number> = {};
+        playersData.forEach((p) => { if (p.PlayerName) map[p.PlayerName] = p.PlayerID; });
+        setPlayerMap(map);
+      }
+    });
   }, []);
 
   return (
@@ -61,20 +63,25 @@ export function LeagueLeaders() {
             </tr>
           </thead>
           <tbody>
-            {leaders.map((row, i) => (
-              <tr
-                key={i}
-                className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20 transition-colors`}
-              >
-                <td className="px-3 py-1.5 font-mono text-muted-foreground">{i + 1}</td>
-                <td className="px-3 py-1.5 font-medium text-accent hover:underline">
-                  <Link to={`/players`}>{row.PlayerName}</Link>
-                </td>
-                <td className="px-3 py-1.5 text-muted-foreground">{row.FullName}</td>
-                <td className="px-3 py-1.5 text-muted-foreground">{row.Position}</td>
-                <td className="px-3 py-1.5 text-right font-mono font-bold">{row[category] ?? 0}</td>
-              </tr>
-            ))}
+            {leaders.map((row, i) => {
+              const pid = row.PlayerName ? playerMap[row.PlayerName] : null;
+              return (
+                <tr
+                  key={i}
+                  className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20 transition-colors`}
+                >
+                  <td className="px-3 py-1.5 font-mono text-muted-foreground">{i + 1}</td>
+                  <td className="px-3 py-1.5 font-medium text-accent hover:underline">
+                    {pid ? <Link to={`/player/${pid}`}>{row.PlayerName}</Link> : row.PlayerName}
+                  </td>
+                  <td className="px-3 py-1.5 text-accent hover:underline">
+                    <Link to={`/team/${encodeURIComponent(row.FullName || "")}`}>{row.FullName}</Link>
+                  </td>
+                  <td className="px-3 py-1.5 text-muted-foreground">{row.Position}</td>
+                  <td className="px-3 py-1.5 text-right font-mono font-bold">{row[category] ?? 0}</td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { GlobalSearch } from "@/components/GlobalSearch";
 
 interface League {
   LeagueID: number;
@@ -40,6 +41,7 @@ export function SiteHeader() {
           <div className="hidden md:flex items-center gap-4 text-sm font-sans">
             <Link to="/players" className="opacity-80 hover:opacity-100 transition-opacity">Players</Link>
             <Link to="/leagues" className="opacity-80 hover:opacity-100 transition-opacity">Leagues</Link>
+            <GlobalSearch />
           </div>
         </div>
       </div>
