@@ -25,8 +25,9 @@ export function SiteFooter() {
             </p>
           </div>
         </div>
-        <div className="border-t border-primary-foreground/20 mt-6 pt-4 text-xs opacity-50 text-center font-sans">
-          QuidReference — Quidditch Statistics & Records
+        <div className="border-t border-primary-foreground/20 mt-6 pt-4 text-xs opacity-50 text-center font-sans flex items-center justify-center gap-4">
+          <span>QuidReference — Quidditch Statistics &amp; Records</span>
+          <Link to="/admin/login" className="hover:opacity-100">Admin</Link>
         </div>
       </div>
     </footer>

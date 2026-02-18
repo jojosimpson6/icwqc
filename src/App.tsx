@@ -10,6 +10,8 @@ import LeaguePage from "./pages/LeaguePage";
 import TeamPage from "./pages/TeamPage";
 import PlayersIndex from "./pages/PlayersIndex";
 import LeaguesIndex from "./pages/LeaguesIndex";
+import AdminLogin from "./pages/AdminLogin";
+import AdminPanel from "./pages/AdminPanel";
 
 const queryClient = new QueryClient();
 
@@ -26,6 +28,8 @@ const App = () => (
           <Route path="/league/:id" element={<LeaguePage />} />
           <Route path="/leagues" element={<LeaguesIndex />} />
           <Route path="/team/:name" element={<TeamPage />} />
+          <Route path="/admin/login" element={<AdminLogin />} />
+          <Route path="/admin" element={<AdminPanel />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
           <Route path="*" element={<NotFound />} />
         </Routes>
