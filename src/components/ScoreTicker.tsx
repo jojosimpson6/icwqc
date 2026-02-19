@@ -60,24 +60,25 @@ export function ScoreTicker() {
             Latest Scores
           </span>
           {scores.map((game) => (
-            <div
+            <Link
               key={game.MatchID}
-              className="border border-border rounded bg-card hover:shadow-md transition-shadow min-w-[200px] shrink-0"
+              to={`/match/${game.MatchID}`}
+              className="border border-border rounded bg-card hover:shadow-md transition-shadow min-w-[200px] shrink-0 block"
             >
               <div className="px-3 py-1 bg-secondary text-xs text-muted-foreground font-sans border-b border-border">
                 Final · {game.SnitchCaughtTime ? `${game.SnitchCaughtTime} min` : ""}
               </div>
               <div className="px-3 py-2 space-y-1">
                 <div className={`flex justify-between text-sm font-sans ${(game.AwayTeamScore) > (game.HomeTeamScore) ? "font-bold" : ""}`}>
-                   <Link to={`/team/${encodeURIComponent(game.away_team)}`} className="truncate mr-2 hover:underline">{game.away_team}</Link>
-                   <span className="font-mono">{game.AwayTeamScore}</span>
-                 </div>
-                 <div className={`flex justify-between text-sm font-sans ${(game.HomeTeamScore) > (game.AwayTeamScore) ? "font-bold" : ""}`}>
-                   <Link to={`/team/${encodeURIComponent(game.home_team)}`} className="truncate mr-2 hover:underline">{game.home_team}</Link>
+                  <span className="truncate mr-2">{game.away_team}</span>
+                  <span className="font-mono">{game.AwayTeamScore}</span>
+                </div>
+                <div className={`flex justify-between text-sm font-sans ${(game.HomeTeamScore) > (game.AwayTeamScore) ? "font-bold" : ""}`}>
+                  <span className="truncate mr-2">{game.home_team}</span>
                   <span className="font-mono">{game.HomeTeamScore}</span>
                 </div>
               </div>
-            </div>
+            </Link>
           ))}
         </div>
       </div>

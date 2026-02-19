@@ -13,6 +13,7 @@ interface EloPoint {
   current_game_number: number;
   new_elo: number;
   player_name: string;
+  MatchID: number | null;
 }
 
 interface Matchday {
@@ -26,6 +27,12 @@ interface LeagueOption {
   LeagueName: string;
 }
 
+// Parse date string as local (not UTC) to avoid timezone-shift display issues
+function parseLocalDate(dateStr: string): Date {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
 export function EloChart() {
   const [chartData, setChartData] = useState<any[]>([]);
   const [teamNames, setTeamNames] = useState<string[]>([]);
@@ -34,17 +41,43 @@ export function EloChart() {
   const [selectedLeague, setSelectedLeague] = useState<number | null>(null);
   const [matchdays, setMatchdays] = useState<Matchday[]>([]);
   const [eloData, setEloData] = useState<EloPoint[]>([]);
+  // MatchID -> date string (YYYY-MM-DD)
+  const [matchDateMap, setMatchDateMap] = useState<Map<number, string>>(new Map());
 
-  // Load leagues and raw data on mount
   useEffect(() => {
     Promise.all([
       supabase.from("leagues").select("LeagueID, LeagueName").order("LeagueTier").order("LeagueName"),
-      supabase.from("elo").select("*").order("current_game_number", { ascending: true }),
+      supabase.from("elo").select("*").order("current_game_number", { ascending: true }).limit(5000),
       supabase.from("matchdays").select("*").order("MatchdayID", { ascending: true }),
     ]).then(([{ data: leagueData }, { data: eData }, { data: mdData }]) => {
       if (leagueData) setLeagues(leagueData as LeagueOption[]);
-      if (eData) setEloData(eData as EloPoint[]);
       if (mdData) setMatchdays(mdData as Matchday[]);
+
+      const elo = (eData || []) as EloPoint[];
+      setEloData(elo);
+
+      // Get unique MatchIDs from elo view, then look up WeekID in results -> date in matchdays
+      const matchIds = [...new Set(elo.map(e => e.MatchID).filter(Boolean))] as number[];
+      if (matchIds.length > 0 && mdData) {
+        // Build WeekID -> Matchday date
+        const weekToDate = new Map<number, string>();
+        (mdData as Matchday[]).forEach(md => {
+          if (md.MatchdayID && md.Matchday) weekToDate.set(md.MatchdayID, md.Matchday);
+        });
+
+        // Fetch results in batches of 1000
+        supabase.from("results").select("MatchID,WeekID").in("MatchID", matchIds.slice(0, 1000))
+          .then(({ data: resultsData }) => {
+            const mMap = new Map<number, string>();
+            (resultsData || []).forEach((r: { MatchID: number; WeekID: number | null }) => {
+              if (r.MatchID && r.WeekID) {
+                const date = weekToDate.get(r.WeekID);
+                if (date) mMap.set(r.MatchID, date);
+              }
+            });
+            setMatchDateMap(mMap);
+          });
+      }
     });
   }, []);
 
@@ -52,37 +85,47 @@ export function EloChart() {
   useEffect(() => {
     if (eloData.length === 0 || matchdays.length === 0) return;
 
-    // Build matchday map: game_number -> date
-    const mdMap = new Map<number, { date: string; leagueId: number | null }>();
-    matchdays.forEach((md) => {
-      mdMap.set(md.MatchdayID, { date: md.Matchday || "", leagueId: md.LeagueID });
-    });
+    // Build matchdayID -> leagueId map (for filtering by league)
+    const mdLeagueMap = new Map<number, number | null>();
+    matchdays.forEach((md) => mdLeagueMap.set(md.MatchdayID, md.LeagueID));
 
-    // Filter by league if selected
+    // For filtering by league: a match belongs to a league if its WeekID maps to that league's matchdays
+    // We use matchDateMap keys (MatchIDs) and filter elo by league via MatchID->WeekID->LeagueID
     let filteredElo = eloData;
     if (selectedLeague !== null) {
-      const validGameNumbers = new Set<number>();
-      matchdays.forEach((md) => {
-        if (md.LeagueID === selectedLeague) validGameNumbers.add(md.MatchdayID);
-      });
-      filteredElo = eloData.filter((d) => validGameNumbers.has(d.current_game_number));
+      // Valid matchdays for this league
+      const validMatchdayIds = new Set<number>(
+        matchdays.filter(md => md.LeagueID === selectedLeague).map(md => md.MatchdayID)
+      );
+      // We need MatchID->WeekID to filter. Build from matchDateMap source data.
+      // Approximate: use current_game_number (which is MatchdayID in the elo view's logic)
+      filteredElo = eloData.filter((d) => validMatchdayIds.has(d.current_game_number));
     }
 
     const names = [...new Set(filteredElo.map((d) => d.player_name))].sort();
     setTeamNames(names);
 
-    // Build chart data keyed by date
+    // Build chart keyed by date string — use MatchID -> date from matchDateMap first,
+    // fall back to current_game_number -> matchday date
+    const mdMap = new Map<number, string>();
+    matchdays.forEach((md) => {
+      if (md.Matchday) mdMap.set(md.MatchdayID, md.Matchday);
+    });
+
     const gameMap = new Map<string, Record<string, any>>();
 
-    // Initial row
+    // Initial row (before any games)
     const initDate = "1994-08-01";
     const gameZero: Record<string, any> = { date: initDate };
     names.forEach((n) => { gameZero[n] = 1000; });
     gameMap.set(initDate, gameZero);
 
     filteredElo.forEach((d) => {
-      const md = mdMap.get(d.current_game_number);
-      const dateKey = md?.date || `Game ${d.current_game_number}`;
+      // Prefer MatchID-based date; fall back to current_game_number as matchday id
+      const dateKey = (d.MatchID && matchDateMap.get(d.MatchID))
+        || mdMap.get(d.current_game_number)
+        || `Game ${d.current_game_number}`;
+
       if (!gameMap.has(dateKey)) {
         gameMap.set(dateKey, { date: dateKey });
       }
@@ -104,7 +147,7 @@ export function EloChart() {
     });
 
     setChartData(filled);
-  }, [eloData, matchdays, selectedLeague]);
+  }, [eloData, matchdays, selectedLeague, matchDateMap]);
 
   const toggleTeam = (name: string) => {
     setHiddenTeams((prev) => {
@@ -115,14 +158,11 @@ export function EloChart() {
     });
   };
 
-  const visibleTeams = teamNames.filter((n) => !hiddenTeams.has(n));
-
   if (chartData.length === 0) return null;
 
   const formatDate = (d: string) => {
     if (!d || d.startsWith("Game")) return d;
-    const date = new Date(d);
-    return date.toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
+    return parseLocalDate(d).toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
   };
 
   return (
@@ -145,13 +185,19 @@ export function EloChart() {
       <div className="bg-card p-4">
         <ResponsiveContainer width="100%" height={350}>
           <LineChart data={chartData}>
-            <XAxis dataKey="date" tickFormatter={formatDate} tick={{ fontSize: 11 }} />
+            <XAxis
+              dataKey="date"
+              tickFormatter={formatDate}
+              tick={{ fontSize: 11 }}
+              type="category"
+              interval="preserveStartEnd"
+            />
             <YAxis domain={["auto", "auto"]} tick={{ fontSize: 11 }} />
             <Tooltip
               contentStyle={{ fontSize: 12 }}
               labelFormatter={(label) => {
                 if (!label || String(label).startsWith("Game")) return label;
-                return new Date(String(label)).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+                return parseLocalDate(String(label)).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
               }}
             />
             <Legend wrapperStyle={{ fontSize: 11 }} onClick={(e) => toggleTeam(String(e.dataKey))} />

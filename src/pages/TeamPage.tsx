@@ -53,6 +53,18 @@ interface StandingRow {
   awaygamesplayed: number | null;
 }
 
+interface MatchResult {
+  MatchID: number;
+  HomeTeamID: number | null;
+  AwayTeamID: number | null;
+  HomeTeamScore: number | null;
+  AwayTeamScore: number | null;
+  SnitchCaughtTime: number | null;
+  LeagueID: number | null;
+  SeasonID: number | null;
+  WeekID: number | null;
+}
+
 function seasonLabel(id: number): string {
   return `${id - 1}–${String(id).slice(-2)}`;
 }
@@ -67,8 +79,11 @@ export default function TeamPage() {
   const [allStandings, setAllStandings] = useState<StandingRow[]>([]);
   const [players, setPlayers] = useState<{ PlayerID: number; PlayerName: string | null }[]>([]);
   const [seasonRegister, setSeasonRegister] = useState<SeasonRegisterRow[]>([]);
-  const [activeTab, setActiveTab] = useState<"register" | "roster">("register");
+  const [activeTab, setActiveTab] = useState<"register" | "results" | "roster">("register");
   const [rosterSeasonId, setRosterSeasonId] = useState<number | null>(null);
+  const [matchResults, setMatchResults] = useState<MatchResult[]>([]);
+  const [teamMapState, setTeamMapState] = useState<Map<number, string>>(new Map());
+  const [matchDayMap, setMatchDayMap] = useState<Map<number, string>>(new Map()); // WeekID -> date
 
   useEffect(() => {
     if (!name) return;
@@ -79,16 +94,43 @@ export default function TeamPage() {
       supabase.from("stats").select("*").eq("FullName", teamName),
       supabase.from("standings").select("*").eq("FullName", teamName).order("SeasonID", { ascending: false }),
       supabase.from("players").select("PlayerID, PlayerName"),
-    ]).then(([{ data: teamData }, { data: statsData }, { data: standData }, { data: playerData }]) => {
+      supabase.from("results").select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SnitchCaughtTime,LeagueID,SeasonID,WeekID")
+        .or(`HomeTeamID.eq.0,AwayTeamID.eq.0`) // placeholder — we need team ID
+        .limit(0), // just to get types; real fetch below
+      supabase.from("teams").select("TeamID, FullName"),
+      supabase.from("matchdays").select("MatchdayID, Matchday"),
+    ]).then(([{ data: teamData }, { data: statsData }, { data: standData }, { data: playerData }, , { data: allTeamsData }, { data: mdData }]) => {
       if (teamData) {
         setTeam(teamData);
         supabase.from("leagues").select("LeagueName").eq("LeagueID", teamData.LeagueID).single().then(({ data: ld }) => {
           if (ld) setLeagueName(ld.LeagueName || "");
         });
+
+        // Fetch results for this team
+        supabase.from("results")
+          .select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SnitchCaughtTime,LeagueID,SeasonID,WeekID")
+          .or(`HomeTeamID.eq.${teamData.TeamID},AwayTeamID.eq.${teamData.TeamID}`)
+          .order("MatchID", { ascending: false })
+          .limit(2000)
+          .then(({ data: rData }) => {
+            if (rData) setMatchResults(rData as MatchResult[]);
+          });
       }
+
+      // Build team map for name lookups
+      const tm = new Map<number, string>();
+      (allTeamsData || []).forEach(t => { if (t.TeamID) tm.set(t.TeamID, t.FullName); });
+      setTeamMapState(tm);
+
+      // Build WeekID -> matchday date map
+      const mdm = new Map<number, string>();
+      (mdData || []).forEach((md: { MatchdayID: number; Matchday: string | null }) => {
+        if (md.MatchdayID && md.Matchday) mdm.set(md.MatchdayID, md.Matchday);
+      });
+      setMatchDayMap(mdm);
+
       if (statsData) {
         setAllStats(statsData as StatLine[]);
-        // Most recent season for roster display
         const seasons = [...new Set((statsData as StatLine[]).map(s => s.SeasonID).filter(Boolean))].sort((a, b) => (b || 0) - (a || 0));
         const latestSeason = seasons[0] || null;
         setRosterSeasonId(latestSeason);
@@ -100,7 +142,6 @@ export default function TeamPage() {
       }
       if (playerData) setPlayers(playerData);
 
-      // Build season register from standings + league info
       if (standData && standData.length > 0) {
         buildSeasonRegister(teamName, standData as StandingRow[], statsData as StatLine[]);
       }
@@ -280,6 +321,12 @@ export default function TeamPage() {
             Season Register
           </button>
           <button
+            onClick={() => setActiveTab("results")}
+            className={`px-4 py-2 text-sm font-sans font-medium border-b-2 -mb-px transition-colors ${activeTab === "results" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+          >
+            Results
+          </button>
+          <button
             onClick={() => setActiveTab("roster")}
             className={`px-4 py-2 text-sm font-sans font-medium border-b-2 -mb-px transition-colors ${activeTab === "roster" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
           >
@@ -298,6 +345,65 @@ export default function TeamPage() {
             {seasonRegister.length === 0 && (
               <p className="text-muted-foreground font-sans text-sm">No season data available.</p>
             )}
+          </div>
+        )}
+
+        {activeTab === "results" && (
+          <div className="border border-border rounded overflow-hidden">
+            <div className="bg-table-header px-3 py-2">
+              <h3 className="font-display text-sm font-bold text-table-header-foreground">Schedule of Results</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm font-sans">
+                <thead>
+                  <tr className="bg-secondary">
+                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Date</th>
+                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
+                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Opponent</th>
+                    <th className="px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">H/A</th>
+                    <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Score</th>
+                    <th className="px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">W/L</th>
+                    <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Min</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {matchResults.map((r, i) => {
+                    const isHome = r.HomeTeamID === team?.TeamID;
+                    const teamScore = isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
+                    const oppScore = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
+                    const oppId = isHome ? r.AwayTeamID : r.HomeTeamID;
+                    const oppName = oppId ? teamMapState.get(oppId) || `Team ${oppId}` : "Unknown";
+                    const won = teamScore > oppScore;
+                    const dateStr = r.WeekID ? matchDayMap.get(r.WeekID) : null;
+                    const displayDate = dateStr
+                      ? (() => { const [y,m,d] = dateStr.split("-").map(Number); return new Date(y,m-1,d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); })()
+                      : "—";
+                    return (
+                      <tr key={r.MatchID} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
+                        <td className="px-3 py-1.5 text-xs text-muted-foreground font-mono">{displayDate}</td>
+                        <td className="px-3 py-1.5 text-xs text-muted-foreground font-mono">{r.SeasonID ? seasonLabel(r.SeasonID) : "—"}</td>
+                        <td className="px-3 py-1.5">
+                          <Link to={`/team/${encodeURIComponent(oppName)}`} className="text-accent hover:underline">{oppName}</Link>
+                        </td>
+                        <td className="px-3 py-1.5 text-center text-xs text-muted-foreground">{isHome ? "H" : "A"}</td>
+                        <td className="px-3 py-1.5 text-right font-mono font-bold">
+                          <Link to={`/match/${r.MatchID}`} className="hover:underline text-accent">
+                            {teamScore}–{oppScore}
+                          </Link>
+                        </td>
+                        <td className={`px-3 py-1.5 text-center font-bold text-xs ${won ? "text-green-600" : "text-destructive"}`}>
+                          {won ? "W" : "L"}
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-mono text-muted-foreground text-xs">{r.SnitchCaughtTime ?? "—"}</td>
+                      </tr>
+                    );
+                  })}
+                  {matchResults.length === 0 && (
+                    <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">No results found.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </div>
         )}
 
