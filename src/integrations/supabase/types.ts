@@ -355,6 +355,7 @@ export type Database = {
       elo: {
         Row: {
           current_game_number: number | null
+          MatchID: number | null
           new_elo: number | null
           player_name: string | null
           previous_elo: number | null
@@ -367,6 +368,7 @@ export type Database = {
           home_team: string | null
           LeagueID: number | null
           Matchday: string | null
+          MatchID: number | null
           SeasonID: number | null
           site: string | null
         }

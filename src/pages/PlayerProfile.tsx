@@ -98,6 +98,7 @@ export default function PlayerProfile() {
   const [leagueLeaders, setLeagueLeaders] = useState<LeagueLeaderEntry[]>([]);
   const [leagueMaxes, setLeagueMaxes] = useState<Map<string, Map<string, number>>>(new Map());
   const [minutesMap, setMinutesMap] = useState<MinutesMap>(new Map());
+  const [shotsFacedMap, setShotsFacedMap] = useState<MinutesMap>(new Map());
 
   useEffect(() => {
     if (!id) return;
@@ -112,7 +113,7 @@ export default function PlayerProfile() {
           });
         }
 
-        // Fetch match minutes from results table based on position
+        // Fetch match minutes (and shots faced for beaters/keepers) from results table
         const pos = data.Position;
         let orFilter = "";
         if (pos === "Chaser") {
@@ -128,10 +129,10 @@ export default function PlayerProfile() {
           supabase.from("results")
             .select("SeasonID,LeagueID,SnitchCaughtTime,HomeKeeperShotsFaced,AwayKeeperShotsFaced,HomeKeeperID,AwayKeeperID,HomeBeater1ID,HomeBeater2ID,AwayBeater1ID,AwayBeater2ID,HomeSeekerID,AwaySeekerID,HomeChaser1ID,HomeChaser2ID,HomeChaser3ID,AwayChaser1ID,AwayChaser2ID,AwayChaser3ID")
             .or(orFilter)
+            .limit(2000)
             .then(({ data: matchData }) => {
               if (!matchData) return;
 
-              // We need league names; fetch leagues mapping
               supabase.from("leagues").select("LeagueID,LeagueName").then(({ data: leaguesData }) => {
                 const leagueNameMap = new Map<number, string>();
                 (leaguesData || []).forEach((l: { LeagueID: number; LeagueName: string | null }) => {
@@ -139,6 +140,9 @@ export default function PlayerProfile() {
                 });
 
                 const minsMap = new Map<string, number>();
+                // shotsFacedMap: key -> total shots faced by opponent keeper (for beaters/keepers it's "shots faced" in their match)
+                const shotsFacedMap = new Map<string, number>();
+
                 matchData.forEach((r: Record<string, unknown>) => {
                   const sid = r.SeasonID as number;
                   const lid = r.LeagueID as number;
@@ -146,8 +150,23 @@ export default function PlayerProfile() {
                   const key = `${sid}|${lname}`;
                   const matchMins = (r.SnitchCaughtTime as number) || 0;
                   minsMap.set(key, (minsMap.get(key) || 0) + matchMins);
+
+                  // For beaters: they face the opponent keeper's shots faced (i.e., the team's keeper shots faced)
+                  // A home beater's team's keeper shots faced = HomeKeeperShotsFaced
+                  // An away beater's team's keeper shots faced = AwayKeeperShotsFaced
+                  if (pos === "Beater" || pos === "Keeper") {
+                    const isHomeBeater = (r.HomeBeater1ID === pid || r.HomeBeater2ID === pid);
+                    const isHomeKeeper = (r.HomeKeeperID === pid);
+                    const isHome = isHomeBeater || isHomeKeeper;
+                    // For beaters: shots their team's keeper faced. For keepers: their own shots faced.
+                    const sf = isHome
+                      ? (r.HomeKeeperShotsFaced as number) || 0
+                      : (r.AwayKeeperShotsFaced as number) || 0;
+                    shotsFacedMap.set(key, (shotsFacedMap.get(key) || 0) + sf);
+                  }
                 });
                 setMinutesMap(minsMap);
+                setShotsFacedMap(shotsFacedMap);
               });
             });
         }
@@ -456,9 +475,10 @@ export default function PlayerProfile() {
                       ? ((s.KeeperSaves || 0) / (s.GamesPlayed || 1)).toFixed(2)
                       : "—";
 
-                    // Beater: shots faced per game (KeeperShotsFaced for team, proxy)
-                    const sfPerGP = isBeater && (s.GamesPlayed || 0) > 0 && (s.KeeperShotsFaced || 0) > 0
-                      ? ((s.KeeperShotsFaced || 0) / (s.GamesPlayed || 1)).toFixed(2)
+                    // Beater/Keeper: shots faced per game — use actual summed shots from results
+                    const sfFromResults = shotsFacedMap.get(mKey) || 0;
+                    const sfPerGP = (isBeater || isKeeper) && (s.GamesPlayed || 0) > 0 && sfFromResults > 0
+                      ? (sfFromResults / (s.GamesPlayed || 1)).toFixed(2)
                       : "—";
 
                     return (
