@@ -303,6 +303,9 @@ export type Database = {
           FullName: string
           LeagueID: number
           Nickname: string | null
+          PrimaryColor: string | null
+          Rival: string | null
+          SecondaryColor: string | null
           State: string | null
           TeamID: number
           ValidFromDt: string
@@ -314,6 +317,9 @@ export type Database = {
           FullName: string
           LeagueID: number
           Nickname?: string | null
+          PrimaryColor?: string | null
+          Rival?: string | null
+          SecondaryColor?: string | null
           State?: string | null
           TeamID: number
           ValidFromDt: string
@@ -325,6 +331,9 @@ export type Database = {
           FullName?: string
           LeagueID?: number
           Nickname?: string | null
+          PrimaryColor?: string | null
+          Rival?: string | null
+          SecondaryColor?: string | null
           State?: string | null
           TeamID?: number
           ValidFromDt?: string
