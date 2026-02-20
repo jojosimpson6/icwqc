@@ -12,6 +12,9 @@ interface Team {
   Country: string | null;
   Nickname: string | null;
   LeagueID: number;
+  PrimaryColor: string | null;
+  SecondaryColor: string | null;
+  Rival: string | null;
 }
 
 interface StatLine {
@@ -69,6 +72,12 @@ function seasonLabel(id: number): string {
   return `${id - 1}–${String(id).slice(-2)}`;
 }
 
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
 export default function TeamPage() {
   const { name } = useParams();
   const [team, setTeam] = useState<Team | null>(null);
@@ -81,9 +90,11 @@ export default function TeamPage() {
   const [seasonRegister, setSeasonRegister] = useState<SeasonRegisterRow[]>([]);
   const [activeTab, setActiveTab] = useState<"register" | "results" | "roster">("register");
   const [rosterSeasonId, setRosterSeasonId] = useState<number | null>(null);
+  const [resultsSeasonId, setResultsSeasonId] = useState<number | "all">("all");
   const [matchResults, setMatchResults] = useState<MatchResult[]>([]);
   const [teamMapState, setTeamMapState] = useState<Map<number, string>>(new Map());
-  const [matchDayMap, setMatchDayMap] = useState<Map<number, string>>(new Map()); // WeekID -> date
+  const [matchDayMap, setMatchDayMap] = useState<Map<number, string>>(new Map());
+  const [rivalTeamName, setRivalTeamName] = useState<string | null>(null);
 
   useEffect(() => {
     if (!name) return;
@@ -95,8 +106,8 @@ export default function TeamPage() {
       supabase.from("standings").select("*").eq("FullName", teamName).order("SeasonID", { ascending: false }),
       supabase.from("players").select("PlayerID, PlayerName"),
       supabase.from("results").select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SnitchCaughtTime,LeagueID,SeasonID,WeekID")
-        .or(`HomeTeamID.eq.0,AwayTeamID.eq.0`) // placeholder — we need team ID
-        .limit(0), // just to get types; real fetch below
+        .or(`HomeTeamID.eq.0,AwayTeamID.eq.0`)
+        .limit(0),
       supabase.from("teams").select("TeamID, FullName"),
       supabase.from("matchdays").select("MatchdayID, Matchday"),
     ]).then(([{ data: teamData }, { data: statsData }, { data: standData }, { data: playerData }, , { data: allTeamsData }, { data: mdData }]) => {
@@ -106,7 +117,11 @@ export default function TeamPage() {
           if (ld) setLeagueName(ld.LeagueName || "");
         });
 
-        // Fetch results for this team
+        // Resolve rival name
+        if (teamData.Rival) {
+          setRivalTeamName(teamData.Rival);
+        }
+
         supabase.from("results")
           .select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SnitchCaughtTime,LeagueID,SeasonID,WeekID")
           .or(`HomeTeamID.eq.${teamData.TeamID},AwayTeamID.eq.${teamData.TeamID}`)
@@ -117,12 +132,10 @@ export default function TeamPage() {
           });
       }
 
-      // Build team map for name lookups
       const tm = new Map<number, string>();
       (allTeamsData || []).forEach(t => { if (t.TeamID) tm.set(t.TeamID, t.FullName); });
       setTeamMapState(tm);
 
-      // Build WeekID -> matchday date map
       const mdm = new Map<number, string>();
       (mdData || []).forEach((md: { MatchdayID: number; Matchday: string | null }) => {
         if (md.MatchdayID && md.Matchday) mdm.set(md.MatchdayID, md.Matchday);
@@ -149,28 +162,23 @@ export default function TeamPage() {
   }, [name]);
 
   async function buildSeasonRegister(teamName: string, standings: StandingRow[], stats: StatLine[]) {
-    // Get all unique season/league combos from stats
     const seasonLeagueMap = new Map<number, string>();
     (stats || []).forEach(s => {
       if (s.SeasonID && s.LeagueName) seasonLeagueMap.set(s.SeasonID, s.LeagueName);
     });
 
-    // Get league tiers
-    const leagueNames = Array.from(new Set(Array.from(seasonLeagueMap.values())));
     const { data: leagueData } = await supabase.from("leagues").select("LeagueName, LeagueTier");
     const leagueTierMap = new Map<string, number>();
     (leagueData || []).forEach(l => {
       if (l.LeagueName) leagueTierMap.set(l.LeagueName, l.LeagueTier || 1);
     });
 
-    // For each season in standings, get all teams' points to calculate position
     const registerRows: SeasonRegisterRow[] = [];
     for (const standing of standings) {
       if (!standing.SeasonID) continue;
       const leagueN = seasonLeagueMap.get(standing.SeasonID) || leagueName;
       const tier = leagueTierMap.get(leagueN) || 1;
 
-      // Get all teams in this season to calculate position
       const { data: allTeamStandings } = await supabase.from("standings")
         .select("FullName, totalpoints")
         .eq("SeasonID", standing.SeasonID)
@@ -185,9 +193,6 @@ export default function TeamPage() {
           isChampion = idx === 0;
         }
       }
-
-      // Top scorer for this season
-      const seasonStats = (stats || []).filter(s => s.SeasonID === standing.SeasonID);
 
       registerRows.push({
         SeasonID: standing.SeasonID,
@@ -212,7 +217,6 @@ export default function TeamPage() {
     return players.find((p) => p.PlayerName === playerName)?.PlayerID || null;
   };
 
-  // Roster for the selected season
   const displayRoster = rosterSeasonId
     ? allStats.filter(s => s.SeasonID === rosterSeasonId)
     : currentRoster;
@@ -230,9 +234,20 @@ export default function TeamPage() {
 
   const availableSeasons = [...new Set(allStats.map(s => s.SeasonID).filter(Boolean))].sort((a, b) => (b || 0) - (a || 0)) as number[];
 
-  // Split register into domestic and cup
+  // Results season options from match data
+  const resultsSeasons = [...new Set(matchResults.map(r => r.SeasonID).filter(Boolean))].sort((a, b) => (b || 0) - (a || 0)) as number[];
+  const filteredResults = resultsSeasonId === "all" ? matchResults : matchResults.filter(r => r.SeasonID === resultsSeasonId);
+
   const domesticRegister = seasonRegister.filter(r => r.LeagueTier !== 0);
   const cupRegister = seasonRegister.filter(r => r.LeagueTier === 0);
+
+  // Team color styling
+  const primaryColor = team?.PrimaryColor || null;
+  const secondaryColor = team?.SecondaryColor || null;
+  const headerStyle = primaryColor ? {
+    backgroundColor: primaryColor,
+    color: secondaryColor || "#ffffff",
+  } : undefined;
 
   if (!team) {
     return (
@@ -246,8 +261,11 @@ export default function TeamPage() {
 
   const RegisterTable = ({ rows, title }: { rows: SeasonRegisterRow[]; title: string }) => (
     <div className="border border-border rounded overflow-hidden">
-      <div className="bg-table-header px-3 py-2">
-        <h3 className="font-display text-sm font-bold text-table-header-foreground">{title}</h3>
+      <div className="px-3 py-2" style={headerStyle || undefined}>
+        <h3 className={`font-display text-sm font-bold ${headerStyle ? "" : "text-table-header-foreground bg-table-header"}`}
+          style={!headerStyle ? undefined : { color: headerStyle.color }}>
+          {title}
+        </h3>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm font-sans">
@@ -280,7 +298,7 @@ export default function TeamPage() {
                   </td>
                   <td className="px-3 py-1.5 text-xs text-muted-foreground">{row.LeagueName}</td>
                   <td className={`px-3 py-1.5 text-right font-mono ${posClass}`}>
-                    {row.isChampion ? "🏆 1" : row.position ?? "—"}
+                    {row.isChampion ? "🏆 1st" : row.position != null ? ordinal(row.position) : "—"}
                   </td>
                   <td className="px-3 py-1.5 text-right font-mono">{row.totalgamesplayed ?? "—"}</td>
                   <td className="px-3 py-1.5 text-right font-mono">{row.totalpoints ?? "—"}</td>
@@ -301,108 +319,131 @@ export default function TeamPage() {
     <div className="min-h-screen bg-background flex flex-col">
       <SiteHeader />
       <main className="flex-1 container py-8">
-        <div className="mb-6 border-b-2 border-primary pb-2">
+        {/* Team header with color accent */}
+        <div className="mb-6 border-b-2 pb-2" style={primaryColor ? { borderColor: primaryColor } : undefined}>
           <p className="text-xs text-muted-foreground font-sans uppercase tracking-wide">
             <Link to={`/league/${team.LeagueID}`} className="hover:text-accent">{leagueName}</Link>
           </p>
-          <h1 className="font-display text-3xl font-bold text-foreground">{team.FullName}</h1>
+          <h1 className="font-display text-3xl font-bold" style={primaryColor ? { color: primaryColor } : undefined}>
+            {team.FullName}
+          </h1>
           <p className="text-sm text-muted-foreground font-sans mt-1">
             {team.City}{team.Country ? `, ${team.Country}` : ""}
             {team.Nickname ? ` — "${team.Nickname}"` : ""}
           </p>
+          {rivalTeamName && (
+            <p className="text-sm font-sans mt-1">
+              <span className="text-muted-foreground">Rival: </span>
+              <Link to={`/team/${encodeURIComponent(rivalTeamName)}`} className="text-accent hover:underline font-medium">
+                {rivalTeamName}
+              </Link>
+            </p>
+          )}
+          {primaryColor && (
+            <div className="flex gap-2 mt-2">
+              <div className="w-6 h-6 rounded border border-border" style={{ backgroundColor: primaryColor }} title="Primary" />
+              {secondaryColor && <div className="w-6 h-6 rounded border border-border" style={{ backgroundColor: secondaryColor }} title="Secondary" />}
+            </div>
+          )}
         </div>
 
         {/* Tabs */}
         <div className="flex gap-2 mb-4 border-b border-border">
-          <button
-            onClick={() => setActiveTab("register")}
-            className={`px-4 py-2 text-sm font-sans font-medium border-b-2 -mb-px transition-colors ${activeTab === "register" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-          >
-            Season Register
-          </button>
-          <button
-            onClick={() => setActiveTab("results")}
-            className={`px-4 py-2 text-sm font-sans font-medium border-b-2 -mb-px transition-colors ${activeTab === "results" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-          >
-            Results
-          </button>
-          <button
-            onClick={() => setActiveTab("roster")}
-            className={`px-4 py-2 text-sm font-sans font-medium border-b-2 -mb-px transition-colors ${activeTab === "roster" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-          >
-            Roster & Stats
-          </button>
+          {(["register", "results", "roster"] as const).map(tab => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-4 py-2 text-sm font-sans font-medium border-b-2 -mb-px transition-colors ${activeTab === tab ? "text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+              style={activeTab === tab && primaryColor ? { borderColor: primaryColor, color: primaryColor } : activeTab === tab ? {} : undefined}
+            >
+              {tab === "register" ? "Season Register" : tab === "results" ? "Results" : "Roster & Stats"}
+            </button>
+          ))}
         </div>
 
         {activeTab === "register" && (
           <div className="space-y-6">
-            {domesticRegister.length > 0 && (
-              <RegisterTable rows={domesticRegister} title="Domestic League Register" />
-            )}
-            {cupRegister.length > 0 && (
-              <RegisterTable rows={cupRegister} title="Cup Competition Register" />
-            )}
-            {seasonRegister.length === 0 && (
-              <p className="text-muted-foreground font-sans text-sm">No season data available.</p>
-            )}
+            {domesticRegister.length > 0 && <RegisterTable rows={domesticRegister} title="Domestic League Register" />}
+            {cupRegister.length > 0 && <RegisterTable rows={cupRegister} title="Cup Competition Register" />}
+            {seasonRegister.length === 0 && <p className="text-muted-foreground font-sans text-sm">No season data available.</p>}
           </div>
         )}
 
         {activeTab === "results" && (
-          <div className="border border-border rounded overflow-hidden">
-            <div className="bg-table-header px-3 py-2">
-              <h3 className="font-display text-sm font-bold text-table-header-foreground">Schedule of Results</h3>
+          <div className="space-y-4">
+            {/* Season filter */}
+            <div className="flex items-center gap-3">
+              <label className="text-sm font-sans text-muted-foreground">Season:</label>
+              <select
+                className="text-sm font-sans border border-border rounded px-2 py-1 bg-background text-foreground"
+                value={resultsSeasonId === "all" ? "all" : resultsSeasonId}
+                onChange={e => setResultsSeasonId(e.target.value === "all" ? "all" : Number(e.target.value))}
+              >
+                <option value="all">All Seasons</option>
+                {resultsSeasons.map(s => (
+                  <option key={s} value={s}>{seasonLabel(s)}</option>
+                ))}
+              </select>
             </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm font-sans">
-                <thead>
-                  <tr className="bg-secondary">
-                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Date</th>
-                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
-                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Opponent</th>
-                    <th className="px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">H/A</th>
-                    <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Score</th>
-                    <th className="px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">W/L</th>
-                    <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Min</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {matchResults.map((r, i) => {
-                    const isHome = r.HomeTeamID === team?.TeamID;
-                    const teamScore = isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
-                    const oppScore = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
-                    const oppId = isHome ? r.AwayTeamID : r.HomeTeamID;
-                    const oppName = oppId ? teamMapState.get(oppId) || `Team ${oppId}` : "Unknown";
-                    const won = teamScore > oppScore;
-                    const dateStr = r.WeekID ? matchDayMap.get(r.WeekID) : null;
-                    const displayDate = dateStr
-                      ? (() => { const [y,m,d] = dateStr.split("-").map(Number); return new Date(y,m-1,d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); })()
-                      : "—";
-                    return (
-                      <tr key={r.MatchID} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
-                        <td className="px-3 py-1.5 text-xs text-muted-foreground font-mono">{displayDate}</td>
-                        <td className="px-3 py-1.5 text-xs text-muted-foreground font-mono">{r.SeasonID ? seasonLabel(r.SeasonID) : "—"}</td>
-                        <td className="px-3 py-1.5">
-                          <Link to={`/team/${encodeURIComponent(oppName)}`} className="text-accent hover:underline">{oppName}</Link>
-                        </td>
-                        <td className="px-3 py-1.5 text-center text-xs text-muted-foreground">{isHome ? "H" : "A"}</td>
-                        <td className="px-3 py-1.5 text-right font-mono font-bold">
-                          <Link to={`/match/${r.MatchID}`} className="hover:underline text-accent">
-                            {teamScore}–{oppScore}
-                          </Link>
-                        </td>
-                        <td className={`px-3 py-1.5 text-center font-bold text-xs ${won ? "text-green-600" : "text-destructive"}`}>
-                          {won ? "W" : "L"}
-                        </td>
-                        <td className="px-3 py-1.5 text-right font-mono text-muted-foreground text-xs">{r.SnitchCaughtTime ?? "—"}</td>
-                      </tr>
-                    );
-                  })}
-                  {matchResults.length === 0 && (
-                    <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">No results found.</td></tr>
-                  )}
-                </tbody>
-              </table>
+
+            <div className="border border-border rounded overflow-hidden">
+              <div className="px-3 py-2" style={headerStyle || undefined}>
+                <h3 className={`font-display text-sm font-bold ${headerStyle ? "" : "text-table-header-foreground"}`}
+                  style={!headerStyle ? undefined : { color: headerStyle.color }}>
+                  Schedule of Results
+                </h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm font-sans">
+                  <thead>
+                    <tr className="bg-secondary">
+                      <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Date</th>
+                      <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
+                      <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Opponent</th>
+                      <th className="px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">H/A</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Score</th>
+                      <th className="px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">W/L</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Min</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredResults.map((r, i) => {
+                      const isHome = r.HomeTeamID === team?.TeamID;
+                      const teamScore = isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
+                      const oppScore = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
+                      const oppId = isHome ? r.AwayTeamID : r.HomeTeamID;
+                      const oppName = oppId ? teamMapState.get(oppId) || `Team ${oppId}` : "Unknown";
+                      const won = teamScore > oppScore;
+                      const dateStr = r.WeekID ? matchDayMap.get(r.WeekID) : null;
+                      const displayDate = dateStr
+                        ? (() => { const [y,m,d] = dateStr.split("-").map(Number); return new Date(y,m-1,d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); })()
+                        : "—";
+                      return (
+                        <tr key={r.MatchID} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
+                          <td className="px-3 py-1.5 text-xs text-muted-foreground font-mono">{displayDate}</td>
+                          <td className="px-3 py-1.5 text-xs text-muted-foreground font-mono">{r.SeasonID ? seasonLabel(r.SeasonID) : "—"}</td>
+                          <td className="px-3 py-1.5">
+                            <Link to={`/team/${encodeURIComponent(oppName)}`} className="text-accent hover:underline">{oppName}</Link>
+                          </td>
+                          <td className="px-3 py-1.5 text-center text-xs text-muted-foreground">{isHome ? "H" : "A"}</td>
+                          <td className="px-3 py-1.5 text-right font-mono font-bold">
+                            <Link to={`/match/${r.MatchID}`} className="hover:underline text-accent">
+                              {teamScore}–{oppScore}
+                            </Link>
+                          </td>
+                          <td className={`px-3 py-1.5 text-center font-bold text-xs ${won ? "text-green-600" : "text-destructive"}`}>
+                            {won ? "W" : "L"}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono text-muted-foreground text-xs">{r.SnitchCaughtTime ?? "—"}</td>
+                        </tr>
+                      );
+                    })}
+                    {filteredResults.length === 0 && (
+                      <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">No results found.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         )}
@@ -410,7 +451,6 @@ export default function TeamPage() {
         {activeTab === "roster" && (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 space-y-6">
-              {/* Season selector */}
               <div className="flex items-center gap-3">
                 <label className="text-sm font-sans text-muted-foreground">Season:</label>
                 <select
@@ -425,8 +465,9 @@ export default function TeamPage() {
               </div>
 
               <div className="border border-border rounded overflow-hidden">
-                <div className="bg-table-header px-3 py-2">
-                  <h3 className="font-display text-sm font-bold text-table-header-foreground">
+                <div className="px-3 py-2" style={headerStyle || undefined}>
+                  <h3 className={`font-display text-sm font-bold ${headerStyle ? "" : "text-table-header-foreground"}`}
+                    style={!headerStyle ? undefined : { color: headerStyle.color }}>
                     {rosterSeasonId ? `${seasonLabel(rosterSeasonId)} Roster & Statistics` : "Roster & Statistics"}
                   </h3>
                 </div>
@@ -468,8 +509,9 @@ export default function TeamPage() {
             <div className="space-y-6">
               {currentStanding && (
                 <div className="border border-border rounded overflow-hidden">
-                  <div className="bg-table-header px-3 py-2">
-                    <h3 className="font-display text-sm font-bold text-table-header-foreground">
+                  <div className="px-3 py-2" style={headerStyle || undefined}>
+                    <h3 className={`font-display text-sm font-bold ${headerStyle ? "" : "text-table-header-foreground"}`}
+                      style={!headerStyle ? undefined : { color: headerStyle.color }}>
                       {rosterSeasonId ? `${seasonLabel(rosterSeasonId)} Season Summary` : "Season Summary"}
                     </h3>
                   </div>
@@ -492,8 +534,11 @@ export default function TeamPage() {
               )}
 
               <div className="border border-border rounded overflow-hidden">
-                <div className="bg-table-header px-3 py-2">
-                  <h3 className="font-display text-sm font-bold text-table-header-foreground">Team Leaders</h3>
+                <div className="px-3 py-2" style={headerStyle || undefined}>
+                  <h3 className={`font-display text-sm font-bold ${headerStyle ? "" : "text-table-header-foreground"}`}
+                    style={!headerStyle ? undefined : { color: headerStyle.color }}>
+                    Team Leaders
+                  </h3>
                 </div>
                 <div className="bg-card p-3 space-y-3 text-sm font-sans">
                   {topScorer && (

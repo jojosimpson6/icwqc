@@ -43,6 +43,17 @@ interface LeagueLeaderEntry {
 // Minutes played per season/league key
 type MinutesMap = Map<string, number>;
 
+interface MatchLogEntry {
+  MatchID: number;
+  SeasonID: number | null;
+  opponentName: string;
+  isHome: boolean;
+  teamScore: number;
+  oppScore: number;
+  stat: string; // position-specific stat
+  date: string | null;
+}
+
 // League abbreviations
 const leagueAbbr: Record<string, string> = {
   "British and Irish Quidditch League": "BIQL",
@@ -99,6 +110,7 @@ export default function PlayerProfile() {
   const [leagueMaxes, setLeagueMaxes] = useState<Map<string, Map<string, number>>>(new Map());
   const [minutesMap, setMinutesMap] = useState<MinutesMap>(new Map());
   const [shotsFacedMap, setShotsFacedMap] = useState<MinutesMap>(new Map());
+  const [matchLog, setMatchLog] = useState<MatchLogEntry[]>([]);
 
   useEffect(() => {
     if (!id) return;
@@ -126,49 +138,106 @@ export default function PlayerProfile() {
           orFilter = `HomeBeater1ID.eq.${pid},HomeBeater2ID.eq.${pid},AwayBeater1ID.eq.${pid},AwayBeater2ID.eq.${pid}`;
         }
         if (orFilter) {
-          supabase.from("results")
-            .select("SeasonID,LeagueID,SnitchCaughtTime,HomeKeeperShotsFaced,AwayKeeperShotsFaced,HomeKeeperID,AwayKeeperID,HomeBeater1ID,HomeBeater2ID,AwayBeater1ID,AwayBeater2ID,HomeSeekerID,AwaySeekerID,HomeChaser1ID,HomeChaser2ID,HomeChaser3ID,AwayChaser1ID,AwayChaser2ID,AwayChaser3ID")
-            .or(orFilter)
-            .limit(2000)
-            .then(({ data: matchData }) => {
-              if (!matchData) return;
+          Promise.all([
+            supabase.from("results")
+              .select("MatchID,SeasonID,LeagueID,WeekID,SnitchCaughtTime,SnitchCaughtBy,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,HomeKeeperShotsFaced,AwayKeeperShotsFaced,HomeKeeperID,AwayKeeperID,HomeKeeperSaves,AwayKeeperSaves,HomeBeater1ID,HomeBeater2ID,AwayBeater1ID,AwayBeater2ID,HomeSeekerID,AwaySeekerID,HomeChaser1ID,HomeChaser1Goals,HomeChaser2ID,HomeChaser2Goals,HomeChaser3ID,HomeChaser3Goals,AwayChaser1ID,AwayChaser1Goals,AwayChaser2ID,AwayChaser2Goals,AwayChaser3ID,AwayChaser3Goals")
+              .or(orFilter)
+              .order("MatchID", { ascending: false })
+              .limit(2000),
+            supabase.from("leagues").select("LeagueID,LeagueName"),
+            supabase.from("teams").select("TeamID, FullName"),
+            supabase.from("matchdays").select("MatchdayID, Matchday"),
+          ]).then(([{ data: matchData }, { data: leaguesData }, { data: teamsData }, { data: mdData }]) => {
+            if (!matchData) return;
 
-              supabase.from("leagues").select("LeagueID,LeagueName").then(({ data: leaguesData }) => {
-                const leagueNameMap = new Map<number, string>();
-                (leaguesData || []).forEach((l: { LeagueID: number; LeagueName: string | null }) => {
-                  if (l.LeagueID && l.LeagueName) leagueNameMap.set(l.LeagueID, l.LeagueName);
-                });
+            const leagueNameMap = new Map<number, string>();
+            (leaguesData || []).forEach((l: { LeagueID: number; LeagueName: string | null }) => {
+              if (l.LeagueID && l.LeagueName) leagueNameMap.set(l.LeagueID, l.LeagueName);
+            });
 
-                const minsMap = new Map<string, number>();
-                // shotsFacedMap: key -> total shots faced by opponent keeper (for beaters/keepers it's "shots faced" in their match)
-                const shotsFacedMap = new Map<string, number>();
+            const teamNameMap = new Map<number, string>();
+            (teamsData || []).forEach((t: { TeamID: number; FullName: string }) => {
+              if (t.TeamID) teamNameMap.set(t.TeamID, t.FullName);
+            });
 
-                matchData.forEach((r: Record<string, unknown>) => {
-                  const sid = r.SeasonID as number;
-                  const lid = r.LeagueID as number;
-                  const lname = leagueNameMap.get(lid) || String(lid);
-                  const key = `${sid}|${lname}`;
-                  const matchMins = (r.SnitchCaughtTime as number) || 0;
-                  minsMap.set(key, (minsMap.get(key) || 0) + matchMins);
+            const mdMap = new Map<number, string>();
+            (mdData || []).forEach((md: { MatchdayID: number; Matchday: string | null }) => {
+              if (md.MatchdayID && md.Matchday) mdMap.set(md.MatchdayID, md.Matchday);
+            });
 
-                  // For beaters: they face the opponent keeper's shots faced (i.e., the team's keeper shots faced)
-                  // A home beater's team's keeper shots faced = HomeKeeperShotsFaced
-                  // An away beater's team's keeper shots faced = AwayKeeperShotsFaced
-                  if (pos === "Beater" || pos === "Keeper") {
-                    const isHomeBeater = (r.HomeBeater1ID === pid || r.HomeBeater2ID === pid);
-                    const isHomeKeeper = (r.HomeKeeperID === pid);
-                    const isHome = isHomeBeater || isHomeKeeper;
-                    // For beaters: shots their team's keeper faced. For keepers: their own shots faced.
-                    const sf = isHome
-                      ? (r.HomeKeeperShotsFaced as number) || 0
-                      : (r.AwayKeeperShotsFaced as number) || 0;
-                    shotsFacedMap.set(key, (shotsFacedMap.get(key) || 0) + sf);
-                  }
-                });
-                setMinutesMap(minsMap);
-                setShotsFacedMap(shotsFacedMap);
+            const minsMap = new Map<string, number>();
+            const sfMap = new Map<string, number>();
+            const logEntries: MatchLogEntry[] = [];
+
+            matchData.forEach((r: Record<string, unknown>) => {
+              const sid = r.SeasonID as number;
+              const lid = r.LeagueID as number;
+              const lname = leagueNameMap.get(lid) || String(lid);
+              const key = `${sid}|${lname}`;
+              const matchMins = (r.SnitchCaughtTime as number) || 0;
+              minsMap.set(key, (minsMap.get(key) || 0) + matchMins);
+
+              // Determine if player is on home or away side
+              const homePlayerIds = [r.HomeChaser1ID, r.HomeChaser2ID, r.HomeChaser3ID, r.HomeKeeperID, r.HomeSeekerID, r.HomeBeater1ID, r.HomeBeater2ID];
+              const isHome = homePlayerIds.includes(pid);
+
+              if (pos === "Beater" || pos === "Keeper") {
+                const sf = isHome
+                  ? (r.HomeKeeperShotsFaced as number) || 0
+                  : (r.AwayKeeperShotsFaced as number) || 0;
+                sfMap.set(key, (sfMap.get(key) || 0) + sf);
+              }
+
+              // Build match log entry
+              const oppId = isHome ? (r.AwayTeamID as number) : (r.HomeTeamID as number);
+              const teamScore = isHome ? (r.HomeTeamScore as number) ?? 0 : (r.AwayTeamScore as number) ?? 0;
+              const oppScore = isHome ? (r.AwayTeamScore as number) ?? 0 : (r.HomeTeamScore as number) ?? 0;
+              const weekId = r.WeekID as number;
+              const dateStr = weekId ? mdMap.get(weekId) || null : null;
+
+              // Position-specific stat
+              let statStr = "";
+              if (pos === "Chaser") {
+                let goals = 0;
+                if (isHome) {
+                  if (r.HomeChaser1ID === pid) goals = (r.HomeChaser1Goals as number) || 0;
+                  else if (r.HomeChaser2ID === pid) goals = (r.HomeChaser2Goals as number) || 0;
+                  else if (r.HomeChaser3ID === pid) goals = (r.HomeChaser3Goals as number) || 0;
+                } else {
+                  if (r.AwayChaser1ID === pid) goals = (r.AwayChaser1Goals as number) || 0;
+                  else if (r.AwayChaser2ID === pid) goals = (r.AwayChaser2Goals as number) || 0;
+                  else if (r.AwayChaser3ID === pid) goals = (r.AwayChaser3Goals as number) || 0;
+                }
+                statStr = `${goals} goals`;
+              } else if (pos === "Keeper") {
+                const saves = isHome ? (r.HomeKeeperSaves as number) || 0 : (r.AwayKeeperSaves as number) || 0;
+                const sf = isHome ? (r.HomeKeeperShotsFaced as number) || 0 : (r.AwayKeeperShotsFaced as number) || 0;
+                statStr = `${saves}/${sf} saves`;
+              } else if (pos === "Seeker") {
+                const snitchTeam = r.SnitchCaughtBy as number;
+                const myTeam = isHome ? (r.HomeTeamID as number) : (r.AwayTeamID as number);
+                statStr = snitchTeam === myTeam ? "✓ Caught" : "—";
+              } else if (pos === "Beater") {
+                const sf = isHome ? (r.HomeKeeperShotsFaced as number) || 0 : (r.AwayKeeperShotsFaced as number) || 0;
+                statStr = `${sf} SA`;
+              }
+
+              logEntries.push({
+                MatchID: r.MatchID as number,
+                SeasonID: sid,
+                opponentName: teamNameMap.get(oppId) || `Team ${oppId}`,
+                isHome,
+                teamScore,
+                oppScore,
+                stat: statStr,
+                date: dateStr,
               });
             });
+
+            setMinutesMap(minsMap);
+            setShotsFacedMap(sfMap);
+            setMatchLog(logEntries);
+          });
         }
       }
     });
@@ -637,6 +706,57 @@ export default function PlayerProfile() {
                     )}
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Match Log */}
+          {matchLog.length > 0 && (
+            <div className="border border-border rounded overflow-hidden">
+              <div className="bg-table-header px-3 py-2">
+                <h3 className="font-display text-sm font-bold text-table-header-foreground">Match Log</h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm font-sans">
+                  <thead>
+                    <tr className="bg-secondary">
+                      <th className={`${thClass} text-left`}>Date</th>
+                      <th className={`${thClass} text-left`}>Season</th>
+                      <th className={`${thClass} text-left`}>Opponent</th>
+                      <th className={`${thClass} text-center`}>H/A</th>
+                      <th className={`${thClass} text-right`}>Score</th>
+                      <th className={`${thClass} text-center`}>W/L</th>
+                      <th className={`${thClass} text-right`}>{isChaser ? "Goals" : isKeeper ? "Saves" : isSeeker ? "GSC" : "SA"}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {matchLog.map((m, i) => {
+                      const won = m.teamScore > m.oppScore;
+                      const displayDate = m.date
+                        ? (() => { const [y, mo, d] = m.date.split("-").map(Number); return new Date(y, mo - 1, d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); })()
+                        : "—";
+                      return (
+                        <tr key={m.MatchID} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
+                          <td className={`${tdClass} text-xs text-muted-foreground font-mono`}>{displayDate}</td>
+                          <td className={`${tdClass} text-xs text-muted-foreground font-mono`}>{m.SeasonID ? seasonLabel(m.SeasonID) : "—"}</td>
+                          <td className={tdClass}>
+                            <Link to={`/team/${encodeURIComponent(m.opponentName)}`} className="text-accent hover:underline">{m.opponentName}</Link>
+                          </td>
+                          <td className={`${tdClass} text-center text-xs text-muted-foreground`}>{m.isHome ? "H" : "A"}</td>
+                          <td className={`${tdClass} text-right font-mono font-bold`}>
+                            <Link to={`/match/${m.MatchID}`} className="hover:underline text-accent">
+                              {m.teamScore}–{m.oppScore}
+                            </Link>
+                          </td>
+                          <td className={`${tdClass} text-center font-bold text-xs ${won ? "text-green-600" : "text-destructive"}`}>
+                            {won ? "W" : "L"}
+                          </td>
+                          <td className={`${tdClass} text-right font-mono`}>{m.stat}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             </div>
           )}

@@ -11,7 +11,7 @@ interface MatchResult {
   HomeTeamScore: number | null;
   AwayTeamScore: number | null;
   SnitchCaughtTime: number | null;
-  SnitchCaughtBy: number | null;
+  SnitchCaughtBy: number | null; // This is a TeamID, not PlayerID
   LeagueID: number | null;
   SeasonID: number | null;
   WeekID: number | null;
@@ -80,7 +80,6 @@ export default function MatchPage() {
           .then(({ data: ld }) => { if (ld) setLeagueName(ld.LeagueName || ""); });
       }
 
-      // Get matchday date via matchdays table (MatchdayWeek = WeekID)
       if (matchData?.WeekID) {
         supabase.from("matchdays").select("Matchday").eq("MatchdayID", matchData.WeekID).single()
           .then(({ data: md }) => {
@@ -110,13 +109,25 @@ export default function MatchPage() {
   const awayTeam = match.AwayTeamID ? teamMap.get(match.AwayTeamID) || `Team ${match.AwayTeamID}` : "Unknown";
   const homeWin = (match.HomeTeamScore || 0) > (match.AwayTeamScore || 0);
   const awayWin = (match.AwayTeamScore || 0) > (match.HomeTeamScore || 0);
-  const snitchCatcher = match.SnitchCaughtBy;
+
+  // SnitchCaughtBy is a TeamID — resolve to the correct seeker
+  const snitchCatcherTeamId = match.SnitchCaughtBy;
+  const snitchCatcherPlayerId = snitchCatcherTeamId === match.HomeTeamID
+    ? match.HomeSeekerID
+    : snitchCatcherTeamId === match.AwayTeamID
+    ? match.AwaySeekerID
+    : null;
+  const homeCaughtSnitch = snitchCatcherTeamId === match.HomeTeamID;
+  const awayCaughtSnitch = snitchCatcherTeamId === match.AwayTeamID;
 
   const thClass = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground";
   const tdClass = "px-3 py-1.5 text-sm font-sans";
 
-  const ChaserRows = ({ side }: { side: "home" | "away" }) => {
-    const chasers = side === "home"
+  // Box score component for one side
+  const BoxScore = ({ side }: { side: "home" | "away" }) => {
+    const isHome = side === "home";
+    const teamName = isHome ? homeTeam : awayTeam;
+    const chasers = isHome
       ? [
           { id: match.HomeChaser1ID, goals: match.HomeChaser1Goals },
           { id: match.HomeChaser2ID, goals: match.HomeChaser2Goals },
@@ -127,28 +138,65 @@ export default function MatchPage() {
           { id: match.AwayChaser2ID, goals: match.AwayChaser2Goals },
           { id: match.AwayChaser3ID, goals: match.AwayChaser3Goals },
         ];
+    const beaters = isHome
+      ? [match.HomeBeater1ID, match.HomeBeater2ID]
+      : [match.AwayBeater1ID, match.AwayBeater2ID];
+    const keeperId = isHome ? match.HomeKeeperID : match.AwayKeeperID;
+    const keeperSaves = isHome ? match.HomeKeeperSaves : match.AwayKeeperSaves;
+    const keeperSF = isHome ? match.HomeKeeperShotsFaced : match.AwayKeeperShotsFaced;
+    const seekerId = isHome ? match.HomeSeekerID : match.AwaySeekerID;
+    const caughtSnitch = isHome ? homeCaughtSnitch : awayCaughtSnitch;
+    // Shots faced by the opposing team's keeper = shots allowed by this team's beaters
+    const oppSF = isHome ? match.AwayKeeperShotsFaced : match.HomeKeeperShotsFaced;
+
+    let rowIdx = 0;
+    const rowClass = () => { const c = rowIdx % 2 === 0 ? "bg-card" : "bg-table-stripe"; rowIdx++; return c; };
+
     return (
-      <>
-        {chasers.filter(c => c.id).map((c, i) => (
-          <tr key={i} className={`border-t border-border ${i % 2 === 0 ? "bg-card" : "bg-table-stripe"}`}>
-            <td className={tdClass}>{playerLink(c.id, playerMap)}</td>
-            <td className={`${tdClass} text-muted-foreground`}>Chaser</td>
-            <td className={`${tdClass} text-right font-mono`}>{c.goals ?? "—"}</td>
-            <td className={`${tdClass} text-right font-mono text-muted-foreground`}>—</td>
-          </tr>
-        ))}
-      </>
+      <div className="border border-border rounded overflow-hidden">
+        <div className="bg-table-header px-3 py-2">
+          <h3 className="font-display text-sm font-bold text-table-header-foreground">{teamName}</h3>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-secondary">
+                <th className={`${thClass} text-left`}>Player</th>
+                <th className={`${thClass} text-left`}>Pos</th>
+                <th className={`${thClass} text-right`}>Stat</th>
+              </tr>
+            </thead>
+            <tbody>
+              {chasers.filter(c => c.id).map((c) => (
+                <tr key={c.id} className={`border-t border-border ${rowClass()}`}>
+                  <td className={tdClass}>{playerLink(c.id, playerMap)}</td>
+                  <td className={`${tdClass} text-muted-foreground`}>Chaser</td>
+                  <td className={`${tdClass} text-right font-mono`}>{c.goals ?? 0} goals</td>
+                </tr>
+              ))}
+              {beaters.filter(Boolean).map((bId) => (
+                <tr key={bId} className={`border-t border-border ${rowClass()}`}>
+                  <td className={tdClass}>{playerLink(bId, playerMap)}</td>
+                  <td className={`${tdClass} text-muted-foreground`}>Beater</td>
+                  <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{oppSF ?? "—"} SA</td>
+                </tr>
+              ))}
+              <tr className={`border-t border-border ${rowClass()}`}>
+                <td className={tdClass}>{playerLink(keeperId, playerMap)}</td>
+                <td className={`${tdClass} text-muted-foreground`}>Keeper</td>
+                <td className={`${tdClass} text-right font-mono`}>{keeperSaves ?? 0}/{keeperSF ?? 0} saves</td>
+              </tr>
+              <tr className={`border-t border-border ${rowClass()}`}>
+                <td className={tdClass}>{playerLink(seekerId, playerMap)}</td>
+                <td className={`${tdClass} text-muted-foreground`}>Seeker</td>
+                <td className={`${tdClass} text-right font-mono`}>{caughtSnitch ? "✓ Caught" : "—"}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
     );
   };
-
-  const SpecialRow = ({ label, id, stat, statVal }: { label: string; id: number | null; stat: string; statVal: string | number | null }) => (
-    <tr className="border-t border-border bg-card">
-      <td className={tdClass}>{playerLink(id, playerMap)}</td>
-      <td className={`${tdClass} text-muted-foreground`}>{label}</td>
-      <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{stat}</td>
-      <td className={`${tdClass} text-right font-mono`}>{statVal ?? "—"}</td>
-    </tr>
-  );
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -185,65 +233,16 @@ export default function MatchPage() {
               </Link>
             </div>
           </div>
-          {match.SnitchCaughtTime && (
+          {match.SnitchCaughtTime && snitchCatcherPlayerId && (
             <p className="text-sm text-muted-foreground font-sans mt-2">
-              Snitch caught at {match.SnitchCaughtTime} min by {playerLink(snitchCatcher, playerMap)}
+              Snitch caught at {match.SnitchCaughtTime} min by {playerLink(snitchCatcherPlayerId, playerMap)}
             </p>
           )}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* Home Box Score */}
-          <div className="border border-border rounded overflow-hidden">
-            <div className="bg-table-header px-3 py-2">
-              <h3 className="font-display text-sm font-bold text-table-header-foreground">{homeTeam}</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-secondary">
-                    <th className={`${thClass} text-left`}>Player</th>
-                    <th className={`${thClass} text-left`}>Pos</th>
-                    <th className={`${thClass} text-right`}>Stat</th>
-                    <th className={`${thClass} text-right`}>Val</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <ChaserRows side="home" />
-                  <SpecialRow label="Beater" id={match.HomeBeater1ID} stat="Btr" statVal={null} />
-                  <SpecialRow label="Beater" id={match.HomeBeater2ID} stat="Btr" statVal={null} />
-                  <SpecialRow label="Keeper" id={match.HomeKeeperID} stat="Sv/SF" statVal={`${match.HomeKeeperSaves ?? "—"}/${match.HomeKeeperShotsFaced ?? "—"}`} />
-                  <SpecialRow label="Seeker" id={match.HomeSeekerID} stat="GSC" statVal={match.HomeSeekerID === snitchCatcher ? 1 : 0} />
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          {/* Away Box Score */}
-          <div className="border border-border rounded overflow-hidden">
-            <div className="bg-table-header px-3 py-2">
-              <h3 className="font-display text-sm font-bold text-table-header-foreground">{awayTeam}</h3>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-secondary">
-                    <th className={`${thClass} text-left`}>Player</th>
-                    <th className={`${thClass} text-left`}>Pos</th>
-                    <th className={`${thClass} text-right`}>Stat</th>
-                    <th className={`${thClass} text-right`}>Val</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <ChaserRows side="away" />
-                  <SpecialRow label="Beater" id={match.AwayBeater1ID} stat="Btr" statVal={null} />
-                  <SpecialRow label="Beater" id={match.AwayBeater2ID} stat="Btr" statVal={null} />
-                  <SpecialRow label="Keeper" id={match.AwayKeeperID} stat="Sv/SF" statVal={`${match.AwayKeeperSaves ?? "—"}/${match.AwayKeeperShotsFaced ?? "—"}`} />
-                  <SpecialRow label="Seeker" id={match.AwaySeekerID} stat="GSC" statVal={match.AwaySeekerID === snitchCatcher ? 1 : 0} />
-                </tbody>
-              </table>
-            </div>
-          </div>
+          <BoxScore side="home" />
+          <BoxScore side="away" />
         </div>
       </main>
       <SiteFooter />
