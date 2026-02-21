@@ -4,6 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { useSortableTable } from "@/hooks/useSortableTable";
+import { getContrastText, formatHeight, calculateAge, getNationFlag } from "@/lib/helpers";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 interface Team {
   TeamID: number;
@@ -66,6 +68,17 @@ interface MatchResult {
   LeagueID: number | null;
   SeasonID: number | null;
   WeekID: number | null;
+  IsNeutralSite: number | null;
+}
+
+interface PlayerInfo {
+  PlayerID: number;
+  PlayerName: string | null;
+  DOB: string | null;
+  NationalityID: number | null;
+  Height: number | null;
+  Weight: number | null;
+  Handedness: string | null;
 }
 
 function seasonLabel(id: number): string {
@@ -86,7 +99,8 @@ export default function TeamPage() {
   const [allStats, setAllStats] = useState<StatLine[]>([]);
   const [currentStanding, setCurrentStanding] = useState<StandingRow | null>(null);
   const [allStandings, setAllStandings] = useState<StandingRow[]>([]);
-  const [players, setPlayers] = useState<{ PlayerID: number; PlayerName: string | null }[]>([]);
+  const [players, setPlayers] = useState<PlayerInfo[]>([]);
+  const [nations, setNations] = useState<Map<number, string>>(new Map());
   const [seasonRegister, setSeasonRegister] = useState<SeasonRegisterRow[]>([]);
   const [activeTab, setActiveTab] = useState<"register" | "results" | "roster">("register");
   const [rosterSeasonId, setRosterSeasonId] = useState<number | null>(null);
@@ -95,6 +109,11 @@ export default function TeamPage() {
   const [teamMapState, setTeamMapState] = useState<Map<number, string>>(new Map());
   const [matchDayMap, setMatchDayMap] = useState<Map<number, string>>(new Map());
   const [rivalTeamName, setRivalTeamName] = useState<string | null>(null);
+  const [resultsOpen, setResultsOpen] = useState(true);
+  const [h2hOpen, setH2hOpen] = useState(true);
+  // Result sort
+  const [resultSortKey, setResultSortKey] = useState<string>("date");
+  const [resultSortDir, setResultSortDir] = useState<"asc" | "desc">("asc");
 
   useEffect(() => {
     if (!name) return;
@@ -104,26 +123,26 @@ export default function TeamPage() {
       supabase.from("teams").select("*").eq("FullName", teamName).single(),
       supabase.from("stats").select("*").eq("FullName", teamName),
       supabase.from("standings").select("*").eq("FullName", teamName).order("SeasonID", { ascending: false }),
-      supabase.from("players").select("PlayerID, PlayerName"),
-      supabase.from("results").select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SnitchCaughtTime,LeagueID,SeasonID,WeekID")
+      supabase.from("players").select("PlayerID, PlayerName, DOB, NationalityID, Height, Weight, Handedness"),
+      supabase.from("results").select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SnitchCaughtTime,LeagueID,SeasonID,WeekID,IsNeutralSite")
         .or(`HomeTeamID.eq.0,AwayTeamID.eq.0`)
         .limit(0),
       supabase.from("teams").select("TeamID, FullName"),
       supabase.from("matchdays").select("MatchdayID, Matchday"),
-    ]).then(([{ data: teamData }, { data: statsData }, { data: standData }, { data: playerData }, , { data: allTeamsData }, { data: mdData }]) => {
+      supabase.from("nations").select("NationID, Nation"),
+    ]).then(([{ data: teamData }, { data: statsData }, { data: standData }, { data: playerData }, , { data: allTeamsData }, { data: mdData }, { data: nationData }]) => {
       if (teamData) {
         setTeam(teamData);
         supabase.from("leagues").select("LeagueName").eq("LeagueID", teamData.LeagueID).single().then(({ data: ld }) => {
           if (ld) setLeagueName(ld.LeagueName || "");
         });
 
-        // Resolve rival name
         if (teamData.Rival) {
           setRivalTeamName(teamData.Rival);
         }
 
         supabase.from("results")
-          .select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SnitchCaughtTime,LeagueID,SeasonID,WeekID")
+          .select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SnitchCaughtTime,LeagueID,SeasonID,WeekID,IsNeutralSite")
           .or(`HomeTeamID.eq.${teamData.TeamID},AwayTeamID.eq.${teamData.TeamID}`)
           .order("MatchID", { ascending: false })
           .limit(2000)
@@ -142,6 +161,12 @@ export default function TeamPage() {
       });
       setMatchDayMap(mdm);
 
+      const nm = new Map<number, string>();
+      (nationData || []).forEach((n: { NationID: number; Nation: string | null }) => {
+        if (n.NationID && n.Nation) nm.set(n.NationID, n.Nation);
+      });
+      setNations(nm);
+
       if (statsData) {
         setAllStats(statsData as StatLine[]);
         const seasons = [...new Set((statsData as StatLine[]).map(s => s.SeasonID).filter(Boolean))].sort((a, b) => (b || 0) - (a || 0));
@@ -153,7 +178,7 @@ export default function TeamPage() {
         setAllStandings(standData as StandingRow[]);
         setCurrentStanding((standData as StandingRow[])[0]);
       }
-      if (playerData) setPlayers(playerData);
+      if (playerData) setPlayers(playerData as PlayerInfo[]);
 
       if (standData && standData.length > 0) {
         buildSeasonRegister(teamName, standData as StandingRow[], statsData as StatLine[]);
@@ -217,17 +242,43 @@ export default function TeamPage() {
     return players.find((p) => p.PlayerName === playerName)?.PlayerID || null;
   };
 
-  const displayRoster = rosterSeasonId
+  const getPlayerInfo = (playerName: string | null): PlayerInfo | null => {
+    if (!playerName) return null;
+    return players.find((p) => p.PlayerName === playerName) || null;
+  };
+
+  // De-duplicate roster: if a player appears under multiple positions in the same season,
+  // merge into one entry with combined stats
+  const displayRosterRaw = rosterSeasonId
     ? allStats.filter(s => s.SeasonID === rosterSeasonId)
     : currentRoster;
+
+  // Deduplicate by PlayerName (merge multi-position entries)
+  const deduped = new Map<string, StatLine & { positions: string[] }>();
+  displayRosterRaw.forEach(s => {
+    const key = s.PlayerName || "";
+    if (deduped.has(key)) {
+      const existing = deduped.get(key)!;
+      existing.GamesPlayed = (existing.GamesPlayed || 0) + (s.GamesPlayed || 0);
+      existing.Goals = (existing.Goals || 0) + (s.Goals || 0);
+      existing.GoldenSnitchCatches = (existing.GoldenSnitchCatches || 0) + (s.GoldenSnitchCatches || 0);
+      existing.KeeperSaves = (existing.KeeperSaves || 0) + (s.KeeperSaves || 0);
+      if (s.Position && !existing.positions.includes(s.Position)) {
+        existing.positions.push(s.Position);
+      }
+    } else {
+      deduped.set(key, { ...s, positions: s.Position ? [s.Position] : [] });
+    }
+  });
+  const displayRoster = [...deduped.values()];
 
   const posOrder: Record<string, number> = { Chaser: 1, Beater: 2, Keeper: 3, Seeker: 4 };
   const defaultSorted = [...displayRoster].sort((a, b) => (posOrder[a.Position || ""] || 5) - (posOrder[b.Position || ""] || 5));
   const { sorted: sortedRoster, sortKey, sortDir, requestSort } = useSortableTable(defaultSorted, "Position", "asc");
 
-  const topScorer = [...displayRoster].filter((r) => r.Position === "Chaser").sort((a, b) => (b.Goals || 0) - (a.Goals || 0))[0];
-  const topGSC = [...displayRoster].filter((r) => r.Position === "Seeker").sort((a, b) => (b.GoldenSnitchCatches || 0) - (a.GoldenSnitchCatches || 0))[0];
-  const topSaves = [...displayRoster].filter((r) => r.Position === "Keeper").sort((a, b) => (b.KeeperSaves || 0) - (a.KeeperSaves || 0))[0];
+  const topScorer = [...displayRoster].filter((r) => r.positions.includes("Chaser")).sort((a, b) => (b.Goals || 0) - (a.Goals || 0))[0];
+  const topGSC = [...displayRoster].filter((r) => r.positions.includes("Seeker")).sort((a, b) => (b.GoldenSnitchCatches || 0) - (a.GoldenSnitchCatches || 0))[0];
+  const topSaves = [...displayRoster].filter((r) => r.positions.includes("Keeper")).sort((a, b) => (b.KeeperSaves || 0) - (a.KeeperSaves || 0))[0];
 
   const thClass = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground cursor-pointer hover:text-foreground select-none";
   const sortIndicator = (key: string) => sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
@@ -238,16 +289,75 @@ export default function TeamPage() {
   const resultsSeasons = [...new Set(matchResults.map(r => r.SeasonID).filter(Boolean))].sort((a, b) => (b || 0) - (a || 0)) as number[];
   const filteredResults = resultsSeasonId === "all" ? matchResults : matchResults.filter(r => r.SeasonID === resultsSeasonId);
 
+  // Sort results
+  const sortedResults = [...filteredResults].sort((a, b) => {
+    if (resultSortKey === "date") {
+      const dateA = a.WeekID ? matchDayMap.get(a.WeekID) || "" : "";
+      const dateB = b.WeekID ? matchDayMap.get(b.WeekID) || "" : "";
+      return resultSortDir === "asc" ? dateA.localeCompare(dateB) : dateB.localeCompare(dateA);
+    }
+    if (resultSortKey === "season") {
+      return resultSortDir === "asc" ? (a.SeasonID || 0) - (b.SeasonID || 0) : (b.SeasonID || 0) - (a.SeasonID || 0);
+    }
+    if (resultSortKey === "score") {
+      const isHomeA = a.HomeTeamID === team?.TeamID;
+      const scoreA = isHomeA ? (a.HomeTeamScore ?? 0) : (a.AwayTeamScore ?? 0);
+      const isHomeB = b.HomeTeamID === team?.TeamID;
+      const scoreB = isHomeB ? (b.HomeTeamScore ?? 0) : (b.AwayTeamScore ?? 0);
+      return resultSortDir === "asc" ? scoreA - scoreB : scoreB - scoreA;
+    }
+    return 0;
+  });
+
+  const toggleResultSort = (key: string) => {
+    if (resultSortKey === key) {
+      setResultSortDir(d => d === "asc" ? "desc" : "asc");
+    } else {
+      setResultSortKey(key);
+      setResultSortDir(key === "date" ? "asc" : "desc");
+    }
+  };
+  const resultSortIndicator = (key: string) => resultSortKey === key ? (resultSortDir === "asc" ? " ↑" : " ↓") : "";
+
   const domesticRegister = seasonRegister.filter(r => r.LeagueTier !== 0);
   const cupRegister = seasonRegister.filter(r => r.LeagueTier === 0);
 
-  // Team color styling
+  // Team color styling with contrast-aware text
   const primaryColor = team?.PrimaryColor || null;
   const secondaryColor = team?.SecondaryColor || null;
+  const headerTextColor = primaryColor ? getContrastText(primaryColor) : undefined;
   const headerStyle = primaryColor ? {
     backgroundColor: primaryColor,
-    color: secondaryColor || "#ffffff",
+    color: headerTextColor,
   } : undefined;
+
+  // Head-to-head rival data
+  const rivalMatches = rivalTeamName ? matchResults.filter(r => {
+    const oppId = r.HomeTeamID === team?.TeamID ? r.AwayTeamID : r.HomeTeamID;
+    const oppName = oppId ? teamMapState.get(oppId) : null;
+    return oppName === rivalTeamName;
+  }) : [];
+
+  const rivalRecord = { wins: 0, losses: 0, draws: 0 };
+  rivalMatches.forEach(r => {
+    const isHome = r.HomeTeamID === team?.TeamID;
+    const teamScore = isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
+    const oppScore = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
+    if (teamScore > oppScore) rivalRecord.wins++;
+    else if (teamScore < oppScore) rivalRecord.losses++;
+    else rivalRecord.draws++;
+  });
+
+  // Earliest season a player appeared = debut year
+  const playerDebutMap = new Map<string, number>();
+  allStats.forEach(s => {
+    if (s.PlayerName && s.SeasonID) {
+      const existing = playerDebutMap.get(s.PlayerName);
+      if (!existing || s.SeasonID < existing) {
+        playerDebutMap.set(s.PlayerName, s.SeasonID);
+      }
+    }
+  });
 
   if (!team) {
     return (
@@ -319,18 +429,29 @@ export default function TeamPage() {
     <div className="min-h-screen bg-background flex flex-col">
       <SiteHeader />
       <main className="flex-1 container py-8">
-        {/* Team header with color accent */}
+        {/* Team header */}
         <div className="mb-6 border-b-2 pb-2" style={primaryColor ? { borderColor: primaryColor } : undefined}>
           <p className="text-xs text-muted-foreground font-sans uppercase tracking-wide">
             <Link to={`/league/${team.LeagueID}`} className="hover:text-accent">{leagueName}</Link>
           </p>
-          <h1 className="font-display text-3xl font-bold" style={primaryColor ? { color: primaryColor } : undefined}>
-            {team.FullName}
-          </h1>
-          <p className="text-sm text-muted-foreground font-sans mt-1">
-            {team.City}{team.Country ? `, ${team.Country}` : ""}
-            {team.Nickname ? ` — "${team.Nickname}"` : ""}
-          </p>
+          <div className="flex items-center gap-4">
+            {/* Team logo placeholder */}
+            <div className="w-16 h-16 rounded border border-border flex items-center justify-center shrink-0"
+              style={primaryColor ? { backgroundColor: primaryColor } : undefined}>
+              <span className="text-2xl" style={{ color: headerTextColor || "inherit" }}>
+                {team.FullName.charAt(0)}
+              </span>
+            </div>
+            <div>
+              <h1 className="font-display text-3xl font-bold" style={primaryColor ? { color: primaryColor } : undefined}>
+                {team.FullName}
+              </h1>
+              <p className="text-sm text-muted-foreground font-sans mt-1">
+                {team.City}{team.Country ? `, ${team.Country}` : ""}
+                {team.Nickname ? ` — "${team.Nickname}"` : ""}
+              </p>
+            </div>
+          </div>
           {rivalTeamName && (
             <p className="text-sm font-sans mt-1">
               <span className="text-muted-foreground">Rival: </span>
@@ -339,6 +460,11 @@ export default function TeamPage() {
               </Link>
             </p>
           )}
+          {/* Coach placeholder */}
+          <p className="text-sm font-sans mt-1">
+            <span className="text-muted-foreground">Coach: </span>
+            <span className="text-foreground italic">TBD</span>
+          </p>
           {primaryColor && (
             <div className="flex gap-2 mt-2">
               <div className="w-6 h-6 rounded border border-border" style={{ backgroundColor: primaryColor }} title="Primary" />
@@ -386,65 +512,135 @@ export default function TeamPage() {
               </select>
             </div>
 
+            {/* Collapsible results table */}
             <div className="border border-border rounded overflow-hidden">
-              <div className="px-3 py-2" style={headerStyle || undefined}>
+              <button
+                onClick={() => setResultsOpen(o => !o)}
+                className="w-full px-3 py-2 flex items-center justify-between"
+                style={headerStyle || undefined}
+              >
                 <h3 className={`font-display text-sm font-bold ${headerStyle ? "" : "text-table-header-foreground"}`}
                   style={!headerStyle ? undefined : { color: headerStyle.color }}>
-                  Schedule of Results
+                  Schedule of Results ({sortedResults.length})
                 </h3>
-              </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm font-sans">
-                  <thead>
-                    <tr className="bg-secondary">
-                      <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Date</th>
-                      <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
-                      <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Opponent</th>
-                      <th className="px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">H/A</th>
-                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Score</th>
-                      <th className="px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">W/L</th>
-                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Min</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredResults.map((r, i) => {
-                      const isHome = r.HomeTeamID === team?.TeamID;
-                      const teamScore = isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
-                      const oppScore = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
-                      const oppId = isHome ? r.AwayTeamID : r.HomeTeamID;
-                      const oppName = oppId ? teamMapState.get(oppId) || `Team ${oppId}` : "Unknown";
-                      const won = teamScore > oppScore;
-                      const dateStr = r.WeekID ? matchDayMap.get(r.WeekID) : null;
-                      const displayDate = dateStr
-                        ? (() => { const [y,m,d] = dateStr.split("-").map(Number); return new Date(y,m-1,d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); })()
-                        : "—";
-                      return (
-                        <tr key={r.MatchID} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
-                          <td className="px-3 py-1.5 text-xs text-muted-foreground font-mono">{displayDate}</td>
-                          <td className="px-3 py-1.5 text-xs text-muted-foreground font-mono">{r.SeasonID ? seasonLabel(r.SeasonID) : "—"}</td>
-                          <td className="px-3 py-1.5">
-                            <Link to={`/team/${encodeURIComponent(oppName)}`} className="text-accent hover:underline">{oppName}</Link>
-                          </td>
-                          <td className="px-3 py-1.5 text-center text-xs text-muted-foreground">{isHome ? "H" : "A"}</td>
-                          <td className="px-3 py-1.5 text-right font-mono font-bold">
-                            <Link to={`/match/${r.MatchID}`} className="hover:underline text-accent">
-                              {teamScore}–{oppScore}
-                            </Link>
-                          </td>
-                          <td className={`px-3 py-1.5 text-center font-bold text-xs ${won ? "text-green-600" : "text-destructive"}`}>
-                            {won ? "W" : "L"}
-                          </td>
-                          <td className="px-3 py-1.5 text-right font-mono text-muted-foreground text-xs">{r.SnitchCaughtTime ?? "—"}</td>
-                        </tr>
-                      );
-                    })}
-                    {filteredResults.length === 0 && (
-                      <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">No results found.</td></tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
+                {resultsOpen ? <ChevronDown className="w-4 h-4" style={headerStyle ? { color: headerStyle.color } : undefined} /> : <ChevronRight className="w-4 h-4" style={headerStyle ? { color: headerStyle.color } : undefined} />}
+              </button>
+              {resultsOpen && (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm font-sans">
+                    <thead>
+                      <tr className="bg-secondary">
+                        <th className={`${thClass}`} onClick={() => toggleResultSort("date")}>Date{resultSortIndicator("date")}</th>
+                        <th className={`${thClass}`} onClick={() => toggleResultSort("season")}>Season{resultSortIndicator("season")}</th>
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Opponent</th>
+                        <th className="px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">H/A/N</th>
+                        <th className={`${thClass} text-right`} onClick={() => toggleResultSort("score")}>Score{resultSortIndicator("score")}</th>
+                        <th className="px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">W/L</th>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Min</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedResults.map((r, i) => {
+                        const isHome = r.HomeTeamID === team?.TeamID;
+                        const teamScore = isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
+                        const oppScore = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
+                        const oppId = isHome ? r.AwayTeamID : r.HomeTeamID;
+                        const oppName = oppId ? teamMapState.get(oppId) || `Team ${oppId}` : "Unknown";
+                        const won = teamScore > oppScore;
+                        const isNeutral = r.IsNeutralSite === 1;
+                        const dateStr = r.WeekID ? matchDayMap.get(r.WeekID) : null;
+                        const displayDate = dateStr
+                          ? (() => { const [y,m,d] = dateStr.split("-").map(Number); return new Date(y,m-1,d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); })()
+                          : "—";
+                        const siteLabel = isNeutral ? "N" : isHome ? "H" : "A";
+                        return (
+                          <tr key={r.MatchID} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
+                            <td className="px-3 py-1.5 text-xs text-muted-foreground font-mono">{displayDate}</td>
+                            <td className="px-3 py-1.5 text-xs text-muted-foreground font-mono">{r.SeasonID ? seasonLabel(r.SeasonID) : "—"}</td>
+                            <td className="px-3 py-1.5">
+                              <Link to={`/team/${encodeURIComponent(oppName)}`} className="text-accent hover:underline">{oppName}</Link>
+                            </td>
+                            <td className="px-3 py-1.5 text-center text-xs text-muted-foreground">{siteLabel}</td>
+                            <td className="px-3 py-1.5 text-right font-mono font-bold">
+                              <Link to={`/match/${r.MatchID}`} className="hover:underline text-accent">
+                                {teamScore}–{oppScore}
+                              </Link>
+                            </td>
+                            <td className={`px-3 py-1.5 text-center font-bold text-xs ${won ? "text-green-600" : "text-destructive"}`}>
+                              {won ? "W" : "L"}
+                            </td>
+                            <td className="px-3 py-1.5 text-right font-mono text-muted-foreground text-xs">{r.SnitchCaughtTime ?? "—"}</td>
+                          </tr>
+                        );
+                      })}
+                      {sortedResults.length === 0 && (
+                        <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground">No results found.</td></tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
+
+            {/* Head-to-Head Rival section */}
+            {rivalTeamName && rivalMatches.length > 0 && (
+              <div className="border border-border rounded overflow-hidden">
+                <button
+                  onClick={() => setH2hOpen(o => !o)}
+                  className="w-full px-3 py-2 flex items-center justify-between"
+                  style={headerStyle || undefined}
+                >
+                  <h3 className={`font-display text-sm font-bold ${headerStyle ? "" : "text-table-header-foreground"}`}
+                    style={!headerStyle ? undefined : { color: headerStyle.color }}>
+                    Head-to-Head vs {rivalTeamName} ({rivalRecord.wins}W–{rivalRecord.losses}L{rivalRecord.draws > 0 ? `–${rivalRecord.draws}D` : ""})
+                  </h3>
+                  {h2hOpen ? <ChevronDown className="w-4 h-4" style={headerStyle ? { color: headerStyle.color } : undefined} /> : <ChevronRight className="w-4 h-4" style={headerStyle ? { color: headerStyle.color } : undefined} />}
+                </button>
+                {h2hOpen && (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm font-sans">
+                      <thead>
+                        <tr className="bg-secondary">
+                          <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Date</th>
+                          <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
+                          <th className="px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">H/A/N</th>
+                          <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Score</th>
+                          <th className="px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">W/L</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...rivalMatches].sort((a, b) => {
+                          const dateA = a.WeekID ? matchDayMap.get(a.WeekID) || "" : "";
+                          const dateB = b.WeekID ? matchDayMap.get(b.WeekID) || "" : "";
+                          return dateA.localeCompare(dateB);
+                        }).map((r, i) => {
+                          const isHome = r.HomeTeamID === team?.TeamID;
+                          const teamScore = isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
+                          const oppScore = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
+                          const won = teamScore > oppScore;
+                          const isNeutral = r.IsNeutralSite === 1;
+                          const dateStr = r.WeekID ? matchDayMap.get(r.WeekID) : null;
+                          const displayDate = dateStr
+                            ? (() => { const [y,m,d] = dateStr.split("-").map(Number); return new Date(y,m-1,d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); })()
+                            : "—";
+                          return (
+                            <tr key={r.MatchID} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
+                              <td className="px-3 py-1.5 text-xs text-muted-foreground font-mono">{displayDate}</td>
+                              <td className="px-3 py-1.5 text-xs text-muted-foreground font-mono">{r.SeasonID ? seasonLabel(r.SeasonID) : "—"}</td>
+                              <td className="px-3 py-1.5 text-center text-xs text-muted-foreground">{isNeutral ? "N" : isHome ? "H" : "A"}</td>
+                              <td className="px-3 py-1.5 text-right font-mono font-bold">
+                                <Link to={`/match/${r.MatchID}`} className="hover:underline text-accent">{teamScore}–{oppScore}</Link>
+                              </td>
+                              <td className={`px-3 py-1.5 text-center font-bold text-xs ${won ? "text-green-600" : "text-destructive"}`}>{won ? "W" : "L"}</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
 
@@ -464,6 +660,7 @@ export default function TeamPage() {
                 </select>
               </div>
 
+              {/* Roster & Stats table */}
               <div className="border border-border rounded overflow-hidden">
                 <div className="px-3 py-2" style={headerStyle || undefined}>
                   <h3 className={`font-display text-sm font-bold ${headerStyle ? "" : "text-table-header-foreground"}`}
@@ -486,16 +683,66 @@ export default function TeamPage() {
                     <tbody>
                       {sortedRoster.map((p, i) => {
                         const pid = getPlayerId(p.PlayerName);
+                        const posDisplay = (p as any).positions?.join("/") || p.Position;
                         return (
                           <tr key={i} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
                             <td className="px-3 py-1.5 font-medium text-accent hover:underline">
                               {pid ? <Link to={`/player/${pid}`}>{p.PlayerName}</Link> : p.PlayerName}
                             </td>
-                            <td className="px-3 py-1.5 text-muted-foreground">{p.Position}</td>
+                            <td className="px-3 py-1.5 text-muted-foreground">{posDisplay}</td>
                             <td className="px-3 py-1.5 text-right font-mono">{p.GamesPlayed}</td>
                             <td className="px-3 py-1.5 text-right font-mono">{p.Goals || "—"}</td>
                             <td className="px-3 py-1.5 text-right font-mono">{p.GoldenSnitchCatches || "—"}</td>
                             <td className="px-3 py-1.5 text-right font-mono">{p.KeeperSaves || "—"}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Roster Demographics */}
+              <div className="border border-border rounded overflow-hidden">
+                <div className="px-3 py-2" style={headerStyle || undefined}>
+                  <h3 className={`font-display text-sm font-bold ${headerStyle ? "" : "text-table-header-foreground"}`}
+                    style={!headerStyle ? undefined : { color: headerStyle.color }}>
+                    Roster Information
+                  </h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm font-sans">
+                    <thead>
+                      <tr className="bg-secondary">
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Name</th>
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pos</th>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Age</th>
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Nat</th>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Ht</th>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Wt</th>
+                        <th className="px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">Hand</th>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Debut</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {sortedRoster.map((p, i) => {
+                        const pInfo = getPlayerInfo(p.PlayerName);
+                        const pid = pInfo?.PlayerID;
+                        const posDisplay = (p as any).positions?.join("/") || p.Position;
+                        const nationName = pInfo?.NationalityID ? nations.get(pInfo.NationalityID) || "" : "";
+                        const debut = p.PlayerName ? playerDebutMap.get(p.PlayerName) : null;
+                        return (
+                          <tr key={i} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
+                            <td className="px-3 py-1.5 font-medium text-accent hover:underline">
+                              {pid ? <Link to={`/player/${pid}`}>{p.PlayerName}</Link> : p.PlayerName}
+                            </td>
+                            <td className="px-3 py-1.5 text-muted-foreground text-xs">{posDisplay}</td>
+                            <td className="px-3 py-1.5 text-right font-mono text-xs">{pInfo?.DOB ? calculateAge(pInfo.DOB) : "—"}</td>
+                            <td className="px-3 py-1.5 text-xs">{getNationFlag(nationName)} {nationName}</td>
+                            <td className="px-3 py-1.5 text-right font-mono text-xs">{pInfo ? formatHeight(pInfo.Height) : "—"}</td>
+                            <td className="px-3 py-1.5 text-right font-mono text-xs">{pInfo?.Weight ? `${pInfo.Weight}` : "—"}</td>
+                            <td className="px-3 py-1.5 text-center text-xs">{pInfo?.Handedness === "R" ? "R" : pInfo?.Handedness === "L" ? "L" : pInfo?.Handedness || "—"}</td>
+                            <td className="px-3 py-1.5 text-right font-mono text-xs">{debut ? seasonLabel(debut) : "—"}</td>
                           </tr>
                         );
                       })}

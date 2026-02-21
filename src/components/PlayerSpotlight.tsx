@@ -16,12 +16,13 @@ export function PlayerSpotlight() {
   const [players, setPlayers] = useState<Player[]>([]);
   const [nations, setNations] = useState<Record<number, string>>({});
   const [playerTeams, setPlayerTeams] = useState<Record<string, string>>({});
+  const [playerPositions, setPlayerPositions] = useState<Record<string, string>>({});
 
   useEffect(() => {
     Promise.all([
       supabase.from("players").select("*"),
       supabase.from("nations").select("*"),
-      supabase.from("stats").select("PlayerName, FullName, SeasonID").order("SeasonID", { ascending: false }),
+      supabase.from("stats").select("PlayerName, FullName, SeasonID, Position, GamesPlayed").order("SeasonID", { ascending: false }),
     ]).then(([{ data: playerData }, { data: nationData }, { data: statsData }]) => {
       if (playerData) {
         const shuffled = [...playerData].sort(() => Math.random() - 0.5).slice(0, 6);
@@ -32,15 +33,32 @@ export function PlayerSpotlight() {
         nationData.forEach((n) => { if (n.NationID) map[n.NationID] = n.Nation || ""; });
         setNations(map);
       }
-      // Build player -> team map (most recent team per player)
       if (statsData) {
         const teamMap: Record<string, string> = {};
+        // For multi-position players, determine primary position (most GP)
+        const posGpMap: Record<string, Record<string, number>> = {};
         statsData.forEach((s) => {
           if (s.PlayerName && s.FullName && !teamMap[s.PlayerName]) {
             teamMap[s.PlayerName] = s.FullName;
           }
+          if (s.PlayerName && s.Position) {
+            if (!posGpMap[s.PlayerName]) posGpMap[s.PlayerName] = {};
+            posGpMap[s.PlayerName][s.Position] = (posGpMap[s.PlayerName][s.Position] || 0) + (s.GamesPlayed || 0);
+          }
         });
         setPlayerTeams(teamMap);
+
+        // Determine primary position by most GP
+        const primaryPosMap: Record<string, string> = {};
+        Object.entries(posGpMap).forEach(([name, posMap]) => {
+          let bestPos = "";
+          let bestGP = 0;
+          Object.entries(posMap).forEach(([pos, gp]) => {
+            if (gp > bestGP) { bestGP = gp; bestPos = pos; }
+          });
+          primaryPosMap[name] = bestPos;
+        });
+        setPlayerPositions(primaryPosMap);
       }
     });
   }, []);
@@ -53,6 +71,7 @@ export function PlayerSpotlight() {
       <div className="bg-card divide-y divide-border">
         {players.map((p) => {
           const teamName = p.PlayerName ? playerTeams[p.PlayerName] : null;
+          const displayPos = p.PlayerName ? (playerPositions[p.PlayerName] || p.Position) : p.Position;
           return (
             <Link
               key={p.PlayerID}
@@ -60,12 +79,12 @@ export function PlayerSpotlight() {
               className="flex items-center gap-3 px-3 py-2.5 hover:bg-highlight/20 transition-colors"
             >
               <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-muted-foreground text-xs font-mono shrink-0">
-                {p.Position?.[0] || "?"}
+                {displayPos?.[0] || "?"}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="font-sans font-medium text-sm text-accent truncate">{p.PlayerName}</p>
                 <p className="text-xs text-muted-foreground font-sans truncate">
-                  {p.Position} · {formatHeight(p.Height)}
+                  {displayPos} · {formatHeight(p.Height)}
                   {teamName && ` · ${teamName}`}
                 </p>
               </div>

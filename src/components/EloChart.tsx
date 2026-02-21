@@ -27,7 +27,6 @@ interface LeagueOption {
   LeagueName: string;
 }
 
-// Parse date string as local (not UTC) to avoid timezone-shift display issues
 function parseLocalDate(dateStr: string): Date {
   const [y, m, d] = dateStr.split("-").map(Number);
   return new Date(y, m - 1, d);
@@ -41,8 +40,11 @@ export function EloChart() {
   const [selectedLeague, setSelectedLeague] = useState<number | null>(null);
   const [matchdays, setMatchdays] = useState<Matchday[]>([]);
   const [eloData, setEloData] = useState<EloPoint[]>([]);
-  // MatchID -> date string (YYYY-MM-DD)
   const [matchDateMap, setMatchDateMap] = useState<Map<number, string>>(new Map());
+  // Date range controls
+  const [startDate, setStartDate] = useState<string>("");
+  const [endDate, setEndDate] = useState<string>("");
+  const [availableDateRange, setAvailableDateRange] = useState<{ min: string; max: string }>({ min: "", max: "" });
 
   useEffect(() => {
     Promise.all([
@@ -56,16 +58,15 @@ export function EloChart() {
       const elo = (eData || []) as EloPoint[];
       setEloData(elo);
 
-      // Get unique MatchIDs from elo view, then look up WeekID in results -> date in matchdays
+      // Build MatchID -> date via results.WeekID -> matchdays.Matchday
       const matchIds = [...new Set(elo.map(e => e.MatchID).filter(Boolean))] as number[];
       if (matchIds.length > 0 && mdData) {
-        // Build WeekID -> Matchday date
         const weekToDate = new Map<number, string>();
         (mdData as Matchday[]).forEach(md => {
           if (md.MatchdayID && md.Matchday) weekToDate.set(md.MatchdayID, md.Matchday);
         });
 
-        // Fetch results in batches of 1000
+        // Fetch results in batches
         supabase.from("results").select("MatchID,WeekID").in("MatchID", matchIds.slice(0, 1000))
           .then(({ data: resultsData }) => {
             const mMap = new Map<number, string>();
@@ -85,46 +86,27 @@ export function EloChart() {
   useEffect(() => {
     if (eloData.length === 0 || matchdays.length === 0) return;
 
-    // Build matchdayID -> leagueId map (for filtering by league)
     const mdLeagueMap = new Map<number, number | null>();
     matchdays.forEach((md) => mdLeagueMap.set(md.MatchdayID, md.LeagueID));
 
-    // For filtering by league: a match belongs to a league if its WeekID maps to that league's matchdays
-    // We use matchDateMap keys (MatchIDs) and filter elo by league via MatchID->WeekID->LeagueID
     let filteredElo = eloData;
     if (selectedLeague !== null) {
-      // Valid matchdays for this league
       const validMatchdayIds = new Set<number>(
         matchdays.filter(md => md.LeagueID === selectedLeague).map(md => md.MatchdayID)
       );
-      // We need MatchID->WeekID to filter. Build from matchDateMap source data.
-      // Approximate: use current_game_number (which is MatchdayID in the elo view's logic)
       filteredElo = eloData.filter((d) => validMatchdayIds.has(d.current_game_number));
     }
 
     const names = [...new Set(filteredElo.map((d) => d.player_name))].sort();
     setTeamNames(names);
 
-    // Build chart keyed by date string — use MatchID -> date from matchDateMap first,
-    // fall back to current_game_number -> matchday date
-    const mdMap = new Map<number, string>();
-    matchdays.forEach((md) => {
-      if (md.Matchday) mdMap.set(md.MatchdayID, md.Matchday);
-    });
-
+    // Build chart keyed by date — ONLY use MatchID -> date mapping
     const gameMap = new Map<string, Record<string, any>>();
 
-    // Initial row (before any games)
-    const initDate = "1994-08-01";
-    const gameZero: Record<string, any> = { date: initDate };
-    names.forEach((n) => { gameZero[n] = 1000; });
-    gameMap.set(initDate, gameZero);
-
     filteredElo.forEach((d) => {
-      // Prefer MatchID-based date; fall back to current_game_number as matchday id
-      const dateKey = (d.MatchID && matchDateMap.get(d.MatchID))
-        || mdMap.get(d.current_game_number)
-        || `Game ${d.current_game_number}`;
+      // Only include points with a resolved date
+      const dateKey = d.MatchID ? matchDateMap.get(d.MatchID) : undefined;
+      if (!dateKey) return; // Skip points without a date
 
       if (!gameMap.has(dateKey)) {
         gameMap.set(dateKey, { date: dateKey });
@@ -134,10 +116,33 @@ export function EloChart() {
 
     // Sort by date and fill forward
     const sorted = [...gameMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+
+    // Compute available range
+    if (sorted.length > 0) {
+      const minD = sorted[0][0];
+      const maxD = sorted[sorted.length - 1][0];
+      setAvailableDateRange({ min: minD, max: maxD });
+      if (!startDate) setStartDate(minD);
+      if (!endDate) setEndDate(maxD);
+    }
+
+    // Apply date range filter
+    const effStart = startDate || "";
+    const effEnd = endDate || "9999-12-31";
+    const filtered = sorted.filter(([dateKey]) => dateKey >= effStart && dateKey <= effEnd);
+
     const lastKnown: Record<string, number> = {};
     names.forEach((n) => { lastKnown[n] = 1000; });
 
-    const filled = sorted.map(([, row]) => {
+    // Pre-fill from all entries before the start date
+    sorted.forEach(([dateKey, row]) => {
+      if (dateKey >= effStart) return;
+      names.forEach((n) => {
+        if (row[n] !== undefined) lastKnown[n] = row[n];
+      });
+    });
+
+    const filled = filtered.map(([, row]) => {
       const newRow: Record<string, any> = { date: row.date };
       names.forEach((n) => {
         if (row[n] !== undefined) lastKnown[n] = row[n];
@@ -147,7 +152,7 @@ export function EloChart() {
     });
 
     setChartData(filled);
-  }, [eloData, matchdays, selectedLeague, matchDateMap]);
+  }, [eloData, matchdays, selectedLeague, matchDateMap, startDate, endDate]);
 
   const toggleTeam = (name: string) => {
     setHiddenTeams((prev) => {
@@ -171,16 +176,35 @@ export function EloChart() {
         <h3 className="font-display text-sm font-bold text-table-header-foreground">
           Team Elo Ratings Over Time
         </h3>
-        <select
-          value={selectedLeague ?? ""}
-          onChange={(e) => setSelectedLeague(e.target.value ? parseInt(e.target.value) : null)}
-          className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
-        >
-          <option value="">All Leagues</option>
-          {leagues.map((l) => (
-            <option key={l.LeagueID} value={l.LeagueID}>{l.LeagueName}</option>
-          ))}
-        </select>
+        <div className="flex items-center gap-2 flex-wrap">
+          <select
+            value={selectedLeague ?? ""}
+            onChange={(e) => setSelectedLeague(e.target.value ? parseInt(e.target.value) : null)}
+            className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
+          >
+            <option value="">All Leagues</option>
+            {leagues.map((l) => (
+              <option key={l.LeagueID} value={l.LeagueID}>{l.LeagueName}</option>
+            ))}
+          </select>
+          <input
+            type="date"
+            value={startDate}
+            min={availableDateRange.min}
+            max={availableDateRange.max}
+            onChange={e => setStartDate(e.target.value)}
+            className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
+          />
+          <span className="text-xs text-table-header-foreground">to</span>
+          <input
+            type="date"
+            value={endDate}
+            min={availableDateRange.min}
+            max={availableDateRange.max}
+            onChange={e => setEndDate(e.target.value)}
+            className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
+          />
+        </div>
       </div>
       <div className="bg-card p-4">
         <ResponsiveContainer width="100%" height={350}>

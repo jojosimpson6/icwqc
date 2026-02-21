@@ -24,6 +24,56 @@ export function formatDate(dateStr: string | null): string {
   });
 }
 
+/**
+ * Parse a YYYY-MM-DD string as a local date (no timezone shift)
+ */
+export function parseLocalDate(dateStr: string): Date {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
+/**
+ * Given a hex or named CSS color, return true if it's "light" (luminance > 0.5).
+ * Used for choosing readable text on colored backgrounds.
+ */
+export function isLightColor(color: string): boolean {
+  let r = 0, g = 0, b = 0;
+  // Handle hex
+  if (color.startsWith("#")) {
+    const hex = color.replace("#", "");
+    if (hex.length === 3) {
+      r = parseInt(hex[0] + hex[0], 16);
+      g = parseInt(hex[1] + hex[1], 16);
+      b = parseInt(hex[2] + hex[2], 16);
+    } else if (hex.length === 6) {
+      r = parseInt(hex.substring(0, 2), 16);
+      g = parseInt(hex.substring(2, 4), 16);
+      b = parseInt(hex.substring(4, 6), 16);
+    }
+  } else if (color.startsWith("rgb")) {
+    const match = color.match(/(\d+)/g);
+    if (match && match.length >= 3) {
+      r = parseInt(match[0]);
+      g = parseInt(match[1]);
+      b = parseInt(match[2]);
+    }
+  } else {
+    // Named colors — assume dark if we can't parse
+    return false;
+  }
+  // Relative luminance
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.55;
+}
+
+/**
+ * Get a readable text color (black or white) for a given background color.
+ */
+export function getContrastText(bgColor: string | null): string {
+  if (!bgColor) return "inherit";
+  return isLightColor(bgColor) ? "#1a1a1a" : "#ffffff";
+}
+
 // Country code mapping for flag emojis
 const nationFlagMap: Record<string, string> = {
   England: "🏴󠁧󠁢󠁥󠁮󠁧󠁿",
@@ -93,7 +143,6 @@ const nationFlagMap: Record<string, string> = {
   Fiji: "🇫🇯",
   Tonga: "🇹🇴",
   "Papua New Guinea": "🇵🇬",
-  // Additional nations
   Bavaria: "🇩🇪",
   Prussia: "🇩🇪",
   Flanders: "🇧🇪",
@@ -227,7 +276,6 @@ const nationFlagMap: Record<string, string> = {
   Yemen: "🇾🇪",
   Zambia: "🇿🇲",
   Zimbabwe: "🇿🇼",
-  // Historical nations
   Basutoland: "🇱🇸",
   Bechuanaland: "🇧🇼",
   Dahomey: "🇧🇯",
