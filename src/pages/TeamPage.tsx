@@ -473,7 +473,7 @@ export default function TeamPage() {
               </span>
             </div>
             <div>
-              <h1 className="font-display text-3xl font-bold" style={primaryColor ? { color: primaryColor } : undefined}>
+              <h1 className="font-display text-3xl font-bold" style={safeTextColor ? { color: safeTextColor } : undefined}>
                 {team.FullName}
               </h1>
               <p className="text-sm text-muted-foreground font-sans mt-1">
