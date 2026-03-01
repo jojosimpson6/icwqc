@@ -44,12 +44,31 @@ interface StandingRow {
   neutralgsc: number | null;
 }
 
+interface AwardRow {
+  awardname: string;
+  placement: number;
+  playerid: number;
+  seasonid: number;
+}
+
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+function seasonLabel(id: number): string {
+  return `${id - 1}–${String(id).slice(-2)}`;
+}
+
 export default function LeaguePage() {
   const { id } = useParams();
   const [league, setLeague] = useState<League | null>(null);
   const [teams, setTeams] = useState<Team[]>([]);
   const [standings, setStandings] = useState<StandingRow[]>([]);
   const [view, setView] = useState<"total" | "home" | "away" | "neutral">("total");
+  const [awards, setAwards] = useState<AwardRow[]>([]);
+  const [playerMap, setPlayerMap] = useState<Map<number, string>>(new Map());
 
   useEffect(() => {
     if (!id) return;
@@ -59,12 +78,20 @@ export default function LeaguePage() {
       supabase.from("leagues").select("*").eq("LeagueID", lid).single(),
       supabase.from("teams").select("*").eq("LeagueID", lid).order("FullName"),
       supabase.from("standings").select("*").order("totalpoints", { ascending: false }),
-    ]).then(([{ data: leagueData }, { data: teamData }, { data: standingsData }]) => {
+      supabase.from("awards").select("*").eq("leagueid", lid).order("seasonid", { ascending: false }),
+      supabase.from("players").select("PlayerID, PlayerName"),
+    ]).then(([{ data: leagueData }, { data: teamData }, { data: standingsData }, { data: awardsData }, { data: playerData }]) => {
       if (leagueData) setLeague(leagueData);
       if (teamData) setTeams(teamData);
       if (standingsData && teamData) {
         const teamNames = new Set(teamData.map((t) => t.FullName));
         setStandings((standingsData as StandingRow[]).filter((s) => teamNames.has(s.FullName || "")));
+      }
+      if (awardsData) setAwards(awardsData as AwardRow[]);
+      if (playerData) {
+        const pm = new Map<number, string>();
+        playerData.forEach((p: any) => { if (p.PlayerID && p.PlayerName) pm.set(p.PlayerID, p.PlayerName); });
+        setPlayerMap(pm);
       }
     });
   }, [id]);
@@ -91,6 +118,20 @@ export default function LeaguePage() {
 
   const thClass = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground cursor-pointer hover:text-foreground select-none";
   const sortIndicator = (key: string) => sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
+
+  // Group awards by season, then by award name
+  const awardsBySeasonMap = new Map<number, Map<string, AwardRow[]>>();
+  awards.forEach(a => {
+    if (!awardsBySeasonMap.has(a.seasonid)) awardsBySeasonMap.set(a.seasonid, new Map());
+    const seasonMap = awardsBySeasonMap.get(a.seasonid)!;
+    if (!seasonMap.has(a.awardname)) seasonMap.set(a.awardname, []);
+    seasonMap.get(a.awardname)!.push(a);
+  });
+  // Sort entries within each award by placement
+  awardsBySeasonMap.forEach(seasonMap => {
+    seasonMap.forEach(entries => entries.sort((a, b) => a.placement - b.placement));
+  });
+  const awardSeasons = [...awardsBySeasonMap.keys()].sort((a, b) => b - a);
 
   if (!league) {
     return (
@@ -168,15 +209,78 @@ export default function LeaguePage() {
               </div>
             )}
 
-            {/* League History placeholder */}
-            <div className="border border-border rounded overflow-hidden">
-              <div className="bg-table-header px-3 py-2">
-                <h3 className="font-display text-sm font-bold text-table-header-foreground">League History</h3>
+            {/* Annual Awards */}
+            {awardSeasons.length > 0 && (
+              <div className="border border-border rounded overflow-hidden">
+                <div className="bg-table-header px-3 py-2">
+                  <h3 className="font-display text-sm font-bold text-table-header-foreground">Annual Awards</h3>
+                </div>
+                <div className="bg-card divide-y divide-border">
+                  {awardSeasons.map(seasonId => {
+                    const seasonAwards = awardsBySeasonMap.get(seasonId)!;
+                    const awardNames = [...seasonAwards.keys()];
+                    const individualAwards = awardNames.filter(n => n !== "Team of the Year");
+                    const teamOfYear = seasonAwards.get("Team of the Year");
+
+                    return (
+                      <div key={seasonId} className="px-3 py-3">
+                        <h4 className="font-display text-sm font-bold text-foreground mb-2">{seasonLabel(seasonId)}</h4>
+                        <div className="space-y-2">
+                          {individualAwards.map(awardName => {
+                            const entries = seasonAwards.get(awardName)!;
+                            return (
+                              <div key={awardName}>
+                                <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold mb-0.5">{awardName}</p>
+                                <div className="flex flex-wrap gap-x-4 gap-y-0.5">
+                                  {entries.map((entry, i) => {
+                                    const pName = playerMap.get(entry.playerid) || `Player #${entry.playerid}`;
+                                    return (
+                                      <span key={i} className="text-sm font-sans">
+                                        <span className="text-base mr-1">
+                                          {entry.placement === 1 ? "🥇" : entry.placement === 2 ? "🥈" : entry.placement === 3 ? "🥉" : ""}
+                                        </span>
+                                        <span className="text-muted-foreground text-xs mr-1">{ordinal(entry.placement)}</span>
+                                        <Link to={`/player/${entry.playerid}`} className="text-accent hover:underline font-medium">
+                                          {pName}
+                                        </Link>
+                                      </span>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+                            );
+                          })}
+                          {teamOfYear && teamOfYear.length > 0 && (
+                            <div>
+                              <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold mb-0.5">Team of the Year</p>
+                              {[...new Set(teamOfYear.map(e => e.placement))].sort().map(placement => {
+                                const teamEntries = teamOfYear.filter(e => e.placement === placement);
+                                return (
+                                  <div key={placement} className="mb-1">
+                                    <span className="text-xs text-muted-foreground font-mono mr-2">{ordinal(placement)} Team:</span>
+                                    <span className="text-sm font-sans">
+                                      {teamEntries.map((entry, i) => {
+                                        const pName = playerMap.get(entry.playerid) || `Player #${entry.playerid}`;
+                                        return (
+                                          <span key={i}>
+                                            {i > 0 && <span className="text-muted-foreground">, </span>}
+                                            <Link to={`/player/${entry.playerid}`} className="text-accent hover:underline">{pName}</Link>
+                                          </span>
+                                        );
+                                      })}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-              <div className="bg-card p-4 text-sm font-sans text-muted-foreground italic">
-                League placement history and awards to be populated.
-              </div>
-            </div>
+            )}
           </div>
 
           {/* Sidebar: Teams */}
