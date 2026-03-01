@@ -61,18 +61,21 @@ export function EloChart() {
       // Build MatchID -> date via results.WeekID -> matchdays.Matchday
       const matchIds = [...new Set(elo.map(e => e.MatchID).filter(Boolean))] as number[];
       if (matchIds.length > 0 && mdData) {
-        const weekToDate = new Map<number, string>();
-        (mdData as Matchday[]).forEach(md => {
-          if (md.MatchdayID && md.Matchday) weekToDate.set(md.MatchdayID, md.Matchday);
+        // Build composite key: SeasonID|LeagueID|MatchdayWeek -> Matchday
+        const compositeToDate = new Map<string, string>();
+        (mdData as any[]).forEach((md: any) => {
+          if (md.SeasonID && md.LeagueID && md.MatchdayWeek != null && md.Matchday) {
+            compositeToDate.set(`${md.SeasonID}|${md.LeagueID}|${md.MatchdayWeek}`, md.Matchday);
+          }
         });
 
-        // Fetch results in batches
-        supabase.from("results").select("MatchID,WeekID").in("MatchID", matchIds.slice(0, 1000))
+        // Fetch results with SeasonID and LeagueID for composite lookup
+        supabase.from("results").select("MatchID,WeekID,SeasonID,LeagueID").in("MatchID", matchIds.slice(0, 1000))
           .then(({ data: resultsData }) => {
             const mMap = new Map<number, string>();
-            (resultsData || []).forEach((r: { MatchID: number; WeekID: number | null }) => {
-              if (r.MatchID && r.WeekID) {
-                const date = weekToDate.get(r.WeekID);
+            (resultsData || []).forEach((r: any) => {
+              if (r.MatchID && r.WeekID && r.SeasonID && r.LeagueID) {
+                const date = compositeToDate.get(`${r.SeasonID}|${r.LeagueID}|${r.WeekID}`);
                 if (date) mMap.set(r.MatchID, date);
               }
             });
