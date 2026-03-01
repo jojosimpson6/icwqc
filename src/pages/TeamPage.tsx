@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { useSortableTable } from "@/hooks/useSortableTable";
-import { getContrastText, formatHeight, calculateAge, getNationFlag } from "@/lib/helpers";
+import { getContrastText, formatHeight, calculateAge, getNationFlag, isLightColor } from "@/lib/helpers";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 interface Team {
