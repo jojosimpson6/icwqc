@@ -134,6 +134,22 @@ export default function PlayerProfile() {
       }
     });
 
+    // Fetch player awards
+    Promise.all([
+      supabase.from("awards").select("*").eq("playerid", pid).order("seasonid", { ascending: false }).order("awardname").order("placement"),
+      supabase.from("leagues").select("LeagueID, LeagueName"),
+    ]).then(([{ data: awardsData }, { data: leaguesData }]) => {
+      const lnm = new Map<number, string>();
+      (leaguesData || []).forEach((l: any) => { if (l.LeagueID && l.LeagueName) lnm.set(l.LeagueID, l.LeagueName); });
+      setLeagueNameMap(lnm);
+      if (awardsData) {
+        setPlayerAwards(awardsData.map((a: any) => ({
+          ...a,
+          leagueName: lnm.get(a.leagueid) || `League ${a.leagueid}`,
+        })));
+      }
+    });
+
     supabase.from("players").select("PlayerName").eq("PlayerID", pid).single().then(({ data: pData }) => {
       if (!pData?.PlayerName) return;
       const playerName = pData.PlayerName;
