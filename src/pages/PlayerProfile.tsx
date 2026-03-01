@@ -758,15 +758,34 @@ export default function PlayerProfile() {
             </div>
           </div>
 
-          {/* Awards */}
-          {leagueLeaders.length > 0 && (
+          {/* Awards & Honours */}
+          {(playerAwards.length > 0 || leagueLeaders.length > 0) && (
             <div className="border border-border rounded overflow-hidden">
               <div className="bg-table-header px-3 py-2">
-                <h3 className="font-display text-sm font-bold text-table-header-foreground">Appearances on Leaderboards, Awards &amp; Honours</h3>
+                <h3 className="font-display text-sm font-bold text-table-header-foreground">Awards &amp; Honours</h3>
               </div>
               <div className="bg-card divide-y divide-border">
+                {/* Formal awards from awards table */}
+                {playerAwards.map((award, i) => (
+                  <div key={`award-${i}`} className="px-3 py-2 flex items-center gap-3 text-sm font-sans">
+                    <span className="text-base">
+                      {award.placement === 1 ? "🏆" : award.placement === 2 ? "🥈" : award.placement === 3 ? "🥉" : `#${award.placement}`}
+                    </span>
+                    <div className="flex-1">
+                      <span className="font-medium text-foreground">
+                        {award.awardname}
+                        {award.placement > 1 && ` (${ordinal(award.placement)})`}
+                      </span>
+                      <span className="text-muted-foreground ml-1">
+                        — {abbrevLeague(award.leagueName || null)}, {seasonLabel(award.seasonid)}
+                      </span>
+                    </div>
+                    <span className="text-xs text-muted-foreground border border-border rounded px-1.5 py-0.5">Award</span>
+                  </div>
+                ))}
+                {/* Leaderboard appearances */}
                 {leagueLeaders.map((entry, i) => (
-                  <div key={i} className="px-3 py-2 flex items-center gap-3 text-sm font-sans">
+                  <div key={`leader-${i}`} className="px-3 py-2 flex items-center gap-3 text-sm font-sans">
                     <span className="text-base">
                       {entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : entry.rank === 3 ? "🥉" : `#${entry.rank}`}
                     </span>
