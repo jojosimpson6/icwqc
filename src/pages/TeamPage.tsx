@@ -616,8 +616,8 @@ export default function TeamPage() {
                       </thead>
                       <tbody>
                         {[...rivalMatches].sort((a, b) => {
-                          const dateA = a.WeekID ? matchDayMap.get(a.WeekID) || "" : "";
-                          const dateB = b.WeekID ? matchDayMap.get(b.WeekID) || "" : "";
+                          const dateA = a.WeekID && a.SeasonID && a.LeagueID ? matchDayCompositeMap.get(`${a.SeasonID}|${a.LeagueID}|${a.WeekID}`) || "" : "";
+                          const dateB = b.WeekID && b.SeasonID && b.LeagueID ? matchDayCompositeMap.get(`${b.SeasonID}|${b.LeagueID}|${b.WeekID}`) || "" : "";
                           return dateA.localeCompare(dateB);
                         }).map((r, i) => {
                           const isHome = r.HomeTeamID === team?.TeamID;
