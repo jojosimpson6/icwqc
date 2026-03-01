@@ -298,8 +298,8 @@ export default function TeamPage() {
   // Sort results
   const sortedResults = [...filteredResults].sort((a, b) => {
     if (resultSortKey === "date") {
-      const dateA = a.WeekID ? matchDayMap.get(a.WeekID) || "" : "";
-      const dateB = b.WeekID ? matchDayMap.get(b.WeekID) || "" : "";
+      const dateA = a.WeekID && a.SeasonID && a.LeagueID ? matchDayCompositeMap.get(`${a.SeasonID}|${a.LeagueID}|${a.WeekID}`) || "" : "";
+      const dateB = b.WeekID && b.SeasonID && b.LeagueID ? matchDayCompositeMap.get(`${b.SeasonID}|${b.LeagueID}|${b.WeekID}`) || "" : "";
       return resultSortDir === "asc" ? dateA.localeCompare(dateB) : dateB.localeCompare(dateA);
     }
     if (resultSortKey === "season") {
