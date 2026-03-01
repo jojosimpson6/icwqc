@@ -625,7 +625,7 @@ export default function TeamPage() {
                           const oppScore = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
                           const won = teamScore > oppScore;
                           const isNeutral = r.IsNeutralSite === 1;
-                          const dateStr = r.WeekID ? matchDayMap.get(r.WeekID) : null;
+                          const dateStr = r.WeekID && r.SeasonID && r.LeagueID ? matchDayCompositeMap.get(`${r.SeasonID}|${r.LeagueID}|${r.WeekID}`) : null;
                           const displayDate = dateStr
                             ? (() => { const [y,m,d] = dateStr.split("-").map(Number); return new Date(y,m-1,d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); })()
                             : "—";
