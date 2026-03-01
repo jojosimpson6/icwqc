@@ -186,9 +186,11 @@ export default function PlayerProfile() {
               if (t.TeamID) teamNameMap.set(t.TeamID, t.FullName);
             });
 
-            const mdMap = new Map<number, string>();
-            (mdData || []).forEach((md: { MatchdayID: number; Matchday: string | null }) => {
-              if (md.MatchdayID && md.Matchday) mdMap.set(md.MatchdayID, md.Matchday);
+            const mdMap = new Map<string, string>();
+            (mdData || []).forEach((md: any) => {
+              if (md.SeasonID && md.LeagueID && md.MatchdayWeek != null && md.Matchday) {
+                mdMap.set(`${md.SeasonID}|${md.LeagueID}|${md.MatchdayWeek}`, md.Matchday);
+              }
             });
 
             const minsMap = new Map<string, number>();
