@@ -198,10 +198,23 @@ export default function TeamPage() {
       if (s.SeasonID && s.LeagueName) seasonLeagueMap.set(s.SeasonID, s.LeagueName);
     });
 
-    const { data: leagueData } = await supabase.from("leagues").select("LeagueName, LeagueTier");
+    const { data: leagueData } = await supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier");
     const leagueTierMap = new Map<string, number>();
+    const leagueIdByName = new Map<string, number>();
     (leagueData || []).forEach(l => {
-      if (l.LeagueName) leagueTierMap.set(l.LeagueName, l.LeagueTier || 1);
+      if (l.LeagueName) {
+        leagueTierMap.set(l.LeagueName, l.LeagueTier || 1);
+        leagueIdByName.set(l.LeagueName, l.LeagueID);
+      }
+    });
+
+    // Get all teams grouped by league for filtering standings
+    const { data: allTeamsData } = await supabase.from("teams").select("FullName, LeagueID");
+    const teamsByLeagueId = new Map<number, string[]>();
+    (allTeamsData || []).forEach(t => {
+      const arr = teamsByLeagueId.get(t.LeagueID) || [];
+      arr.push(t.FullName);
+      teamsByLeagueId.set(t.LeagueID, arr);
     });
 
     const registerRows: SeasonRegisterRow[] = [];
@@ -209,6 +222,8 @@ export default function TeamPage() {
       if (!standing.SeasonID) continue;
       const leagueN = seasonLeagueMap.get(standing.SeasonID) || leagueName;
       const tier = leagueTierMap.get(leagueN) || 1;
+      const leagueId = leagueIdByName.get(leagueN);
+      const leagueTeamNames = leagueId ? teamsByLeagueId.get(leagueId) || [] : [];
 
       const { data: allTeamStandings } = await supabase.from("standings")
         .select("FullName, totalpoints")
@@ -218,7 +233,11 @@ export default function TeamPage() {
       let position: number | null = null;
       let isChampion = false;
       if (allTeamStandings && allTeamStandings.length > 0) {
-        const idx = allTeamStandings.findIndex(t => t.FullName === teamName);
+        // Filter to only teams in the same league
+        const leagueStandings = leagueTeamNames.length > 0
+          ? allTeamStandings.filter(t => leagueTeamNames.includes(t.FullName || ""))
+          : allTeamStandings;
+        const idx = leagueStandings.findIndex(t => t.FullName === teamName);
         if (idx >= 0) {
           position = idx + 1;
           isChampion = idx === 0;
