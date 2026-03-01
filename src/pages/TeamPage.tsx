@@ -156,10 +156,15 @@ export default function TeamPage() {
       setTeamMapState(tm);
 
       const mdm = new Map<number, string>();
-      (mdData || []).forEach((md: { MatchdayID: number; Matchday: string | null }) => {
+      const mdComposite = new Map<string, string>();
+      (mdData || []).forEach((md: any) => {
         if (md.MatchdayID && md.Matchday) mdm.set(md.MatchdayID, md.Matchday);
+        if (md.SeasonID && md.LeagueID && md.MatchdayWeek != null && md.Matchday) {
+          mdComposite.set(`${md.SeasonID}|${md.LeagueID}|${md.MatchdayWeek}`, md.Matchday);
+        }
       });
       setMatchDayMap(mdm);
+      setMatchDayCompositeMap(mdComposite);
 
       const nm = new Map<number, string>();
       (nationData || []).forEach((n: { NationID: number; Nation: string | null }) => {
