@@ -115,8 +115,9 @@ export default function PlayerProfile() {
   const [matchLogSeason, setMatchLogSeason] = useState<number | "all">("all");
   const [matchLogSortKey, setMatchLogSortKey] = useState<string>("date");
   const [matchLogSortDir, setMatchLogSortDir] = useState<"asc" | "desc">("asc");
-  // Detected positions from stats (for multi-position players)
   const [detectedPositions, setDetectedPositions] = useState<string[]>([]);
+  const [playerAwards, setPlayerAwards] = useState<{ awardname: string; placement: number; seasonid: number; leagueid: number; leagueName?: string }[]>([]);
+  const [leagueNameMap, setLeagueNameMap] = useState<Map<number, string>>(new Map());
 
   useEffect(() => {
     if (!id) return;
