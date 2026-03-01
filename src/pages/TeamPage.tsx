@@ -356,6 +356,10 @@ export default function TeamPage() {
     backgroundColor: primaryColor,
     color: headerTextColor,
   } : undefined;
+  // For using primaryColor as text on a light background: if the color is too light, darken it
+  const safeTextColor = primaryColor
+    ? (isLightColor(primaryColor) ? (secondaryColor && !isLightColor(secondaryColor) ? secondaryColor : "#1a1a1a") : primaryColor)
+    : undefined;
 
   // Head-to-head rival data
   const rivalMatches = rivalTeamName ? matchResults.filter(r => {
