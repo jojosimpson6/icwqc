@@ -172,7 +172,7 @@ export default function PlayerProfile() {
               .limit(2000),
             supabase.from("leagues").select("LeagueID,LeagueName"),
             supabase.from("teams").select("TeamID, FullName"),
-            supabase.from("matchdays").select("MatchdayID, Matchday"),
+            supabase.from("matchdays").select("MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek"),
           ]).then(([{ data: matchData }, { data: leaguesData }, { data: teamsData }, { data: mdData }]) => {
             if (!matchData) return;
 
