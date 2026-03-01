@@ -232,8 +232,6 @@ export default function PlayerProfile() {
               const teamScore = isHome ? (r.HomeTeamScore as number) ?? 0 : (r.AwayTeamScore as number) ?? 0;
               const oppScore = isHome ? (r.AwayTeamScore as number) ?? 0 : (r.HomeTeamScore as number) ?? 0;
               const weekId = r.WeekID as number;
-              const sid = r.SeasonID as number;
-              const lid = r.LeagueID as number;
               const dateStr = weekId && sid && lid ? mdMap.get(`${sid}|${lid}|${weekId}`) || null : null;
               const isNeutral = (r.IsNeutralSite as number) === 1;
 
