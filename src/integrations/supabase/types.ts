@@ -14,6 +14,33 @@ export type Database = {
   }
   public: {
     Tables: {
+      awards: {
+        Row: {
+          awardid: number | null
+          awardname: string | null
+          leagueid: number | null
+          placement: number | null
+          playerid: number | null
+          seasonid: number | null
+        }
+        Insert: {
+          awardid?: number | null
+          awardname?: string | null
+          leagueid?: number | null
+          placement?: number | null
+          playerid?: number | null
+          seasonid?: number | null
+        }
+        Update: {
+          awardid?: number | null
+          awardname?: string | null
+          leagueid?: number | null
+          placement?: number | null
+          playerid?: number | null
+          seasonid?: number | null
+        }
+        Relationships: []
+      }
       leagues: {
         Row: {
           LeagueID: number

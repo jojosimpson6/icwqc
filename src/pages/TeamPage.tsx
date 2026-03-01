@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { useSortableTable } from "@/hooks/useSortableTable";
-import { getContrastText, formatHeight, calculateAge, getNationFlag } from "@/lib/helpers";
+import { getContrastText, formatHeight, calculateAge, getNationFlag, isLightColor } from "@/lib/helpers";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 interface Team {
@@ -108,6 +108,7 @@ export default function TeamPage() {
   const [matchResults, setMatchResults] = useState<MatchResult[]>([]);
   const [teamMapState, setTeamMapState] = useState<Map<number, string>>(new Map());
   const [matchDayMap, setMatchDayMap] = useState<Map<number, string>>(new Map());
+  const [matchDayCompositeMap, setMatchDayCompositeMap] = useState<Map<string, string>>(new Map());
   const [rivalTeamName, setRivalTeamName] = useState<string | null>(null);
   const [resultsOpen, setResultsOpen] = useState(true);
   const [h2hOpen, setH2hOpen] = useState(true);
@@ -128,8 +129,8 @@ export default function TeamPage() {
         .or(`HomeTeamID.eq.0,AwayTeamID.eq.0`)
         .limit(0),
       supabase.from("teams").select("TeamID, FullName"),
-      supabase.from("matchdays").select("MatchdayID, Matchday"),
-      supabase.from("nations").select("NationID, Nation"),
+      supabase.from("matchdays").select("MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek"),
+      supabase.from("nations").select("NationID, Nation, ValidToDt").order("ValidToDt", { ascending: false }),
     ]).then(([{ data: teamData }, { data: statsData }, { data: standData }, { data: playerData }, , { data: allTeamsData }, { data: mdData }, { data: nationData }]) => {
       if (teamData) {
         setTeam(teamData);
@@ -156,14 +157,20 @@ export default function TeamPage() {
       setTeamMapState(tm);
 
       const mdm = new Map<number, string>();
-      (mdData || []).forEach((md: { MatchdayID: number; Matchday: string | null }) => {
+      const mdComposite = new Map<string, string>();
+      (mdData || []).forEach((md: any) => {
         if (md.MatchdayID && md.Matchday) mdm.set(md.MatchdayID, md.Matchday);
+        if (md.SeasonID && md.LeagueID && md.MatchdayWeek != null && md.Matchday) {
+          mdComposite.set(`${md.SeasonID}|${md.LeagueID}|${md.MatchdayWeek}`, md.Matchday);
+        }
       });
       setMatchDayMap(mdm);
+      setMatchDayCompositeMap(mdComposite);
 
       const nm = new Map<number, string>();
+      // Data is ordered by ValidToDt desc, so first entry per NationID is the most current name
       (nationData || []).forEach((n: { NationID: number; Nation: string | null }) => {
-        if (n.NationID && n.Nation) nm.set(n.NationID, n.Nation);
+        if (n.NationID && n.Nation && !nm.has(n.NationID)) nm.set(n.NationID, n.Nation);
       });
       setNations(nm);
 
@@ -192,10 +199,23 @@ export default function TeamPage() {
       if (s.SeasonID && s.LeagueName) seasonLeagueMap.set(s.SeasonID, s.LeagueName);
     });
 
-    const { data: leagueData } = await supabase.from("leagues").select("LeagueName, LeagueTier");
+    const { data: leagueData } = await supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier");
     const leagueTierMap = new Map<string, number>();
+    const leagueIdByName = new Map<string, number>();
     (leagueData || []).forEach(l => {
-      if (l.LeagueName) leagueTierMap.set(l.LeagueName, l.LeagueTier || 1);
+      if (l.LeagueName) {
+        leagueTierMap.set(l.LeagueName, l.LeagueTier || 1);
+        leagueIdByName.set(l.LeagueName, l.LeagueID);
+      }
+    });
+
+    // Get all teams grouped by league for filtering standings
+    const { data: allTeamsData } = await supabase.from("teams").select("FullName, LeagueID");
+    const teamsByLeagueId = new Map<number, string[]>();
+    (allTeamsData || []).forEach(t => {
+      const arr = teamsByLeagueId.get(t.LeagueID) || [];
+      arr.push(t.FullName);
+      teamsByLeagueId.set(t.LeagueID, arr);
     });
 
     const registerRows: SeasonRegisterRow[] = [];
@@ -203,6 +223,8 @@ export default function TeamPage() {
       if (!standing.SeasonID) continue;
       const leagueN = seasonLeagueMap.get(standing.SeasonID) || leagueName;
       const tier = leagueTierMap.get(leagueN) || 1;
+      const leagueId = leagueIdByName.get(leagueN);
+      const leagueTeamNames = leagueId ? teamsByLeagueId.get(leagueId) || [] : [];
 
       const { data: allTeamStandings } = await supabase.from("standings")
         .select("FullName, totalpoints")
@@ -212,7 +234,11 @@ export default function TeamPage() {
       let position: number | null = null;
       let isChampion = false;
       if (allTeamStandings && allTeamStandings.length > 0) {
-        const idx = allTeamStandings.findIndex(t => t.FullName === teamName);
+        // Filter to only teams in the same league
+        const leagueStandings = leagueTeamNames.length > 0
+          ? allTeamStandings.filter(t => leagueTeamNames.includes(t.FullName || ""))
+          : allTeamStandings;
+        const idx = leagueStandings.findIndex(t => t.FullName === teamName);
         if (idx >= 0) {
           position = idx + 1;
           isChampion = idx === 0;
@@ -292,8 +318,8 @@ export default function TeamPage() {
   // Sort results
   const sortedResults = [...filteredResults].sort((a, b) => {
     if (resultSortKey === "date") {
-      const dateA = a.WeekID ? matchDayMap.get(a.WeekID) || "" : "";
-      const dateB = b.WeekID ? matchDayMap.get(b.WeekID) || "" : "";
+      const dateA = a.WeekID && a.SeasonID && a.LeagueID ? matchDayCompositeMap.get(`${a.SeasonID}|${a.LeagueID}|${a.WeekID}`) || "" : "";
+      const dateB = b.WeekID && b.SeasonID && b.LeagueID ? matchDayCompositeMap.get(`${b.SeasonID}|${b.LeagueID}|${b.WeekID}`) || "" : "";
       return resultSortDir === "asc" ? dateA.localeCompare(dateB) : dateB.localeCompare(dateA);
     }
     if (resultSortKey === "season") {
@@ -330,6 +356,10 @@ export default function TeamPage() {
     backgroundColor: primaryColor,
     color: headerTextColor,
   } : undefined;
+  // For using primaryColor as text on a light background: if the color is too light, darken it
+  const safeTextColor = primaryColor
+    ? (isLightColor(primaryColor) ? (secondaryColor && !isLightColor(secondaryColor) ? secondaryColor : "#1a1a1a") : primaryColor)
+    : undefined;
 
   // Head-to-head rival data
   const rivalMatches = rivalTeamName ? matchResults.filter(r => {
@@ -443,7 +473,7 @@ export default function TeamPage() {
               </span>
             </div>
             <div>
-              <h1 className="font-display text-3xl font-bold" style={primaryColor ? { color: primaryColor } : undefined}>
+              <h1 className="font-display text-3xl font-bold" style={safeTextColor ? { color: safeTextColor } : undefined}>
                 {team.FullName}
               </h1>
               <p className="text-sm text-muted-foreground font-sans mt-1">
@@ -480,7 +510,7 @@ export default function TeamPage() {
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={`px-4 py-2 text-sm font-sans font-medium border-b-2 -mb-px transition-colors ${activeTab === tab ? "text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-              style={activeTab === tab && primaryColor ? { borderColor: primaryColor, color: primaryColor } : activeTab === tab ? {} : undefined}
+              style={activeTab === tab && safeTextColor ? { borderColor: primaryColor || safeTextColor, color: safeTextColor } : activeTab === tab ? {} : undefined}
             >
               {tab === "register" ? "Season Register" : tab === "results" ? "Results" : "Roster & Stats"}
             </button>
@@ -548,7 +578,7 @@ export default function TeamPage() {
                         const oppName = oppId ? teamMapState.get(oppId) || `Team ${oppId}` : "Unknown";
                         const won = teamScore > oppScore;
                         const isNeutral = r.IsNeutralSite === 1;
-                        const dateStr = r.WeekID ? matchDayMap.get(r.WeekID) : null;
+                        const dateStr = r.WeekID && r.SeasonID && r.LeagueID ? matchDayCompositeMap.get(`${r.SeasonID}|${r.LeagueID}|${r.WeekID}`) : null;
                         const displayDate = dateStr
                           ? (() => { const [y,m,d] = dateStr.split("-").map(Number); return new Date(y,m-1,d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); })()
                           : "—";
@@ -610,8 +640,8 @@ export default function TeamPage() {
                       </thead>
                       <tbody>
                         {[...rivalMatches].sort((a, b) => {
-                          const dateA = a.WeekID ? matchDayMap.get(a.WeekID) || "" : "";
-                          const dateB = b.WeekID ? matchDayMap.get(b.WeekID) || "" : "";
+                          const dateA = a.WeekID && a.SeasonID && a.LeagueID ? matchDayCompositeMap.get(`${a.SeasonID}|${a.LeagueID}|${a.WeekID}`) || "" : "";
+                          const dateB = b.WeekID && b.SeasonID && b.LeagueID ? matchDayCompositeMap.get(`${b.SeasonID}|${b.LeagueID}|${b.WeekID}`) || "" : "";
                           return dateA.localeCompare(dateB);
                         }).map((r, i) => {
                           const isHome = r.HomeTeamID === team?.TeamID;
@@ -619,7 +649,7 @@ export default function TeamPage() {
                           const oppScore = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
                           const won = teamScore > oppScore;
                           const isNeutral = r.IsNeutralSite === 1;
-                          const dateStr = r.WeekID ? matchDayMap.get(r.WeekID) : null;
+                          const dateStr = r.WeekID && r.SeasonID && r.LeagueID ? matchDayCompositeMap.get(`${r.SeasonID}|${r.LeagueID}|${r.WeekID}`) : null;
                           const displayDate = dateStr
                             ? (() => { const [y,m,d] = dateStr.split("-").map(Number); return new Date(y,m-1,d).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }); })()
                             : "—";

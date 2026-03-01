@@ -80,9 +80,14 @@ export default function MatchPage() {
           .then(({ data: ld }) => { if (ld) setLeagueName(ld.LeagueName || ""); });
       }
 
-      if (matchData?.WeekID) {
-        supabase.from("matchdays").select("Matchday").eq("MatchdayID", matchData.WeekID).single()
-          .then(({ data: md }) => {
+      if (matchData?.WeekID && matchData?.SeasonID && matchData?.LeagueID) {
+        supabase.from("matchdays").select("Matchday")
+          .eq("MatchdayWeek", matchData.WeekID)
+          .eq("SeasonID", matchData.SeasonID)
+          .eq("LeagueID", matchData.LeagueID)
+          .limit(1)
+          .then(({ data: mdArr }) => {
+            const md = mdArr?.[0];
             if (md?.Matchday) {
               const [y, m, d] = md.Matchday.split("-");
               setMatchDate(new Date(parseInt(y), parseInt(m) - 1, parseInt(d))

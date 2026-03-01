@@ -172,7 +172,7 @@ export default function PlayerProfile() {
               .limit(2000),
             supabase.from("leagues").select("LeagueID,LeagueName"),
             supabase.from("teams").select("TeamID, FullName"),
-            supabase.from("matchdays").select("MatchdayID, Matchday"),
+            supabase.from("matchdays").select("MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek"),
           ]).then(([{ data: matchData }, { data: leaguesData }, { data: teamsData }, { data: mdData }]) => {
             if (!matchData) return;
 
@@ -186,9 +186,11 @@ export default function PlayerProfile() {
               if (t.TeamID) teamNameMap.set(t.TeamID, t.FullName);
             });
 
-            const mdMap = new Map<number, string>();
-            (mdData || []).forEach((md: { MatchdayID: number; Matchday: string | null }) => {
-              if (md.MatchdayID && md.Matchday) mdMap.set(md.MatchdayID, md.Matchday);
+            const mdMap = new Map<string, string>();
+            (mdData || []).forEach((md: any) => {
+              if (md.SeasonID && md.LeagueID && md.MatchdayWeek != null && md.Matchday) {
+                mdMap.set(`${md.SeasonID}|${md.LeagueID}|${md.MatchdayWeek}`, md.Matchday);
+              }
             });
 
             const minsMap = new Map<string, number>();
@@ -230,7 +232,7 @@ export default function PlayerProfile() {
               const teamScore = isHome ? (r.HomeTeamScore as number) ?? 0 : (r.AwayTeamScore as number) ?? 0;
               const oppScore = isHome ? (r.AwayTeamScore as number) ?? 0 : (r.HomeTeamScore as number) ?? 0;
               const weekId = r.WeekID as number;
-              const dateStr = weekId ? mdMap.get(weekId) || null : null;
+              const dateStr = weekId && sid && lid ? mdMap.get(`${sid}|${lid}|${weekId}`) || null : null;
               const isNeutral = (r.IsNeutralSite as number) === 1;
 
               let statStr = "";
