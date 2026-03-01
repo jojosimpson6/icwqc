@@ -129,7 +129,7 @@ export default function TeamPage() {
         .or(`HomeTeamID.eq.0,AwayTeamID.eq.0`)
         .limit(0),
       supabase.from("teams").select("TeamID, FullName"),
-      supabase.from("matchdays").select("MatchdayID, Matchday"),
+      supabase.from("matchdays").select("MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek"),
       supabase.from("nations").select("NationID, Nation"),
     ]).then(([{ data: teamData }, { data: statsData }, { data: standData }, { data: playerData }, , { data: allTeamsData }, { data: mdData }, { data: nationData }]) => {
       if (teamData) {
