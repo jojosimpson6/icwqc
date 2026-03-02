@@ -10,6 +10,7 @@ interface Player {
   Height: number | null;
   NationalityID: number | null;
   DOB: string | null;
+  headshot_url: string | null;
 }
 
 export function PlayerSpotlight() {
@@ -78,8 +79,12 @@ export function PlayerSpotlight() {
               to={`/player/${p.PlayerID}`}
               className="flex items-center gap-3 px-3 py-2.5 hover:bg-highlight/20 transition-colors"
             >
-              <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-muted-foreground text-xs font-mono shrink-0">
-                {displayPos?.[0] || "?"}
+              <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-muted-foreground text-xs font-mono shrink-0 overflow-hidden">
+                {p.headshot_url ? (
+                  <img src={p.headshot_url} alt={p.PlayerName || ""} className="w-full h-full object-cover" />
+                ) : (
+                  displayPos?.[0] || "?"
+                )}
               </div>
               <div className="flex-1 min-w-0">
                 <p className="font-sans font-medium text-sm text-accent truncate">{p.PlayerName}</p>

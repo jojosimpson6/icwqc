@@ -18,6 +18,7 @@ interface Player {
   Handedness: string | null;
   Gender: string | null;
   NationalityID: number | null;
+  headshot_url: string | null;
 }
 
 interface StatLine {
@@ -516,8 +517,12 @@ export default function PlayerProfile() {
         {/* Header */}
         <div className="mb-6 border-b-2 border-primary pb-4">
           <div className="flex items-start gap-6">
-            <div className="w-32 h-40 bg-muted border border-border rounded flex items-center justify-center shrink-0">
-              <span className="text-4xl text-muted-foreground">👤</span>
+            <div className="w-32 h-40 bg-muted border border-border rounded flex items-center justify-center shrink-0 overflow-hidden">
+              {player.headshot_url ? (
+                <img src={player.headshot_url} alt={player.PlayerName || "Player"} className="w-full h-full object-cover" />
+              ) : (
+                <span className="text-4xl text-muted-foreground">👤</span>
+              )}
             </div>
             <div className="flex-1">
               <h1 className="font-display text-3xl font-bold text-foreground">
