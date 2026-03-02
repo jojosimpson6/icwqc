@@ -69,6 +69,7 @@ export default function LeaguePage() {
   const [view, setView] = useState<"total" | "home" | "away" | "neutral">("total");
   const [awards, setAwards] = useState<AwardRow[]>([]);
   const [playerMap, setPlayerMap] = useState<Map<number, string>>(new Map());
+  const [playerPosMap, setPlayerPosMap] = useState<Map<number, string>>(new Map());
 
   useEffect(() => {
     if (!id) return;
@@ -79,7 +80,7 @@ export default function LeaguePage() {
       supabase.from("teams").select("*").eq("LeagueID", lid).order("FullName"),
       supabase.from("standings").select("*").order("totalpoints", { ascending: false }),
       supabase.from("awards").select("*").eq("leagueid", lid).order("seasonid", { ascending: false }),
-      supabase.from("players").select("PlayerID, PlayerName"),
+      supabase.from("players").select("PlayerID, PlayerName, Position"),
     ]).then(([{ data: leagueData }, { data: teamData }, { data: standingsData }, { data: awardsData }, { data: playerData }]) => {
       if (leagueData) setLeague(leagueData);
       if (teamData) setTeams(teamData);
@@ -90,8 +91,13 @@ export default function LeaguePage() {
       if (awardsData) setAwards(awardsData as AwardRow[]);
       if (playerData) {
         const pm = new Map<number, string>();
-        playerData.forEach((p: any) => { if (p.PlayerID && p.PlayerName) pm.set(p.PlayerID, p.PlayerName); });
+        const ppm = new Map<number, string>();
+        playerData.forEach((p: any) => {
+          if (p.PlayerID && p.PlayerName) pm.set(p.PlayerID, p.PlayerName);
+          if (p.PlayerID && p.Position) ppm.set(p.PlayerID, p.Position);
+        });
         setPlayerMap(pm);
+        setPlayerPosMap(ppm);
       }
     });
   }, [id]);
