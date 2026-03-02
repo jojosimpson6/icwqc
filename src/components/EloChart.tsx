@@ -9,17 +9,11 @@ const COLORS = [
   "hsl(160, 60%, 35%)",
 ];
 
-interface EloPoint {
+interface EloNewPoint {
+  FullName: string;
+  Matchday: string; // date string
+  elo_rating: number;
   current_game_number: number;
-  new_elo: number;
-  player_name: string;
-  MatchID: number | null;
-}
-
-interface Matchday {
-  MatchdayID: number;
-  Matchday: string | null;
-  LeagueID: number | null;
 }
 
 interface LeagueOption {
@@ -38,10 +32,8 @@ export function EloChart() {
   const [hiddenTeams, setHiddenTeams] = useState<Set<string>>(new Set());
   const [leagues, setLeagues] = useState<LeagueOption[]>([]);
   const [selectedLeague, setSelectedLeague] = useState<number | null>(null);
-  const [matchdays, setMatchdays] = useState<Matchday[]>([]);
-  const [eloData, setEloData] = useState<EloPoint[]>([]);
-  const [matchDateMap, setMatchDateMap] = useState<Map<number, string>>(new Map());
-  // Date range controls
+  const [eloData, setEloData] = useState<EloNewPoint[]>([]);
+  const [teamLeagueMap, setTeamLeagueMap] = useState<Map<string, number>>(new Map());
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [availableDateRange, setAvailableDateRange] = useState<{ min: string; max: string }>({ min: "", max: "" });
@@ -49,78 +41,47 @@ export function EloChart() {
   useEffect(() => {
     Promise.all([
       supabase.from("leagues").select("LeagueID, LeagueName").order("LeagueTier").order("LeagueName"),
-      supabase.from("elo").select("*").order("current_game_number", { ascending: true }).limit(5000),
-      supabase.from("matchdays").select("*").order("MatchdayID", { ascending: true }),
-    ]).then(([{ data: leagueData }, { data: eData }, { data: mdData }]) => {
+      supabase.from("elo_new").select("*").order("Matchday", { ascending: true }).limit(5000),
+      supabase.from("teams").select("FullName, LeagueID"),
+    ]).then(([{ data: leagueData }, { data: eData }, { data: teamsData }]) => {
       if (leagueData) setLeagues(leagueData as LeagueOption[]);
-      if (mdData) setMatchdays(mdData as Matchday[]);
 
-      const elo = (eData || []) as EloPoint[];
+      const elo = (eData || []).filter((d: any) => d.FullName && d.Matchday && d.elo_rating != null) as EloNewPoint[];
       setEloData(elo);
 
-      // Build MatchID -> date via results.WeekID -> matchdays.Matchday
-      const matchIds = [...new Set(elo.map(e => e.MatchID).filter(Boolean))] as number[];
-      if (matchIds.length > 0 && mdData) {
-        // Build composite key: SeasonID|LeagueID|MatchdayWeek -> Matchday
-        const compositeToDate = new Map<string, string>();
-        (mdData as any[]).forEach((md: any) => {
-          if (md.SeasonID && md.LeagueID && md.MatchdayWeek != null && md.Matchday) {
-            compositeToDate.set(`${md.SeasonID}|${md.LeagueID}|${md.MatchdayWeek}`, md.Matchday);
-          }
-        });
-
-        // Fetch results with SeasonID and LeagueID for composite lookup
-        supabase.from("results").select("MatchID,WeekID,SeasonID,LeagueID").in("MatchID", matchIds.slice(0, 1000))
-          .then(({ data: resultsData }) => {
-            const mMap = new Map<number, string>();
-            (resultsData || []).forEach((r: any) => {
-              if (r.MatchID && r.WeekID && r.SeasonID && r.LeagueID) {
-                const date = compositeToDate.get(`${r.SeasonID}|${r.LeagueID}|${r.WeekID}`);
-                if (date) mMap.set(r.MatchID, date);
-              }
-            });
-            setMatchDateMap(mMap);
-          });
-      }
+      const tlm = new Map<string, number>();
+      (teamsData || []).forEach((t: any) => {
+        if (t.FullName && t.LeagueID) tlm.set(t.FullName, t.LeagueID);
+      });
+      setTeamLeagueMap(tlm);
     });
   }, []);
 
-  // Build chart when data or filters change
   useEffect(() => {
-    if (eloData.length === 0 || matchdays.length === 0) return;
+    if (eloData.length === 0) return;
 
-    const mdLeagueMap = new Map<number, number | null>();
-    matchdays.forEach((md) => mdLeagueMap.set(md.MatchdayID, md.LeagueID));
-
-    let filteredElo = eloData;
+    let filtered = eloData;
     if (selectedLeague !== null) {
-      const validMatchdayIds = new Set<number>(
-        matchdays.filter(md => md.LeagueID === selectedLeague).map(md => md.MatchdayID)
-      );
-      filteredElo = eloData.filter((d) => validMatchdayIds.has(d.current_game_number));
+      const leagueTeams = new Set<string>();
+      teamLeagueMap.forEach((lid, name) => {
+        if (lid === selectedLeague) leagueTeams.add(name);
+      });
+      filtered = eloData.filter(d => leagueTeams.has(d.FullName));
     }
 
-    const names = [...new Set(filteredElo.map((d) => d.player_name))].sort();
+    const names = [...new Set(filtered.map(d => d.FullName))].sort();
     setTeamNames(names);
 
-    // Build chart keyed by date — ONLY use MatchID -> date mapping
+    // Group by date
     const gameMap = new Map<string, Record<string, any>>();
-
-    filteredElo.forEach((d) => {
-      // Only include points with a resolved date
-      const dateKey = d.MatchID ? matchDateMap.get(d.MatchID) : undefined;
-      if (!dateKey) return; // Skip points without a date
-
-      if (!gameMap.has(dateKey)) {
-        gameMap.set(dateKey, { date: dateKey });
-      }
-      gameMap.get(dateKey)![d.player_name] = d.new_elo;
+    filtered.forEach(d => {
+      const dateKey = d.Matchday;
+      if (!gameMap.has(dateKey)) gameMap.set(dateKey, { date: dateKey });
+      gameMap.get(dateKey)![d.FullName] = d.elo_rating;
     });
 
-    // Sort by date and fill forward
     const sorted = [...gameMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 
-    // Compute available range
     if (sorted.length > 0) {
       const minD = sorted[0][0];
       const maxD = sorted[sorted.length - 1][0];
@@ -129,25 +90,24 @@ export function EloChart() {
       if (!endDate) setEndDate(maxD);
     }
 
-    // Apply date range filter
     const effStart = startDate || "";
     const effEnd = endDate || "9999-12-31";
-    const filtered = sorted.filter(([dateKey]) => dateKey >= effStart && dateKey <= effEnd);
+    const dateFiltered = sorted.filter(([dateKey]) => dateKey >= effStart && dateKey <= effEnd);
 
     const lastKnown: Record<string, number> = {};
-    names.forEach((n) => { lastKnown[n] = 1000; });
+    names.forEach(n => { lastKnown[n] = 5000; });
 
-    // Pre-fill from all entries before the start date
+    // Pre-fill from entries before start date
     sorted.forEach(([dateKey, row]) => {
       if (dateKey >= effStart) return;
-      names.forEach((n) => {
+      names.forEach(n => {
         if (row[n] !== undefined) lastKnown[n] = row[n];
       });
     });
 
-    const filled = filtered.map(([, row]) => {
+    const filled = dateFiltered.map(([, row]) => {
       const newRow: Record<string, any> = { date: row.date };
-      names.forEach((n) => {
+      names.forEach(n => {
         if (row[n] !== undefined) lastKnown[n] = row[n];
         newRow[n] = lastKnown[n];
       });
@@ -155,10 +115,10 @@ export function EloChart() {
     });
 
     setChartData(filled);
-  }, [eloData, matchdays, selectedLeague, matchDateMap, startDate, endDate]);
+  }, [eloData, selectedLeague, teamLeagueMap, startDate, endDate]);
 
   const toggleTeam = (name: string) => {
-    setHiddenTeams((prev) => {
+    setHiddenTeams(prev => {
       const next = new Set(prev);
       if (next.has(name)) next.delete(name);
       else next.add(name);
@@ -169,7 +129,7 @@ export function EloChart() {
   if (chartData.length === 0) return null;
 
   const formatDate = (d: string) => {
-    if (!d || d.startsWith("Game")) return d;
+    if (!d) return d;
     return parseLocalDate(d).toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
   };
 
@@ -223,7 +183,7 @@ export function EloChart() {
             <Tooltip
               contentStyle={{ fontSize: 12 }}
               labelFormatter={(label) => {
-                if (!label || String(label).startsWith("Game")) return label;
+                if (!label) return label;
                 return parseLocalDate(String(label)).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
               }}
             />

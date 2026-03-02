@@ -17,6 +17,7 @@ interface Team {
   PrimaryColor: string | null;
   SecondaryColor: string | null;
   Rival: string | null;
+  logo_url: string | null;
 }
 
 interface StatLine {
@@ -465,12 +466,15 @@ export default function TeamPage() {
             <Link to={`/league/${team.LeagueID}`} className="hover:text-accent">{leagueName}</Link>
           </p>
           <div className="flex items-center gap-4">
-            {/* Team logo placeholder */}
-            <div className="w-16 h-16 rounded border border-border flex items-center justify-center shrink-0"
-              style={primaryColor ? { backgroundColor: primaryColor } : undefined}>
-              <span className="text-2xl" style={{ color: headerTextColor || "inherit" }}>
-                {team.FullName.charAt(0)}
-              </span>
+            <div className="w-16 h-16 rounded border border-border flex items-center justify-center shrink-0 overflow-hidden"
+              style={!team.logo_url && primaryColor ? { backgroundColor: primaryColor } : undefined}>
+              {team.logo_url ? (
+                <img src={team.logo_url} alt={team.FullName} className="w-full h-full object-contain" />
+              ) : (
+                <span className="text-2xl" style={{ color: headerTextColor || "inherit" }}>
+                  {team.FullName.charAt(0)}
+                </span>
+              )}
             </div>
             <div>
               <h1 className="font-display text-3xl font-bold" style={safeTextColor ? { color: safeTextColor } : undefined}>
