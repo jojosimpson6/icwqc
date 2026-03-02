@@ -146,6 +146,7 @@ export type Database = {
           FirstName: string | null
           Gender: string | null
           Handedness: string | null
+          headshot_url: string | null
           Height: number | null
           LastName: string | null
           NationalityID: number | null
@@ -159,6 +160,7 @@ export type Database = {
           FirstName?: string | null
           Gender?: string | null
           Handedness?: string | null
+          headshot_url?: string | null
           Height?: number | null
           LastName?: string | null
           NationalityID?: number | null
@@ -172,6 +174,7 @@ export type Database = {
           FirstName?: string | null
           Gender?: string | null
           Handedness?: string | null
+          headshot_url?: string | null
           Height?: number | null
           LastName?: string | null
           NationalityID?: number | null
@@ -329,6 +332,7 @@ export type Database = {
           Country: string | null
           FullName: string
           LeagueID: number
+          logo_url: string | null
           Nickname: string | null
           PrimaryColor: string | null
           Rival: string | null
@@ -343,6 +347,7 @@ export type Database = {
           Country?: string | null
           FullName: string
           LeagueID: number
+          logo_url?: string | null
           Nickname?: string | null
           PrimaryColor?: string | null
           Rival?: string | null
@@ -357,6 +362,7 @@ export type Database = {
           Country?: string | null
           FullName?: string
           LeagueID?: number
+          logo_url?: string | null
           Nickname?: string | null
           PrimaryColor?: string | null
           Rival?: string | null
@@ -395,6 +401,15 @@ export type Database = {
           new_elo: number | null
           player_name: string | null
           previous_elo: number | null
+        }
+        Relationships: []
+      }
+      elo_new: {
+        Row: {
+          current_game_number: number | null
+          elo_rating: number | null
+          FullName: string | null
+          Matchday: string | null
         }
         Relationships: []
       }
