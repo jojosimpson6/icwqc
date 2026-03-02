@@ -1,0 +1,1 @@
+CREATE POLICY "Public read access" ON public.awards FOR SELECT USING (true);
