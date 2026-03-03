@@ -772,7 +772,15 @@ export default function TeamPage() {
                             </td>
                             <td className="px-3 py-1.5 text-muted-foreground text-xs">{posDisplay}</td>
                             <td className="px-3 py-1.5 text-right font-mono text-xs">{pInfo?.DOB ? calculateAge(pInfo.DOB) : "—"}</td>
-                            <td className="px-3 py-1.5 text-xs">{getNationFlag(nationName)} {nationName}</td>
+                            <td className="px-3 py-1.5 text-xs">
+                              {pInfo?.NationalityID ? (
+                                <Link to={`/nation/${pInfo.NationalityID}`} className="text-accent hover:underline">
+                                  {getNationFlag(nationName)} {nationName}
+                                </Link>
+                              ) : (
+                                <>{getNationFlag(nationName)} {nationName}</>
+                              )}
+                            </td>
                             <td className="px-3 py-1.5 text-right font-mono text-xs">{pInfo ? formatHeight(pInfo.Height) : "—"}</td>
                             <td className="px-3 py-1.5 text-right font-mono text-xs">{pInfo?.Weight ? `${pInfo.Weight}` : "—"}</td>
                             <td className="px-3 py-1.5 text-center text-xs">{pInfo?.Handedness === "R" ? "R" : pInfo?.Handedness === "L" ? "L" : pInfo?.Handedness || "—"}</td>
