@@ -251,6 +251,7 @@ export default function LeaguePage() {
                                         </Link>
                                       </span>
                                     );
+
                                   })}
                                 </div>
                               </div>

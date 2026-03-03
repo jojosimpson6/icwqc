@@ -543,7 +543,13 @@ export default function PlayerProfile() {
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground uppercase tracking-wide">Nationality</p>
-                  <p className="font-medium">{getNationFlag(nation)} {nation}</p>
+                  <p className="font-medium">
+                    {player.NationalityID ? (
+                      <Link to={`/nation/${player.NationalityID}`} className="hover:text-accent">
+                        {getNationFlag(nation)} {nation}
+                      </Link>
+                    ) : "—"}
+                  </p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground uppercase tracking-wide">Height / Weight</p>

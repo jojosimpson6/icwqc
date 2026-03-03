@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend } from "recharts";
+import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
 const COLORS = [
   "hsl(0, 72%, 45%)", "hsl(220, 60%, 45%)", "hsl(140, 50%, 35%)", "hsl(30, 80%, 50%)",
@@ -11,7 +11,7 @@ const COLORS = [
 
 interface EloNewPoint {
   FullName: string;
-  Matchday: string; // date string
+  Matchday: string;
   elo_rating: number;
   current_game_number: number;
 }
@@ -29,7 +29,7 @@ function parseLocalDate(dateStr: string): Date {
 export function EloChart() {
   const [chartData, setChartData] = useState<any[]>([]);
   const [teamNames, setTeamNames] = useState<string[]>([]);
-  const [hiddenTeams, setHiddenTeams] = useState<Set<string>>(new Set());
+  const [selectedTeams, setSelectedTeams] = useState<Set<string>>(new Set());
   const [leagues, setLeagues] = useState<LeagueOption[]>([]);
   const [selectedLeague, setSelectedLeague] = useState<number | null>(null);
   const [eloData, setEloData] = useState<EloNewPoint[]>([]);
@@ -37,6 +37,19 @@ export function EloChart() {
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [availableDateRange, setAvailableDateRange] = useState<{ min: string; max: string }>({ min: "", max: "" });
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setDropdownOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
 
   useEffect(() => {
     Promise.all([
@@ -71,8 +84,9 @@ export function EloChart() {
 
     const names = [...new Set(filtered.map(d => d.FullName))].sort();
     setTeamNames(names);
+    // Auto-select all teams when league changes
+    setSelectedTeams(new Set(names));
 
-    // Group by date
     const gameMap = new Map<string, Record<string, any>>();
     filtered.forEach(d => {
       const dateKey = d.Matchday;
@@ -97,7 +111,6 @@ export function EloChart() {
     const lastKnown: Record<string, number> = {};
     names.forEach(n => { lastKnown[n] = 5000; });
 
-    // Pre-fill from entries before start date
     sorted.forEach(([dateKey, row]) => {
       if (dateKey >= effStart) return;
       names.forEach(n => {
@@ -118,7 +131,7 @@ export function EloChart() {
   }, [eloData, selectedLeague, teamLeagueMap, startDate, endDate]);
 
   const toggleTeam = (name: string) => {
-    setHiddenTeams(prev => {
+    setSelectedTeams(prev => {
       const next = new Set(prev);
       if (next.has(name)) next.delete(name);
       else next.add(name);
@@ -126,12 +139,17 @@ export function EloChart() {
     });
   };
 
+  const selectAll = () => setSelectedTeams(new Set(teamNames));
+  const selectNone = () => setSelectedTeams(new Set());
+
   if (chartData.length === 0) return null;
 
   const formatDate = (d: string) => {
     if (!d) return d;
     return parseLocalDate(d).toLocaleDateString("en-GB", { month: "short", year: "2-digit" });
   };
+
+  const visibleTeams = teamNames.filter(n => selectedTeams.has(n));
 
   return (
     <div className="border border-border rounded overflow-hidden">
@@ -150,6 +168,44 @@ export function EloChart() {
               <option key={l.LeagueID} value={l.LeagueID}>{l.LeagueName}</option>
             ))}
           </select>
+
+          {/* Team selector dropdown */}
+          <div className="relative" ref={dropdownRef}>
+            <button
+              onClick={() => setDropdownOpen(o => !o)}
+              className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans flex items-center gap-1"
+            >
+              Teams ({selectedTeams.size}/{teamNames.length})
+              <span className="text-[10px]">▼</span>
+            </button>
+            {dropdownOpen && (
+              <div className="absolute right-0 top-full mt-1 z-50 bg-popover border border-border rounded shadow-lg w-56 max-h-64 overflow-y-auto">
+                <div className="px-2 py-1.5 border-b border-border flex gap-2">
+                  <button onClick={selectAll} className="text-xs text-accent hover:underline font-sans">All</button>
+                  <button onClick={selectNone} className="text-xs text-accent hover:underline font-sans">None</button>
+                </div>
+                {teamNames.map((name, i) => (
+                  <label
+                    key={name}
+                    className={`flex items-center gap-2 px-2 py-1 text-xs font-sans cursor-pointer hover:bg-highlight/20 ${i % 2 === 1 ? "bg-secondary/30" : ""}`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedTeams.has(name)}
+                      onChange={() => toggleTeam(name)}
+                      className="accent-[hsl(var(--accent))] w-3 h-3"
+                    />
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: COLORS[teamNames.indexOf(name) % COLORS.length] }}
+                    />
+                    <span className="truncate text-popover-foreground">{name}</span>
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+
           <input
             type="date"
             value={startDate}
@@ -187,20 +243,27 @@ export function EloChart() {
                 return parseLocalDate(String(label)).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
               }}
             />
-            <Legend wrapperStyle={{ fontSize: 11 }} onClick={(e) => toggleTeam(String(e.dataKey))} />
-            {teamNames.map((name, i) => (
+            {visibleTeams.map((name) => (
               <Line
                 key={name}
                 type="monotone"
                 dataKey={name}
-                stroke={COLORS[i % COLORS.length]}
+                stroke={COLORS[teamNames.indexOf(name) % COLORS.length]}
                 dot={false}
                 strokeWidth={1.5}
-                hide={hiddenTeams.has(name)}
               />
             ))}
           </LineChart>
         </ResponsiveContainer>
+        {/* Compact legend */}
+        <div className="flex flex-wrap gap-x-3 gap-y-1 mt-2 px-1">
+          {visibleTeams.map(name => (
+            <span key={name} className="flex items-center gap-1 text-[10px] font-sans text-muted-foreground">
+              <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: COLORS[teamNames.indexOf(name) % COLORS.length] }} />
+              {name}
+            </span>
+          ))}
+        </div>
       </div>
     </div>
   );
