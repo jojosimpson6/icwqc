@@ -21,7 +21,7 @@ const Index = () => {
               QuidReference Dashboard
             </h2>
             <p className="text-sm text-muted-foreground font-sans mt-1">
-              Quidditch Statistics & Records
+              Quidditch Statistics &amp; Records
             </p>
           </div>
 
