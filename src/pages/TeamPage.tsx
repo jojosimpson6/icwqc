@@ -516,7 +516,7 @@ export default function TeamPage() {
               className={`px-4 py-2 text-sm font-sans font-medium border-b-2 -mb-px transition-colors ${activeTab === tab ? "text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
               style={activeTab === tab && safeTextColor ? { borderColor: primaryColor || safeTextColor, color: safeTextColor } : activeTab === tab ? {} : undefined}
             >
-              {tab === "register" ? "Season Register" : tab === "results" ? "Results" : "Roster & Stats"}
+              {tab === "register" ? "Season Register" : tab === "results" ? "Results" : tab === "roster" ? "Roster & Stats" : "All-Time"}
             </button>
           ))}
         </div>
