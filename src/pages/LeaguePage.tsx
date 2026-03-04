@@ -163,7 +163,9 @@ export default function LeaguePage() {
             {standings.length > 0 && (
               <div className="border border-border rounded overflow-hidden">
                 <div className="bg-table-header px-3 py-2 flex items-center justify-between flex-wrap gap-2">
-                  <h3 className="font-display text-sm font-bold text-table-header-foreground">Standings — 1994-1995</h3>
+                  <h3 className="font-display text-sm font-bold text-table-header-foreground">
+                    Standings{standings.length > 0 && standings[0].SeasonID ? ` — ${(standings[0] as any).SeasonID - 1}-${standings[0].SeasonID}` : ""}
+                  </h3>
                   <div className="flex gap-1">
                     {(["total", "home", "away", ...(hasNeutral ? ["neutral" as const] : [])] as const).map((v) => (
                       <button
