@@ -22,6 +22,7 @@ interface Team {
 
 interface StandingRow {
   FullName: string | null;
+  SeasonID: number | null;
   totalpoints: number | null;
   totalgamesplayed: number | null;
   GoalsFor: number | null;
