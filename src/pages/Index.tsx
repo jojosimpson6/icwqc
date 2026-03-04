@@ -21,22 +21,22 @@ const Index = () => {
               QuidReference Dashboard
             </h2>
             <p className="text-sm text-muted-foreground font-sans mt-1">
-              1995 Season — Quidditch Statistics & Records
+              Quidditch Statistics &amp; Records
             </p>
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Main content */}
+            {/* Main content — News is the focus */}
             <div className="lg:col-span-2 space-y-6">
+              <NewsFeed />
               <LeagueLeaders />
               <EloChart />
-              <HomeStandings />
             </div>
 
             {/* Sidebar */}
             <div className="space-y-6">
               <PlayerSpotlight />
-              <NewsFeed />
+              <HomeStandings />
             </div>
           </div>
         </div>

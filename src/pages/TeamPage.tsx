@@ -103,7 +103,7 @@ export default function TeamPage() {
   const [players, setPlayers] = useState<PlayerInfo[]>([]);
   const [nations, setNations] = useState<Map<number, string>>(new Map());
   const [seasonRegister, setSeasonRegister] = useState<SeasonRegisterRow[]>([]);
-  const [activeTab, setActiveTab] = useState<"register" | "results" | "roster">("register");
+  const [activeTab, setActiveTab] = useState<"register" | "results" | "roster" | "alltime">("register");
   const [rosterSeasonId, setRosterSeasonId] = useState<number | null>(null);
   const [resultsSeasonId, setResultsSeasonId] = useState<number | "all">("all");
   const [matchResults, setMatchResults] = useState<MatchResult[]>([]);
@@ -509,14 +509,14 @@ export default function TeamPage() {
 
         {/* Tabs */}
         <div className="flex gap-2 mb-4 border-b border-border">
-          {(["register", "results", "roster"] as const).map(tab => (
+          {(["register", "results", "roster", "alltime"] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={`px-4 py-2 text-sm font-sans font-medium border-b-2 -mb-px transition-colors ${activeTab === tab ? "text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
               style={activeTab === tab && safeTextColor ? { borderColor: primaryColor || safeTextColor, color: safeTextColor } : activeTab === tab ? {} : undefined}
             >
-              {tab === "register" ? "Season Register" : tab === "results" ? "Results" : "Roster & Stats"}
+              {tab === "register" ? "Season Register" : tab === "results" ? "Results" : tab === "roster" ? "Roster & Stats" : "All-Time"}
             </button>
           ))}
         </div>
@@ -865,6 +865,103 @@ export default function TeamPage() {
             </div>
           </div>
         )}
+
+        {activeTab === "alltime" && (() => {
+          // Aggregate all-time stats across all seasons for this team
+          const allTimeMap = new Map<string, { gp: number; goals: number; gsc: number; saves: number; positions: Set<string> }>();
+          allStats.forEach(s => {
+            if (!s.PlayerName) return;
+            const existing = allTimeMap.get(s.PlayerName) || { gp: 0, goals: 0, gsc: 0, saves: 0, positions: new Set<string>() };
+            existing.gp += s.GamesPlayed || 0;
+            existing.goals += s.Goals || 0;
+            existing.gsc += s.GoldenSnitchCatches || 0;
+            existing.saves += s.KeeperSaves || 0;
+            if (s.Position) existing.positions.add(s.Position);
+            allTimeMap.set(s.PlayerName, existing);
+          });
+
+          const allTimeArr = [...allTimeMap.entries()].map(([name, stats]) => ({
+            name, ...stats, positions: [...stats.positions].join("/")
+          }));
+
+          const topByGP = [...allTimeArr].sort((a, b) => b.gp - a.gp).slice(0, 10);
+          const topByGoals = [...allTimeArr].sort((a, b) => b.goals - a.goals).filter(p => p.goals > 0).slice(0, 10);
+          const topByGSC = [...allTimeArr].sort((a, b) => b.gsc - a.gsc).filter(p => p.gsc > 0).slice(0, 10);
+          const topBySaves = [...allTimeArr].sort((a, b) => b.saves - a.saves).filter(p => p.saves > 0).slice(0, 10);
+
+          // Franchise records from standings
+          const bestPts = allStandings.length > 0 ? [...allStandings].sort((a, b) => (b.totalpoints || 0) - (a.totalpoints || 0))[0] : null;
+          const mostGF = allStandings.length > 0 ? [...allStandings].sort((a, b) => (b.GoalsFor || 0) - (a.GoalsFor || 0))[0] : null;
+          const fewestGA = allStandings.length > 0 ? [...allStandings].sort((a, b) => (a.GoalsAgainst || 0) - (b.GoalsAgainst || 0))[0] : null;
+
+          const LeaderTable = ({ title, data, statKey, statLabel }: { title: string; data: typeof topByGP; statKey: "gp" | "goals" | "gsc" | "saves"; statLabel: string }) => (
+            <div className="border border-border rounded overflow-hidden">
+              <div className="px-3 py-2" style={headerStyle || undefined}>
+                <h3 className={`font-display text-sm font-bold ${headerStyle ? "" : "text-table-header-foreground"}`}
+                  style={!headerStyle ? undefined : { color: headerStyle.color }}>
+                  {title}
+                </h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm font-sans">
+                  <thead>
+                    <tr className="bg-secondary">
+                      <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">#</th>
+                      <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Player</th>
+                      <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pos</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{statLabel}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.map((p, i) => {
+                      const pid = getPlayerId(p.name);
+                      return (
+                        <tr key={p.name} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
+                          <td className="px-3 py-1.5 font-mono text-muted-foreground">{i + 1}</td>
+                          <td className="px-3 py-1.5 font-medium text-accent hover:underline">
+                            {pid ? <Link to={`/player/${pid}`}>{p.name}</Link> : p.name}
+                          </td>
+                          <td className="px-3 py-1.5 text-muted-foreground text-xs">{p.positions}</td>
+                          <td className="px-3 py-1.5 text-right font-mono font-bold">{p[statKey]}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          );
+
+          return (
+            <div className="space-y-6">
+              {/* Franchise Records */}
+              {allStandings.length > 0 && (
+                <div className="border border-border rounded overflow-hidden">
+                  <div className="px-3 py-2" style={headerStyle || undefined}>
+                    <h3 className={`font-display text-sm font-bold ${headerStyle ? "" : "text-table-header-foreground"}`}
+                      style={!headerStyle ? undefined : { color: headerStyle.color }}>
+                      Franchise Records
+                    </h3>
+                  </div>
+                  <div className="bg-card p-3 space-y-2 text-sm font-sans">
+                    {bestPts && <div className="flex justify-between"><span className="text-muted-foreground">Best Season (Pts)</span><span className="font-mono font-bold">{bestPts.totalpoints} ({bestPts.SeasonID ? seasonLabel(bestPts.SeasonID as number) : "—"})</span></div>}
+                    {mostGF && <div className="flex justify-between"><span className="text-muted-foreground">Most Goals For</span><span className="font-mono font-bold">{mostGF.GoalsFor} ({mostGF.SeasonID ? seasonLabel(mostGF.SeasonID as number) : "—"})</span></div>}
+                    {fewestGA && <div className="flex justify-between"><span className="text-muted-foreground">Fewest Goals Against</span><span className="font-mono font-bold">{fewestGA.GoalsAgainst} ({fewestGA.SeasonID ? seasonLabel(fewestGA.SeasonID as number) : "—"})</span></div>}
+                    <div className="flex justify-between"><span className="text-muted-foreground">Seasons Played</span><span className="font-mono font-bold">{allStandings.length}</span></div>
+                    <div className="flex justify-between"><span className="text-muted-foreground">All-Time Record (Pts)</span><span className="font-mono font-bold">{allStandings.reduce((s, r) => s + (r.totalpoints || 0), 0)}</span></div>
+                  </div>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {topByGP.length > 0 && <LeaderTable title="All-Time Appearances" data={topByGP} statKey="gp" statLabel="GP" />}
+                {topByGoals.length > 0 && <LeaderTable title="All-Time Goals" data={topByGoals} statKey="goals" statLabel="Goals" />}
+                {topByGSC.length > 0 && <LeaderTable title="All-Time Snitch Catches" data={topByGSC} statKey="gsc" statLabel="GSC" />}
+                {topBySaves.length > 0 && <LeaderTable title="All-Time Keeper Saves" data={topBySaves} statKey="saves" statLabel="Saves" />}
+              </div>
+            </div>
+          );
+        })()}
       </main>
       <SiteFooter />
     </div>

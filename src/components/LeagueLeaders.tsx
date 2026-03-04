@@ -20,12 +20,20 @@ interface StatRow {
   KeeperSaves: number | null;
   GamesPlayed: number | null;
   Position: string | null;
+  LeagueName: string | null;
+}
+
+interface LeagueOption {
+  LeagueID: number;
+  LeagueName: string;
 }
 
 export function LeagueLeaders() {
-  const [leaders, setLeaders] = useState<StatRow[]>([]);
+  const [allStats, setAllStats] = useState<StatRow[]>([]);
   const [category, setCategory] = useState<StatCategory>("Goals");
   const [playerMap, setPlayerMap] = useState<Record<string, number>>({});
+  const [leagues, setLeagues] = useState<LeagueOption[]>([]);
+  const [selectedLeague, setSelectedLeague] = useState<string>("all");
 
   useEffect(() => {
     const cats: StatCategory[] = ["Goals", "GoldenSnitchCatches", "KeeperSaves", "GamesPlayed"];
@@ -33,29 +41,45 @@ export function LeagueLeaders() {
     setCategory(picked);
 
     Promise.all([
-      supabase.from("stats").select("*").not(picked, "is", null).order(picked, { ascending: false }).limit(10),
+      supabase.from("stats").select("*").not(picked, "is", null).order(picked, { ascending: false }).limit(500),
       supabase.from("players").select("PlayerID, PlayerName"),
-    ]).then(([{ data: statsData }, { data: playersData }]) => {
-      if (statsData) setLeaders(statsData as StatRow[]);
+      supabase.from("leagues").select("LeagueID, LeagueName").order("LeagueTier").order("LeagueName"),
+    ]).then(([{ data: statsData }, { data: playersData }, { data: leagueData }]) => {
+      if (statsData) setAllStats(statsData as StatRow[]);
       if (playersData) {
         const map: Record<string, number> = {};
         playersData.forEach((p) => { if (p.PlayerName) map[p.PlayerName] = p.PlayerID; });
         setPlayerMap(map);
       }
+      if (leagueData) setLeagues(leagueData as LeagueOption[]);
     });
   }, []);
 
-  const { sorted, sortKey, sortDir, requestSort } = useSortableTable(leaders, category, "desc");
+  const filtered = selectedLeague === "all"
+    ? allStats.slice(0, 10)
+    : allStats.filter(s => s.LeagueName === selectedLeague).slice(0, 10);
+
+  const { sorted, sortKey, sortDir, requestSort } = useSortableTable(filtered, category, "desc");
 
   const thClass = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground cursor-pointer hover:text-foreground select-none";
   const sortIndicator = (key: string) => sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
   return (
     <div className="border border-border rounded overflow-hidden">
-      <div className="bg-table-header px-3 py-2">
+      <div className="bg-table-header px-3 py-2 flex items-center justify-between flex-wrap gap-2">
         <h3 className="font-display text-sm font-bold text-table-header-foreground">
           League Leaders — {statLabels[category]}
         </h3>
+        <select
+          value={selectedLeague}
+          onChange={(e) => setSelectedLeague(e.target.value)}
+          className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
+        >
+          <option value="all">All Leagues</option>
+          {leagues.map((l) => (
+            <option key={l.LeagueID} value={l.LeagueName}>{l.LeagueName}</option>
+          ))}
+        </select>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-sm font-sans">
@@ -88,6 +112,9 @@ export function LeagueLeaders() {
                 </tr>
               );
             })}
+            {sorted.length === 0 && (
+              <tr><td colSpan={5} className="px-3 py-4 text-center text-muted-foreground italic">No data available.</td></tr>
+            )}
           </tbody>
         </table>
       </div>
