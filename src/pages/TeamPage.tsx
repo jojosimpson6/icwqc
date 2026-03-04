@@ -509,7 +509,7 @@ export default function TeamPage() {
 
         {/* Tabs */}
         <div className="flex gap-2 mb-4 border-b border-border">
-          {(["register", "results", "roster"] as const).map(tab => (
+          {(["register", "results", "roster", "alltime"] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
