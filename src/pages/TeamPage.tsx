@@ -103,7 +103,7 @@ export default function TeamPage() {
   const [players, setPlayers] = useState<PlayerInfo[]>([]);
   const [nations, setNations] = useState<Map<number, string>>(new Map());
   const [seasonRegister, setSeasonRegister] = useState<SeasonRegisterRow[]>([]);
-  const [activeTab, setActiveTab] = useState<"register" | "results" | "roster">("register");
+  const [activeTab, setActiveTab] = useState<"register" | "results" | "roster" | "alltime">("register");
   const [rosterSeasonId, setRosterSeasonId] = useState<number | null>(null);
   const [resultsSeasonId, setResultsSeasonId] = useState<number | "all">("all");
   const [matchResults, setMatchResults] = useState<MatchResult[]>([]);
