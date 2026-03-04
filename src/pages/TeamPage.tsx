@@ -967,7 +967,3 @@ export default function TeamPage() {
     </div>
   );
 }
-      <SiteFooter />
-    </div>
-  );
-}
