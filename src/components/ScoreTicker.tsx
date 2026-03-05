@@ -19,56 +19,67 @@ export function ScoreTicker() {
 
   useEffect(() => {
     async function fetchLatestScores() {
-      // Get all matchdays to find the most recent date with results
-      const { data: matchdays } = await supabase
-        .from("matchdays")
-        .select("Matchday, MatchdayWeek, SeasonID, LeagueID")
-        .order("Matchday", { ascending: false })
-        .limit(200);
-
-      if (!matchdays || matchdays.length === 0) return;
-
-      // Find the latest date
-      const latestDate = matchdays[0].Matchday;
-
-      // Get all matchdays on that date (could span multiple leagues)
-      const latestMatchdays = matchdays.filter(md => md.Matchday === latestDate);
-
-      // Fetch results for each league/week combo on the latest date
-      const { data: teams } = await supabase.from("teams").select("TeamID, FullName");
-      const { data: leagues } = await supabase.from("leagues").select("LeagueID, LeagueName");
+      // Get reference data
+      const [{ data: teams }, { data: leagues }] = await Promise.all([
+        supabase.from("teams").select("TeamID, FullName"),
+        supabase.from("leagues").select("LeagueID, LeagueName"),
+      ]);
       const teamMap: Record<number, string> = {};
       teams?.forEach(t => { teamMap[t.TeamID] = t.FullName; });
       const leagueMap: Record<number, string> = {};
       leagues?.forEach(l => { leagueMap[l.LeagueID] = l.LeagueName || ""; });
 
-      const allScores: GameScore[] = [];
+      // Get recent matchdays ordered by date descending
+      const { data: matchdays } = await supabase
+        .from("matchdays")
+        .select("Matchday, MatchdayWeek, SeasonID, LeagueID")
+        .order("Matchday", { ascending: false })
+        .limit(300);
 
-      for (const md of latestMatchdays) {
-        const { data: results } = await supabase
-          .from("results")
-          .select("MatchID, HomeTeamID, AwayTeamID, HomeTeamScore, AwayTeamScore, SnitchCaughtTime, LeagueID")
-          .eq("LeagueID", md.LeagueID!)
-          .eq("WeekID", md.MatchdayWeek!)
-          .eq("SeasonID", md.SeasonID!);
+      if (!matchdays || matchdays.length === 0) return;
 
-        if (results) {
-          results.forEach((r: any) => {
-            allScores.push({
-              MatchID: r.MatchID,
-              home_team: teamMap[r.HomeTeamID] || "Unknown",
-              away_team: teamMap[r.AwayTeamID] || "Unknown",
-              HomeTeamScore: r.HomeTeamScore,
-              AwayTeamScore: r.AwayTeamScore,
-              SnitchCaughtTime: r.SnitchCaughtTime,
-              LeagueID: r.LeagueID,
-              leagueName: leagueMap[r.LeagueID] || "",
+      // Group matchdays by date, then try each date until we find one with results
+      const dateSet = [...new Set(matchdays.map(md => md.Matchday))];
+
+      for (const date of dateSet) {
+        const mdsForDate = matchdays.filter(md => md.Matchday === date);
+        const allScores: GameScore[] = [];
+
+        // Query results for all league/week/season combos on this date in parallel
+        const resultPromises = mdsForDate.map(md =>
+          supabase
+            .from("results")
+            .select("MatchID, HomeTeamID, AwayTeamID, HomeTeamScore, AwayTeamScore, SnitchCaughtTime, LeagueID")
+            .eq("LeagueID", md.LeagueID!)
+            .eq("WeekID", md.MatchdayWeek!)
+            .eq("SeasonID", md.SeasonID!)
+        );
+
+        const resultSets = await Promise.all(resultPromises);
+
+        for (const { data: results } of resultSets) {
+          if (results) {
+            results.forEach((r: any) => {
+              allScores.push({
+                MatchID: r.MatchID,
+                home_team: teamMap[r.HomeTeamID] || "Unknown",
+                away_team: teamMap[r.AwayTeamID] || "Unknown",
+                HomeTeamScore: r.HomeTeamScore,
+                AwayTeamScore: r.AwayTeamScore,
+                SnitchCaughtTime: r.SnitchCaughtTime,
+                LeagueID: r.LeagueID,
+                leagueName: leagueMap[r.LeagueID] || "",
+              });
             });
-          });
+          }
         }
-      }
 
-      setScores(allScores);
+        if (allScores.length > 0) {
+          setScores(allScores);
+          return; // Found a date with results, stop
+        }
+        // Otherwise try the next earlier date
+      }
     }
 
     fetchLatestScores();
@@ -80,7 +91,7 @@ export function ScoreTicker() {
     if (!el || scores.length <= 3) return;
 
     let animationId: number;
-    let scrollSpeed = 0.5;
+    const scrollSpeed = 0.5;
 
     const scroll = () => {
       if (el.scrollLeft >= el.scrollWidth - el.clientWidth) {
@@ -91,7 +102,6 @@ export function ScoreTicker() {
       animationId = requestAnimationFrame(scroll);
     };
 
-    // Pause on hover
     const pause = () => cancelAnimationFrame(animationId);
     const resume = () => { animationId = requestAnimationFrame(scroll); };
 
