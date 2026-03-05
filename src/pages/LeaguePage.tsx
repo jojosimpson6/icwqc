@@ -157,6 +157,9 @@ export default function LeaguePage() {
         <div className="mb-6 border-b-2 border-primary pb-2">
           <p className="text-xs text-muted-foreground font-sans uppercase tracking-wide">{getLeagueTierLabel(league.LeagueTier)}</p>
           <h1 className="font-display text-3xl font-bold text-foreground">{league.LeagueName}</h1>
+          <Link to={`/league/${league.LeagueID}/history`} className="text-sm text-accent hover:underline font-sans mt-1 inline-block">
+            Season-by-Season History →
+          </Link>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

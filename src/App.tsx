@@ -16,6 +16,7 @@ import MatchPage from "./pages/MatchPage";
 import NationPage from "./pages/NationPage";
 import NationsIndex from "./pages/NationsIndex";
 import NewsArticle from "./pages/NewsArticle";
+import LeagueHistory from "./pages/LeagueHistory";
 
 const queryClient = new QueryClient();
 
@@ -30,6 +31,7 @@ const App = () => (
           <Route path="/player/:id" element={<PlayerProfile />} />
           <Route path="/players" element={<PlayersIndex />} />
           <Route path="/league/:id" element={<LeaguePage />} />
+          <Route path="/league/:id/history" element={<LeagueHistory />} />
           <Route path="/leagues" element={<LeaguesIndex />} />
           <Route path="/team/:name" element={<TeamPage />} />
           <Route path="/match/:id" element={<MatchPage />} />
