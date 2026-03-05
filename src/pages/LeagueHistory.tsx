@@ -293,25 +293,39 @@ export default function LeagueHistory() {
               {seasonAwardsMap && seasonAwardsMap.size > 0 && (
                 <div className="p-3 border-t border-border">
                   <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Awards</h4>
-                  <div className="space-y-2">
-                    {[...seasonAwardsMap.entries()].map(([awardName, entries]) => (
-                      <div key={awardName}>
-                        <p className="text-xs text-muted-foreground font-semibold uppercase tracking-wide mb-0.5">{awardName}</p>
-                        <div className="flex flex-wrap gap-x-4 gap-y-0.5">
-                          {entries.sort((a, b) => a.placement - b.placement).map((entry, i) => (
-                            <span key={i} className="text-sm font-sans">
-                              <span className="text-base mr-1">
-                                {entry.placement === 1 ? "🥇" : entry.placement === 2 ? "🥈" : entry.placement === 3 ? "🥉" : ""}
-                              </span>
-                              <span className="text-muted-foreground text-xs mr-1">{ordinal(entry.placement)}</span>
-                              <Link to={`/player/${entry.playerid}`} className="text-accent hover:underline font-medium">
-                                {playerMap.get(entry.playerid) || `#${entry.playerid}`}
-                              </Link>
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm font-sans">
+                      <thead>
+                        <tr className="bg-secondary">
+                          <th className="px-2 py-1 text-left text-xs font-semibold text-muted-foreground">Award</th>
+                          <th className="px-2 py-1 text-left text-xs font-semibold text-muted-foreground">1st</th>
+                          <th className="px-2 py-1 text-left text-xs font-semibold text-muted-foreground">2nd</th>
+                          <th className="px-2 py-1 text-left text-xs font-semibold text-muted-foreground">3rd</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {[...seasonAwardsMap.entries()].map(([awardName, entries], i) => {
+                          const sorted = entries.sort((a, b) => a.placement - b.placement);
+                          const first = sorted.find(e => e.placement === 1);
+                          const second = sorted.find(e => e.placement === 2);
+                          const third = sorted.find(e => e.placement === 3);
+                          return (
+                            <tr key={awardName} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
+                              <td className="px-2 py-1.5 font-medium text-foreground">{awardName}</td>
+                              <td className="px-2 py-1.5 bg-highlight/20 font-semibold">
+                                {first ? <Link to={`/player/${first.playerid}`} className="text-accent hover:underline">{playerMap.get(first.playerid) || `#${first.playerid}`}</Link> : "—"}
+                              </td>
+                              <td className="px-2 py-1.5 bg-secondary/60">
+                                {second ? <Link to={`/player/${second.playerid}`} className="text-accent hover:underline">{playerMap.get(second.playerid) || `#${second.playerid}`}</Link> : "—"}
+                              </td>
+                              <td className="px-2 py-1.5 bg-muted/40">
+                                {third ? <Link to={`/player/${third.playerid}`} className="text-accent hover:underline">{playerMap.get(third.playerid) || `#${third.playerid}`}</Link> : "—"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
