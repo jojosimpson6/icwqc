@@ -256,7 +256,7 @@ export default function NationPage() {
                 activeTab === tab ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              {tab === "roster" ? "Current Roster" : tab === "records" ? "All-Time Records" : "International Results"}
+              {tab === "roster" ? "Current Roster" : tab === "records" ? "Players Abroad" : "All-Time Records"}
             </button>
           ))}
         </div>

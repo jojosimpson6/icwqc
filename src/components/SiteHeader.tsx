@@ -41,6 +41,7 @@ export function SiteHeader() {
          <div className="hidden md:flex items-center gap-4 text-sm font-sans">
             <Link to="/players" className="opacity-80 hover:opacity-100 transition-opacity">Players</Link>
             <Link to="/leagues" className="opacity-80 hover:opacity-100 transition-opacity">Leagues</Link>
+            <Link to="/leaders" className="opacity-80 hover:opacity-100 transition-opacity">Leaders</Link>
             <Link to="/nations" className="opacity-80 hover:opacity-100 transition-opacity">Nations</Link>
             <GlobalSearch />
           </div>
