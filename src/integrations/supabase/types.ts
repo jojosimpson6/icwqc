@@ -413,6 +413,16 @@ export type Database = {
         }
         Relationships: []
       }
+      player_season_minutes: {
+        Row: {
+          FullName: string | null
+          LeagueName: string | null
+          MinutesPlayed: number | null
+          PlayerName: string | null
+          SeasonID: number | null
+        }
+        Relationships: []
+      }
       schedule: {
         Row: {
           away_team: string | null
