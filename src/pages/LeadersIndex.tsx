@@ -161,8 +161,8 @@ export default function LeadersIndex() {
         supabase.from("players").select("PlayerID, PlayerName"),
         supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier"),
       ]);
-      setRawStats([...(s1.data || []), ...(s2.data || [])] as RawStat[]);
-      setRawMin([...(m1.data || []), ...(m2.data || [])] as MinRow[]);
+      setRawStats([...(s1.data || []), ...(s2.data || [])] as unknown as RawStat[]);
+      setRawMin([...(m1.data || []), ...(m2.data || [])] as unknown as MinRow[]);
       const pm = new Map<string, number>();
       (pl.data || []).forEach((p: any) => { if (p.PlayerName) pm.set(p.PlayerName, p.PlayerID); });
       setPlayerMap(pm);
