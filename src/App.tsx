@@ -17,6 +17,7 @@ import NationPage from "./pages/NationPage";
 import NationsIndex from "./pages/NationsIndex";
 import NewsArticle from "./pages/NewsArticle";
 import LeagueHistory from "./pages/LeagueHistory";
+import LeadersIndex from "./pages/LeadersIndex";
 
 const queryClient = new QueryClient();
 
@@ -38,6 +39,7 @@ const App = () => (
           <Route path="/nation/:id" element={<NationPage />} />
           <Route path="/nations" element={<NationsIndex />} />
           <Route path="/news/:id" element={<NewsArticle />} />
+          <Route path="/leaders" element={<LeadersIndex />} />
           <Route path="/admin/login" element={<AdminLogin />} />
           <Route path="/admin" element={<AdminPanel />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

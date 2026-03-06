@@ -238,31 +238,44 @@ export default function LeaguePage() {
                       <div key={seasonId} className="px-3 py-3">
                         <h4 className="font-display text-sm font-bold text-foreground mb-2">{seasonLabel(seasonId)}</h4>
                         <div className="space-y-2">
-                          {individualAwards.map(awardName => {
-                            const entries = seasonAwards.get(awardName)!;
-                            return (
-                              <div key={awardName}>
-                                <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold mb-0.5">{awardName}</p>
-                                <div className="flex flex-wrap gap-x-4 gap-y-0.5">
-                                  {entries.map((entry, i) => {
-                                    const pName = playerMap.get(entry.playerid) || `Player #${entry.playerid}`;
-                                    return (
-                                      <span key={i} className="text-sm font-sans">
-                                        <span className="text-base mr-1">
-                                          {entry.placement === 1 ? "🥇" : entry.placement === 2 ? "🥈" : entry.placement === 3 ? "🥉" : ""}
-                                        </span>
-                                        <span className="text-muted-foreground text-xs mr-1">{ordinal(entry.placement)}</span>
+                          {individualAwards.length > 0 && (
+                            <table className="w-full text-sm font-sans">
+                              <thead>
+                                <tr className="bg-secondary">
+                                  <th className="px-2 py-1 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Award</th>
+                                  <th className="px-2 py-1 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">1st</th>
+                                  <th className="px-2 py-1 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">2nd</th>
+                                  <th className="px-2 py-1 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">3rd</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {individualAwards.map((awardName, ai) => {
+                                  const entries = seasonAwards.get(awardName)!;
+                                  const byP = (p: number) => entries.find(e => e.placement === p);
+                                  const first = byP(1);
+                                  const second = byP(2);
+                                  const third = byP(3);
+                                  const cell = (entry: AwardRow | undefined, bg: string) => (
+                                    <td className={`px-2 py-1.5 ${bg}`}>
+                                      {entry ? (
                                         <Link to={`/player/${entry.playerid}`} className="text-accent hover:underline font-medium">
-                                          {pName}
+                                          {playerMap.get(entry.playerid) || `Player #${entry.playerid}`}
                                         </Link>
-                                      </span>
-                                    );
-
-                                  })}
-                                </div>
-                              </div>
-                            );
-                          })}
+                                      ) : "—"}
+                                    </td>
+                                  );
+                                  return (
+                                    <tr key={awardName} className={`border-t border-border ${ai % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
+                                      <td className="px-2 py-1.5 font-medium">{awardName}</td>
+                                      {cell(first, "bg-highlight/20")}
+                                      {cell(second, "bg-secondary/60")}
+                                      {cell(third, "bg-muted/40")}
+                                    </tr>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          )}
                           {teamOfYear && teamOfYear.length > 0 && (
                             <div>
                               <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold mb-1">Team of the Year</p>
