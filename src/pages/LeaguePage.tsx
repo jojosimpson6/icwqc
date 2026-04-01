@@ -82,15 +82,19 @@ export default function LeaguePage() {
     Promise.all([
       supabase.from("leagues").select("*").eq("LeagueID", lid).single(),
       supabase.from("teams").select("*").eq("LeagueID", lid).order("FullName"),
-      supabase.from("standings").select("*").order("totalpoints", { ascending: false }),
+      fetchAllRows("standings", { select: "*", order: { column: "totalpoints", ascending: false } }),
       supabase.from("awards").select("*").eq("leagueid", lid).order("seasonid", { ascending: false }),
       supabase.from("players").select("PlayerID, PlayerName, Position"),
-    ]).then(([{ data: leagueData }, { data: teamData }, { data: standingsData }, { data: awardsData }, { data: playerData }]) => {
+    ]).then(([{ data: leagueData }, { data: teamData }, standingsData, { data: awardsData }, { data: playerData }]) => {
       if (leagueData) setLeague(leagueData);
       if (teamData) setTeams(teamData);
       if (standingsData && teamData) {
-        const teamNames = new Set(teamData.map((t) => t.FullName));
-        setStandings((standingsData as StandingRow[]).filter((s) => teamNames.has(s.FullName || "")));
+        const teamNames = new Set(teamData.map((t: any) => t.FullName));
+        const filtered = (standingsData as StandingRow[]).filter((s) => teamNames.has(s.FullName || ""));
+        setStandings(filtered);
+        const seasons = [...new Set(filtered.map(s => s.SeasonID).filter(Boolean))].sort((a, b) => (b || 0) - (a || 0)) as number[];
+        setAvailableSeasons(seasons);
+        if (seasons.length > 0) setSelectedSeason(seasons[0]);
       }
       if (awardsData) setAwards(awardsData as AwardRow[]);
       if (playerData) {
