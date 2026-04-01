@@ -304,6 +304,7 @@ export default function PlayerProfile() {
             setMinutesMap(minsMap);
             setShotsFacedMap(sfMap);
             setMatchLog(logEntries);
+            setFirstMatchDateMap(fmdMap);
           });
         }
 
