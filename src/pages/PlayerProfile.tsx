@@ -209,9 +209,14 @@ export default function PlayerProfile() {
             });
 
             const mdMap = new Map<string, string>();
+            const fmdMap = new Map<number, string>();
             (mdData || []).forEach((md: any) => {
               if (md.SeasonID && md.LeagueID && md.MatchdayWeek != null && md.Matchday) {
                 mdMap.set(`${md.SeasonID}|${md.LeagueID}|${md.MatchdayWeek}`, md.Matchday);
+              }
+              if (md.SeasonID && md.Matchday) {
+                const existing = fmdMap.get(md.SeasonID);
+                if (!existing || md.Matchday < existing) fmdMap.set(md.SeasonID, md.Matchday);
               }
             });
 
