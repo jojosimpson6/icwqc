@@ -31,10 +31,10 @@ export function ScoreTicker() {
       leagues?.forEach(l => { leagueMap[l.LeagueID] = l.LeagueName || ""; });
 
       // Get recent matchdays ordered by date descending
-      const { data: matchdays } = await supabase
-        .from("matchdays")
-        .select("Matchday, MatchdayWeek, SeasonID, LeagueID")
-        .order("Matchday", { ascending: false });
+      const matchdays = await fetchAllRows("matchdays", {
+        select: "Matchday, MatchdayWeek, SeasonID, LeagueID",
+        order: { column: "Matchday", ascending: false },
+      });
 
       if (!matchdays || matchdays.length === 0) return;
 
