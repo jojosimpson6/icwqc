@@ -177,9 +177,21 @@ export default function LeaguePage() {
               <div className="border border-border rounded overflow-hidden">
                 <div className="bg-table-header px-3 py-2 flex items-center justify-between flex-wrap gap-2">
                   <h3 className="font-display text-sm font-bold text-table-header-foreground">
-                    Standings{standings.length > 0 && standings[0].SeasonID ? ` — ${standings[0].SeasonID - 1}-${standings[0].SeasonID}` : ""}
+                    Standings{selectedSeason ? ` — ${selectedSeason - 1}-${selectedSeason}` : ""}
                   </h3>
-                  <div className="flex gap-1">
+                  <div className="flex items-center gap-2">
+                    {availableSeasons.length > 1 && (
+                      <select
+                        value={selectedSeason ?? ""}
+                        onChange={(e) => setSelectedSeason(parseInt(e.target.value))}
+                        className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
+                      >
+                        {availableSeasons.map(s => (
+                          <option key={s} value={s}>{`${s - 1}–${String(s).slice(-2)}`}</option>
+                        ))}
+                      </select>
+                    )}
+                    <div className="flex gap-1">
                     {(["total", "home", "away", ...(hasNeutral ? ["neutral" as const] : [])] as const).map((v) => (
                       <button
                         key={v}
