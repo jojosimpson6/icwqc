@@ -158,14 +158,20 @@ export default function TeamPage() {
 
       const mdm = new Map<number, string>();
       const mdComposite = new Map<string, string>();
+      const firstMatchDates = new Map<number, string>();
       (mdData || []).forEach((md: any) => {
         if (md.MatchdayID && md.Matchday) mdm.set(md.MatchdayID, md.Matchday);
         if (md.SeasonID && md.LeagueID && md.MatchdayWeek != null && md.Matchday) {
           mdComposite.set(`${md.SeasonID}|${md.LeagueID}|${md.MatchdayWeek}`, md.Matchday);
         }
+        if (md.SeasonID && md.Matchday) {
+          const existing = firstMatchDates.get(md.SeasonID);
+          if (!existing || md.Matchday < existing) firstMatchDates.set(md.SeasonID, md.Matchday);
+        }
       });
       setMatchDayMap(mdm);
       setMatchDayCompositeMap(mdComposite);
+      setFirstMatchDateMap(firstMatchDates);
 
       const nm = new Map<number, string>();
       // Data is ordered by ValidToDt desc, so first entry per NationID is the most current name
