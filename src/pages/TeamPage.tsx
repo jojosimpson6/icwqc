@@ -191,7 +191,7 @@ export default function TeamPage() {
         setAllStandings(standData as StandingRow[]);
         setCurrentStanding((standData as StandingRow[])[0]);
       }
-      if (playerData) setPlayers(playerData as PlayerInfo[]);
+      if (playerData) setPlayers(playerData);
 
       if (standData && standData.length > 0) {
         buildSeasonRegister(teamName, standData as StandingRow[], statsData as StatLine[]);
