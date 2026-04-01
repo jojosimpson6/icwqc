@@ -90,10 +90,14 @@ function seasonLabel(id: number | null): string {
   return `${id - 1}–${String(id).slice(-2)}`;
 }
 
-function ageAtSeason(dob: string | null, seasonId: number | null): string {
-  if (!dob || !seasonId) return "—";
+function ageAtSeasonFromDate(dob: string | null, firstMatchDate: string | null): string {
+  if (!dob || !firstMatchDate) return "—";
   const birth = new Date(dob);
-  const age = seasonId - birth.getFullYear();
+  const [fy, fm, fd] = firstMatchDate.split("-").map(Number);
+  const refDate = new Date(fy, fm - 1, fd);
+  let age = refDate.getFullYear() - birth.getFullYear();
+  const m = refDate.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && refDate.getDate() < birth.getDate())) age--;
   return String(age);
 }
 
