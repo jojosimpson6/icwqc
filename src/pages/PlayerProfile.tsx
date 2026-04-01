@@ -648,7 +648,7 @@ export default function PlayerProfile() {
                     return (
                       <tr key={i} className={rowClass}>
                         <td className={`${tdClass} font-mono`}>{seasonLabel(s.SeasonID)}</td>
-                        <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{ageAtSeason(player.DOB, s.SeasonID)}</td>
+                        <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{ageAtSeasonFromDate(player.DOB, s.SeasonID ? firstMatchDateMap.get(s.SeasonID) || null : null)}</td>
                         <td className={`${tdClass} font-mono text-xs`} title={s.LeagueName || ""}>{abbrevLeague(s.LeagueName)}</td>
                         <td className={`${tdClass}`}>
                           {s.FullName ? (
