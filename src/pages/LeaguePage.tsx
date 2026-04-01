@@ -110,8 +110,10 @@ export default function LeaguePage() {
     });
   }, [id]);
 
+  const seasonStandings = standings.filter(s => s.SeasonID === selectedSeason);
+
   const getViewData = () => {
-    return standings.map((s) => {
+    return seasonStandings.map((s) => {
       switch (view) {
         case "home":
           return { ...s, _gp: s.homegamesplayed, _pts: s.homepoints, _gf: s.homegoalsfor, _ga: s.homegoalsagainst, _gsc: s.homegsc };
