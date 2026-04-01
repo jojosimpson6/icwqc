@@ -41,7 +41,7 @@ export function LeagueLeaders() {
     setCategory(picked);
 
     Promise.all([
-      supabase.from("stats").select("*").not(picked, "is", null).order(picked, { ascending: false }).limit(500),
+      supabase.from("stats").select("*").not(picked, "is", null).order(picked, { ascending: false }),
       supabase.from("players").select("PlayerID, PlayerName"),
       supabase.from("leagues").select("LeagueID, LeagueName").order("LeagueTier").order("LeagueName"),
     ]).then(([{ data: statsData }, { data: playersData }, { data: leagueData }]) => {

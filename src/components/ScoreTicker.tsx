@@ -33,8 +33,7 @@ export function ScoreTicker() {
       const { data: matchdays } = await supabase
         .from("matchdays")
         .select("Matchday, MatchdayWeek, SeasonID, LeagueID")
-        .order("Matchday", { ascending: false })
-        .limit(300);
+        .order("Matchday", { ascending: false });
 
       if (!matchdays || matchdays.length === 0) return;
 

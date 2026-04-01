@@ -146,7 +146,6 @@ export default function TeamPage() {
           .select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SnitchCaughtTime,LeagueID,SeasonID,WeekID,IsNeutralSite")
           .or(`HomeTeamID.eq.${teamData.TeamID},AwayTeamID.eq.${teamData.TeamID}`)
           .order("MatchID", { ascending: false })
-          .limit(2000)
           .then(({ data: rData }) => {
             if (rData) setMatchResults(rData as MatchResult[]);
           });
