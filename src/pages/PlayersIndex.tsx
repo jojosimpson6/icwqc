@@ -28,11 +28,11 @@ export default function PlayersIndex() {
 
   useEffect(() => {
     Promise.all([
-      supabase.from("players").select("PlayerID, PlayerName, Position, Height, DOB, NationalityID").order("PlayerName"),
+      fetchAllRows<Player>("players", { select: "PlayerID, PlayerName, Position, Height, DOB, NationalityID", order: { column: "PlayerName" } }),
       supabase.from("nations").select("NationID, Nation, ValidToDt").order("ValidToDt", { ascending: false }),
-      supabase.from("stats").select("PlayerName, FullName, SeasonID").order("SeasonID", { ascending: false }),
-    ]).then(([{ data: playerData }, { data: nationData }, { data: statsData }]) => {
-      if (playerData) setPlayers(playerData as Player[]);
+      fetchAllRows("stats", { select: "PlayerName, FullName, SeasonID", order: { column: "SeasonID", ascending: false } }),
+    ]).then(([playerData, { data: nationData }, statsData]) => {
+      setPlayers(playerData);
 
       const nm = new Map<number, { name: string; id: number }>();
       (nationData || []).forEach((n: any) => {
