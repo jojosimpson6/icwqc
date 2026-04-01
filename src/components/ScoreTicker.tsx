@@ -36,7 +36,7 @@ export function ScoreTicker() {
         order: { column: "Matchday", ascending: false },
       });
 
-      if (!matchdays || matchdays.length === 0) return;
+      if (matchdays.length === 0) return;
 
       // Group matchdays by date, then try each date until we find one with results
       const dateSet = [...new Set(matchdays.map(md => md.Matchday))];
