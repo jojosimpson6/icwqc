@@ -4,7 +4,8 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { useSortableTable } from "@/hooks/useSortableTable";
-import { getContrastText, formatHeight, calculateAge, getNationFlag, isLightColor } from "@/lib/helpers";
+import { getContrastText, formatHeight, getNationFlag, isLightColor } from "@/lib/helpers";
+import { fetchAllRows } from "@/lib/fetchAll";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 interface Team {
@@ -36,6 +37,7 @@ interface SeasonRegisterRow {
   SeasonID: number;
   LeagueName: string;
   LeagueTier: number;
+  LeagueID: number;
   position: number | null;
   isChampion: boolean;
   totalgamesplayed: number | null;
@@ -110,6 +112,7 @@ export default function TeamPage() {
   const [teamMapState, setTeamMapState] = useState<Map<number, string>>(new Map());
   const [matchDayMap, setMatchDayMap] = useState<Map<number, string>>(new Map());
   const [matchDayCompositeMap, setMatchDayCompositeMap] = useState<Map<string, string>>(new Map());
+  const [firstMatchDateMap, setFirstMatchDateMap] = useState<Map<number, string>>(new Map());
   const [rivalTeamName, setRivalTeamName] = useState<string | null>(null);
   const [resultsOpen, setResultsOpen] = useState(true);
   const [h2hOpen, setH2hOpen] = useState(true);
@@ -125,13 +128,11 @@ export default function TeamPage() {
       supabase.from("teams").select("*").eq("FullName", teamName).single(),
       supabase.from("stats").select("*").eq("FullName", teamName),
       supabase.from("standings").select("*").eq("FullName", teamName).order("SeasonID", { ascending: false }),
-      supabase.from("players").select("PlayerID, PlayerName, DOB, NationalityID, Height, Weight, Handedness"),
-      supabase.from("results").select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SnitchCaughtTime,LeagueID,SeasonID,WeekID,IsNeutralSite")
-        .or(`HomeTeamID.eq.0,AwayTeamID.eq.0`),
+      fetchAllRows("players", { select: "PlayerID, PlayerName, DOB, NationalityID, Height, Weight, Handedness" }),
       supabase.from("teams").select("TeamID, FullName"),
-      supabase.from("matchdays").select("MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek"),
+      fetchAllRows("matchdays", { select: "MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek" }),
       supabase.from("nations").select("NationID, Nation, ValidToDt").order("ValidToDt", { ascending: false }),
-    ]).then(([{ data: teamData }, { data: statsData }, { data: standData }, { data: playerData }, , { data: allTeamsData }, { data: mdData }, { data: nationData }]) => {
+    ]).then(([{ data: teamData }, { data: statsData }, { data: standData }, playerData, { data: allTeamsData }, mdData, { data: nationData }]) => {
       if (teamData) {
         setTeam(teamData);
         supabase.from("leagues").select("LeagueName").eq("LeagueID", teamData.LeagueID).single().then(({ data: ld }) => {
@@ -157,14 +158,20 @@ export default function TeamPage() {
 
       const mdm = new Map<number, string>();
       const mdComposite = new Map<string, string>();
+      const firstMatchDates = new Map<number, string>();
       (mdData || []).forEach((md: any) => {
         if (md.MatchdayID && md.Matchday) mdm.set(md.MatchdayID, md.Matchday);
         if (md.SeasonID && md.LeagueID && md.MatchdayWeek != null && md.Matchday) {
           mdComposite.set(`${md.SeasonID}|${md.LeagueID}|${md.MatchdayWeek}`, md.Matchday);
         }
+        if (md.SeasonID && md.Matchday) {
+          const existing = firstMatchDates.get(md.SeasonID);
+          if (!existing || md.Matchday < existing) firstMatchDates.set(md.SeasonID, md.Matchday);
+        }
       });
       setMatchDayMap(mdm);
       setMatchDayCompositeMap(mdComposite);
+      setFirstMatchDateMap(firstMatchDates);
 
       const nm = new Map<number, string>();
       // Data is ordered by ValidToDt desc, so first entry per NationID is the most current name
@@ -184,7 +191,7 @@ export default function TeamPage() {
         setAllStandings(standData as StandingRow[]);
         setCurrentStanding((standData as StandingRow[])[0]);
       }
-      if (playerData) setPlayers(playerData as PlayerInfo[]);
+      if (playerData) setPlayers(playerData);
 
       if (standData && standData.length > 0) {
         buildSeasonRegister(teamName, standData as StandingRow[], statsData as StatLine[]);
@@ -248,6 +255,7 @@ export default function TeamPage() {
         SeasonID: standing.SeasonID,
         LeagueName: leagueN,
         LeagueTier: tier,
+        LeagueID: leagueId || 0,
         position,
         isChampion,
         totalgamesplayed: standing.totalgamesplayed,
@@ -344,8 +352,9 @@ export default function TeamPage() {
   };
   const resultSortIndicator = (key: string) => resultSortKey === key ? (resultSortDir === "asc" ? " ↑" : " ↓") : "";
 
-  const domesticRegister = seasonRegister.filter(r => r.LeagueTier !== 0);
-  const cupRegister = seasonRegister.filter(r => r.LeagueTier === 0);
+  const domesticRegister = seasonRegister.filter(r => r.LeagueID >= 1 && r.LeagueID <= 14);
+  const cupRegister = seasonRegister.filter(r => r.LeagueID >= 15 && r.LeagueID <= 18);
+  const championsLeagueRegister = seasonRegister.filter(r => r.LeagueID > 18);
 
   // Team color styling with contrast-aware text
   const primaryColor = team?.PrimaryColor || null;
@@ -523,6 +532,7 @@ export default function TeamPage() {
           <div className="space-y-6">
             {domesticRegister.length > 0 && <RegisterTable rows={domesticRegister} title="Domestic League Register" />}
             {cupRegister.length > 0 && <RegisterTable rows={cupRegister} title="Cup Competition Register" />}
+            {championsLeagueRegister.length > 0 && <RegisterTable rows={championsLeagueRegister} title="Champions League Register" />}
             {seasonRegister.length === 0 && <p className="text-muted-foreground font-sans text-sm">No season data available.</p>}
           </div>
         )}
@@ -769,7 +779,18 @@ export default function TeamPage() {
                               {pid ? <Link to={`/player/${pid}`}>{p.PlayerName}</Link> : p.PlayerName}
                             </td>
                             <td className="px-3 py-1.5 text-muted-foreground text-xs">{posDisplay}</td>
-                            <td className="px-3 py-1.5 text-right font-mono text-xs">{pInfo?.DOB ? calculateAge(pInfo.DOB) : "—"}</td>
+                            <td className="px-3 py-1.5 text-right font-mono text-xs">{(() => {
+                              if (!pInfo?.DOB || !rosterSeasonId) return "—";
+                              const firstDate = firstMatchDateMap.get(rosterSeasonId);
+                              if (!firstDate) return "—";
+                              const [fy, fm, fd] = firstDate.split("-").map(Number);
+                              const refDate = new Date(fy, fm - 1, fd);
+                              const birth = new Date(pInfo.DOB);
+                              let age = refDate.getFullYear() - birth.getFullYear();
+                              const m = refDate.getMonth() - birth.getMonth();
+                              if (m < 0 || (m === 0 && refDate.getDate() < birth.getDate())) age--;
+                              return age;
+                            })()}</td>
                             <td className="px-3 py-1.5 text-xs">
                               {pInfo?.NationalityID ? (
                                 <Link to={`/nation/${pInfo.NationalityID}`} className="text-accent hover:underline">

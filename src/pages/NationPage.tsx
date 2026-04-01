@@ -69,6 +69,7 @@ export default function NationPage() {
   const [intlResults, setIntlResults] = useState<IntlResult[]>([]);
   const [teamMap, setTeamMap] = useState<Map<number, string>>(new Map());
   const [leagueMap, setLeagueMap] = useState<Map<number, string>>(new Map());
+  const [nationalTeam, setNationalTeam] = useState<{ TeamID: number; FullName: string; PrimaryColor: string | null; logo_url: string | null } | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -77,7 +78,7 @@ export default function NationPage() {
     Promise.all([
       supabase.from("nations").select("*").eq("NationID", nid).order("ValidToDt", { ascending: false }).limit(1),
       supabase.from("players").select("PlayerID, PlayerName, Position, DOB, Height, headshot_url").eq("NationalityID", nid).order("PlayerName"),
-      supabase.from("teams").select("TeamID, FullName"),
+      supabase.from("teams").select("TeamID, FullName, PrimaryColor, logo_url, nationid, LeagueID"),
       supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier"),
     ]).then(([{ data: nationData }, { data: playerData }, { data: teamsData }, { data: leaguesData }]) => {
       if (nationData?.[0]) setNation(nationData[0] as Nation);
@@ -94,13 +95,35 @@ export default function NationPage() {
       // Get international league IDs (tier 0)
       const intlLeagueIds = (leaguesData || []).filter((l: any) => l.LeagueTier === 0).map((l: any) => l.LeagueID);
 
+      // Find the national team (team with matching nationid in an international league)
+      const natTeam = (teamsData || []).find((t: any) => t.nationid === nid && intlLeagueIds.includes(t.LeagueID));
+      if (natTeam) {
+        setNationalTeam({ TeamID: natTeam.TeamID, FullName: natTeam.FullName, PrimaryColor: natTeam.PrimaryColor, logo_url: natTeam.logo_url });
+
+        // Fetch intl results for this national team specifically
+        supabase.from("results")
+          .select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,SnitchCaughtTime")
+          .or(`HomeTeamID.eq.${natTeam.TeamID},AwayTeamID.eq.${natTeam.TeamID}`)
+          .order("MatchID", { ascending: false })
+          .then(({ data: rData }) => {
+            if (rData) setIntlResults(rData as IntlResult[]);
+          });
+      } else if (intlLeagueIds.length > 0) {
+        // Fallback: show all intl results
+        supabase.from("results")
+          .select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,SnitchCaughtTime")
+          .in("LeagueID", intlLeagueIds)
+          .order("MatchID", { ascending: false })
+          .then(({ data: rData }) => {
+            if (rData) setIntlResults(rData as IntlResult[]);
+          });
+      }
+
       if (playerData && playerData.length > 0) {
         const playerNames = playerData.map((p: any) => p.PlayerName).filter(Boolean);
-        // Fetch stats for all players from this nation
         supabase.from("stats").select("*").in("PlayerName", playerNames).then(({ data: statsData }) => {
           if (!statsData) return;
 
-          // Build career records
           const recordMap = new Map<number, CareerRecord>();
           (playerData as PlayerRow[]).forEach(p => {
             recordMap.set(p.PlayerID, {
@@ -139,30 +162,6 @@ export default function NationPage() {
 
           setCareerRecords([...recordMap.values()]);
         });
-
-        // Fetch international results involving players from this nation
-        if (intlLeagueIds.length > 0) {
-          // Get all player IDs
-          const pids = playerData.map((p: any) => p.PlayerID);
-          // Build OR filter for all player position columns
-          const orFilters = pids.flatMap((pid: number) => [
-            `HomeChaser1ID.eq.${pid}`, `HomeChaser2ID.eq.${pid}`, `HomeChaser3ID.eq.${pid}`,
-            `AwayChaser1ID.eq.${pid}`, `AwayChaser2ID.eq.${pid}`, `AwayChaser3ID.eq.${pid}`,
-            `HomeKeeperID.eq.${pid}`, `AwayKeeperID.eq.${pid}`,
-            `HomeSeekerID.eq.${pid}`, `AwaySeekerID.eq.${pid}`,
-            `HomeBeater1ID.eq.${pid}`, `HomeBeater2ID.eq.${pid}`,
-            `AwayBeater1ID.eq.${pid}`, `AwayBeater2ID.eq.${pid}`,
-          ]);
-
-          // Too many OR filters - instead, just get all intl results and filter client-side
-          supabase.from("results")
-            .select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,SnitchCaughtTime")
-            .in("LeagueID", intlLeagueIds)
-            .order("MatchID", { ascending: false })
-            .then(({ data: rData }) => {
-              if (rData) setIntlResults(rData as IntlResult[]);
-            });
-        }
       }
     });
   }, [id]);
@@ -232,6 +231,18 @@ export default function NationPage() {
     </div>
   );
 
+  // Compute W-L record for national team
+  const natTeamRecord = nationalTeam ? (() => {
+    let w = 0, l = 0, d = 0;
+    intlResults.forEach(r => {
+      const isHome = r.HomeTeamID === nationalTeam.TeamID;
+      const ts = isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
+      const os = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
+      if (ts > os) w++; else if (ts < os) l++; else d++;
+    });
+    return { w, l, d };
+  })() : null;
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <SiteHeader />
@@ -242,6 +253,12 @@ export default function NationPage() {
           </h1>
           <p className="text-sm text-muted-foreground font-sans mt-1">
             {players.length} registered players
+            {nationalTeam && (
+              <> · National Team: <Link to={`/team/${encodeURIComponent(nationalTeam.FullName)}`} className="text-accent hover:underline">{nationalTeam.FullName}</Link></>
+            )}
+            {natTeamRecord && (
+              <> · Intl Record: {natTeamRecord.w}W–{natTeamRecord.l}L{natTeamRecord.d > 0 ? `–${natTeamRecord.d}D` : ""}</>
+            )}
           </p>
         </div>
 

@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { formatHeight, calculateAge, formatDate, getNationFlag } from "@/lib/helpers";
+import { fetchAllRows } from "@/lib/fetchAll";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 interface Player {
@@ -89,10 +90,14 @@ function seasonLabel(id: number | null): string {
   return `${id - 1}–${String(id).slice(-2)}`;
 }
 
-function ageAtSeason(dob: string | null, seasonId: number | null): string {
-  if (!dob || !seasonId) return "—";
+function ageAtSeasonFromDate(dob: string | null, firstMatchDate: string | null): string {
+  if (!dob || !firstMatchDate) return "—";
   const birth = new Date(dob);
-  const age = seasonId - birth.getFullYear();
+  const [fy, fm, fd] = firstMatchDate.split("-").map(Number);
+  const refDate = new Date(fy, fm - 1, fd);
+  let age = refDate.getFullYear() - birth.getFullYear();
+  const m = refDate.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && refDate.getDate() < birth.getDate())) age--;
   return String(age);
 }
 
@@ -119,7 +124,7 @@ export default function PlayerProfile() {
   const [detectedPositions, setDetectedPositions] = useState<string[]>([]);
   const [playerAwards, setPlayerAwards] = useState<{ awardname: string; placement: number; seasonid: number; leagueid: number; leagueName?: string }[]>([]);
   const [leagueNameMap, setLeagueNameMap] = useState<Map<number, string>>(new Map());
-
+  const [firstMatchDateMap, setFirstMatchDateMap] = useState<Map<number, string>>(new Map());
   useEffect(() => {
     if (!id) return;
     const pid = parseInt(id);
@@ -189,8 +194,8 @@ export default function PlayerProfile() {
               .order("MatchID", { ascending: false }),
             supabase.from("leagues").select("LeagueID,LeagueName"),
             supabase.from("teams").select("TeamID, FullName"),
-            supabase.from("matchdays").select("MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek"),
-          ]).then(([{ data: matchData }, { data: leaguesData }, { data: teamsData }, { data: mdData }]) => {
+            fetchAllRows("matchdays", { select: "MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek" }),
+          ]).then(([{ data: matchData }, { data: leaguesData }, { data: teamsData }, mdData]) => {
             if (!matchData) return;
 
             const leagueNameMap = new Map<number, string>();
@@ -204,9 +209,14 @@ export default function PlayerProfile() {
             });
 
             const mdMap = new Map<string, string>();
+            const fmdMap = new Map<number, string>();
             (mdData || []).forEach((md: any) => {
               if (md.SeasonID && md.LeagueID && md.MatchdayWeek != null && md.Matchday) {
                 mdMap.set(`${md.SeasonID}|${md.LeagueID}|${md.MatchdayWeek}`, md.Matchday);
+              }
+              if (md.SeasonID && md.Matchday) {
+                const existing = fmdMap.get(md.SeasonID);
+                if (!existing || md.Matchday < existing) fmdMap.set(md.SeasonID, md.Matchday);
               }
             });
 
@@ -294,6 +304,7 @@ export default function PlayerProfile() {
             setMinutesMap(minsMap);
             setShotsFacedMap(sfMap);
             setMatchLog(logEntries);
+            setFirstMatchDateMap(fmdMap);
           });
         }
 
@@ -637,7 +648,7 @@ export default function PlayerProfile() {
                     return (
                       <tr key={i} className={rowClass}>
                         <td className={`${tdClass} font-mono`}>{seasonLabel(s.SeasonID)}</td>
-                        <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{ageAtSeason(player.DOB, s.SeasonID)}</td>
+                        <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{ageAtSeasonFromDate(player.DOB, s.SeasonID ? firstMatchDateMap.get(s.SeasonID) || null : null)}</td>
                         <td className={`${tdClass} font-mono text-xs`} title={s.LeagueName || ""}>{abbrevLeague(s.LeagueName)}</td>
                         <td className={`${tdClass}`}>
                           {s.FullName ? (
