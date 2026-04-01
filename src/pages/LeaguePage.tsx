@@ -72,6 +72,8 @@ export default function LeaguePage() {
   const [awards, setAwards] = useState<AwardRow[]>([]);
   const [playerMap, setPlayerMap] = useState<Map<number, string>>(new Map());
   const [playerPosMap, setPlayerPosMap] = useState<Map<number, string>>(new Map());
+  const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
+  const [availableSeasons, setAvailableSeasons] = useState<number[]>([]);
 
   useEffect(() => {
     if (!id) return;
