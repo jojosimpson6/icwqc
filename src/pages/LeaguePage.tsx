@@ -130,7 +130,7 @@ export default function LeaguePage() {
   const viewData = getViewData();
   const { sorted, sortKey, sortDir, requestSort } = useSortableTable(viewData, "_pts", "desc");
 
-  const hasNeutral = standings.some((s) => (s.neutralgamesplayed || 0) > 0);
+  const hasNeutral = seasonStandings.some((s) => (s.neutralgamesplayed || 0) > 0);
 
   const thClass = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground cursor-pointer hover:text-foreground select-none";
   const sortIndicator = (key: string) => sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
