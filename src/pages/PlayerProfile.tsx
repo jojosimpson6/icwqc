@@ -194,8 +194,8 @@ export default function PlayerProfile() {
               .order("MatchID", { ascending: false }),
             supabase.from("leagues").select("LeagueID,LeagueName"),
             supabase.from("teams").select("TeamID, FullName"),
-            supabase.from("matchdays").select("MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek"),
-          ]).then(([{ data: matchData }, { data: leaguesData }, { data: teamsData }, { data: mdData }]) => {
+            fetchAllRows("matchdays", { select: "MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek" }),
+          ]).then(([{ data: matchData }, { data: leaguesData }, { data: teamsData }, mdData]) => {
             if (!matchData) return;
 
             const leagueNameMap = new Map<number, string>();
