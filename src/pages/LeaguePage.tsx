@@ -205,6 +205,7 @@ export default function LeaguePage() {
                         {v}
                       </button>
                     ))}
+                    </div>
                   </div>
                 </div>
                 <div className="overflow-x-auto">
