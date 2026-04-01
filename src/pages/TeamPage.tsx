@@ -352,8 +352,9 @@ export default function TeamPage() {
   };
   const resultSortIndicator = (key: string) => resultSortKey === key ? (resultSortDir === "asc" ? " ↑" : " ↓") : "";
 
-  const domesticRegister = seasonRegister.filter(r => r.LeagueTier !== 0);
-  const cupRegister = seasonRegister.filter(r => r.LeagueTier === 0);
+  const domesticRegister = seasonRegister.filter(r => r.LeagueID >= 1 && r.LeagueID <= 14);
+  const cupRegister = seasonRegister.filter(r => r.LeagueID >= 15 && r.LeagueID <= 18);
+  const championsLeagueRegister = seasonRegister.filter(r => r.LeagueID > 18);
 
   // Team color styling with contrast-aware text
   const primaryColor = team?.PrimaryColor || null;
