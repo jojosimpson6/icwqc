@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { formatHeight, calculateAge, formatDate, getNationFlag } from "@/lib/helpers";
+import { fetchAllRows } from "@/lib/fetchAll";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 interface Player {
