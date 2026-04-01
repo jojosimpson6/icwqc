@@ -5,6 +5,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { getLeagueTierLabel } from "@/lib/helpers";
 import { useSortableTable } from "@/hooks/useSortableTable";
+import { fetchAllRows } from "@/lib/fetchAll";
 
 interface League {
   LeagueID: number;
