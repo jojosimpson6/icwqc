@@ -112,6 +112,7 @@ export default function TeamPage() {
   const [teamMapState, setTeamMapState] = useState<Map<number, string>>(new Map());
   const [matchDayMap, setMatchDayMap] = useState<Map<number, string>>(new Map());
   const [matchDayCompositeMap, setMatchDayCompositeMap] = useState<Map<string, string>>(new Map());
+  const [firstMatchDateMap, setFirstMatchDateMap] = useState<Map<number, string>>(new Map());
   const [rivalTeamName, setRivalTeamName] = useState<string | null>(null);
   const [resultsOpen, setResultsOpen] = useState(true);
   const [h2hOpen, setH2hOpen] = useState(true);
