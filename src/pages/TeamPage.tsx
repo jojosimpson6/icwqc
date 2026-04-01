@@ -37,6 +37,7 @@ interface SeasonRegisterRow {
   SeasonID: number;
   LeagueName: string;
   LeagueTier: number;
+  LeagueID: number;
   position: number | null;
   isChampion: boolean;
   totalgamesplayed: number | null;
