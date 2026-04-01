@@ -255,6 +255,7 @@ export default function TeamPage() {
         SeasonID: standing.SeasonID,
         LeagueName: leagueN,
         LeagueTier: tier,
+        LeagueID: leagueId || 0,
         position,
         isChampion,
         totalgamesplayed: standing.totalgamesplayed,
