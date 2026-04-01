@@ -231,6 +231,18 @@ export default function NationPage() {
     </div>
   );
 
+  // Compute W-L record for national team
+  const natTeamRecord = nationalTeam ? (() => {
+    let w = 0, l = 0, d = 0;
+    intlResults.forEach(r => {
+      const isHome = r.HomeTeamID === nationalTeam.TeamID;
+      const ts = isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
+      const os = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
+      if (ts > os) w++; else if (ts < os) l++; else d++;
+    });
+    return { w, l, d };
+  })() : null;
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <SiteHeader />
@@ -241,6 +253,12 @@ export default function NationPage() {
           </h1>
           <p className="text-sm text-muted-foreground font-sans mt-1">
             {players.length} registered players
+            {nationalTeam && (
+              <> · National Team: <Link to={`/team/${encodeURIComponent(nationalTeam.FullName)}`} className="text-accent hover:underline">{nationalTeam.FullName}</Link></>
+            )}
+            {natTeamRecord && (
+              <> · Intl Record: {natTeamRecord.w}W–{natTeamRecord.l}L{natTeamRecord.d > 0 ? `–${natTeamRecord.d}D` : ""}</>
+            )}
           </p>
         </div>
 
