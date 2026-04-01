@@ -124,7 +124,7 @@ export default function PlayerProfile() {
   const [detectedPositions, setDetectedPositions] = useState<string[]>([]);
   const [playerAwards, setPlayerAwards] = useState<{ awardname: string; placement: number; seasonid: number; leagueid: number; leagueName?: string }[]>([]);
   const [leagueNameMap, setLeagueNameMap] = useState<Map<number, string>>(new Map());
-
+  const [firstMatchDateMap, setFirstMatchDateMap] = useState<Map<number, string>>(new Map());
   useEffect(() => {
     if (!id) return;
     const pid = parseInt(id);
