@@ -187,32 +187,102 @@ export type Database = {
       }
       results: {
         Row: {
+          AwayBeater1BludgersHit: number | null
+          AwayBeater1BludgerShotsFaced: number | null
           AwayBeater1ID: number | null
+          AwayBeater1MinPlayed: number | null
+          AwayBeater1TeammatesProtected: number | null
+          AwayBeater1TurnoversForced: number | null
+          AwayBeater2BludgersHit: number | null
+          AwayBeater2BludgerShotsFaced: number | null
           AwayBeater2ID: number | null
+          AwayBeater2MinPlayed: number | null
+          AwayBeater2TeammatesProtected: number | null
+          AwayBeater2TurnoversForced: number | null
           AwayChaser1Goals: number | null
           AwayChaser1ID: number | null
+          AwayChaser1MinPlayed: number | null
+          AwayChaser1PassAtt: number | null
+          AwayChaser1PassComp: number | null
+          AwayChaser1ShotAtt: number | null
+          AwayChaser1ShotScored: number | null
           AwayChaser2Goals: number | null
           AwayChaser2ID: number | null
+          AwayChaser2MinPlayed: number | null
+          AwayChaser2PassAtt: number | null
+          AwayChaser2PassComp: number | null
+          AwayChaser2ShotAtt: number | null
+          AwayChaser2ShotScored: number | null
           AwayChaser3Goals: number | null
           AwayChaser3ID: number | null
+          AwayChaser3MinPlayed: number | null
+          AwayChaser3PassAtt: number | null
+          AwayChaser3PassComp: number | null
+          AwayChaser3ShotAtt: number | null
+          AwayChaser3ShotScored: number | null
           AwayKeeperID: number | null
+          AwayKeeperMinPlayed: number | null
+          AwayKeeperPassAtt: number | null
+          AwayKeeperPassComp: number | null
           AwayKeeperSaves: number | null
+          AwayKeeperShotsConceded: number | null
           AwayKeeperShotsFaced: number | null
+          AwayKeeperShotsFaced2: number | null
+          AwayKeeperShotsParried: number | null
+          AwayKeeperShotsSaved: number | null
+          AwaySeekerCatchAttempts: number | null
           AwaySeekerID: number | null
+          AwaySeekerMinPlayed: number | null
+          AwaySeekerSnitchSpotted: number | null
           AwayTeamID: number | null
           AwayTeamScore: number | null
+          HomeBeater1BludgersHit: number | null
+          HomeBeater1BludgerShotsFaced: number | null
           HomeBeater1ID: number | null
+          HomeBeater1MinPlayed: number | null
+          HomeBeater1TeammatesProtected: number | null
+          HomeBeater1TurnoversForced: number | null
+          HomeBeater2BludgersHit: number | null
+          HomeBeater2BludgerShotsFaced: number | null
           HomeBeater2ID: number | null
+          HomeBeater2MinPlayed: number | null
+          HomeBeater2TeammatesProtected: number | null
+          HomeBeater2TurnoversForced: number | null
           HomeChaser1Goals: number | null
           HomeChaser1ID: number | null
+          HomeChaser1MinPlayed: number | null
+          HomeChaser1PassAtt: number | null
+          HomeChaser1PassComp: number | null
+          HomeChaser1ShotAtt: number | null
+          HomeChaser1ShotScored: number | null
           HomeChaser2Goals: number | null
           HomeChaser2ID: number | null
+          HomeChaser2MinPlayed: number | null
+          HomeChaser2PassAtt: number | null
+          HomeChaser2PassComp: number | null
+          HomeChaser2ShotAtt: number | null
+          HomeChaser2ShotScored: number | null
           HomeChaser3Goals: number | null
           HomeChaser3ID: number | null
+          HomeChaser3MinPlayed: number | null
+          HomeChaser3PassAtt: number | null
+          HomeChaser3PassComp: number | null
+          HomeChaser3ShotAtt: number | null
+          HomeChaser3ShotScored: number | null
           HomeKeeperID: number | null
+          HomeKeeperMinPlayed: number | null
+          HomeKeeperPassAtt: number | null
+          HomeKeeperPassComp: number | null
           HomeKeeperSaves: number | null
+          HomeKeeperShotsConceded: number | null
           HomeKeeperShotsFaced: number | null
+          HomeKeeperShotsFaced2: number | null
+          HomeKeeperShotsParried: number | null
+          HomeKeeperShotsSaved: number | null
+          HomeSeekerCatchAttempts: number | null
           HomeSeekerID: number | null
+          HomeSeekerMinPlayed: number | null
+          HomeSeekerSnitchSpotted: number | null
           HomeTeamID: number | null
           HomeTeamScore: number | null
           IsNeutralSite: number | null
@@ -224,32 +294,102 @@ export type Database = {
           WeekID: number | null
         }
         Insert: {
+          AwayBeater1BludgersHit?: number | null
+          AwayBeater1BludgerShotsFaced?: number | null
           AwayBeater1ID?: number | null
+          AwayBeater1MinPlayed?: number | null
+          AwayBeater1TeammatesProtected?: number | null
+          AwayBeater1TurnoversForced?: number | null
+          AwayBeater2BludgersHit?: number | null
+          AwayBeater2BludgerShotsFaced?: number | null
           AwayBeater2ID?: number | null
+          AwayBeater2MinPlayed?: number | null
+          AwayBeater2TeammatesProtected?: number | null
+          AwayBeater2TurnoversForced?: number | null
           AwayChaser1Goals?: number | null
           AwayChaser1ID?: number | null
+          AwayChaser1MinPlayed?: number | null
+          AwayChaser1PassAtt?: number | null
+          AwayChaser1PassComp?: number | null
+          AwayChaser1ShotAtt?: number | null
+          AwayChaser1ShotScored?: number | null
           AwayChaser2Goals?: number | null
           AwayChaser2ID?: number | null
+          AwayChaser2MinPlayed?: number | null
+          AwayChaser2PassAtt?: number | null
+          AwayChaser2PassComp?: number | null
+          AwayChaser2ShotAtt?: number | null
+          AwayChaser2ShotScored?: number | null
           AwayChaser3Goals?: number | null
           AwayChaser3ID?: number | null
+          AwayChaser3MinPlayed?: number | null
+          AwayChaser3PassAtt?: number | null
+          AwayChaser3PassComp?: number | null
+          AwayChaser3ShotAtt?: number | null
+          AwayChaser3ShotScored?: number | null
           AwayKeeperID?: number | null
+          AwayKeeperMinPlayed?: number | null
+          AwayKeeperPassAtt?: number | null
+          AwayKeeperPassComp?: number | null
           AwayKeeperSaves?: number | null
+          AwayKeeperShotsConceded?: number | null
           AwayKeeperShotsFaced?: number | null
+          AwayKeeperShotsFaced2?: number | null
+          AwayKeeperShotsParried?: number | null
+          AwayKeeperShotsSaved?: number | null
+          AwaySeekerCatchAttempts?: number | null
           AwaySeekerID?: number | null
+          AwaySeekerMinPlayed?: number | null
+          AwaySeekerSnitchSpotted?: number | null
           AwayTeamID?: number | null
           AwayTeamScore?: number | null
+          HomeBeater1BludgersHit?: number | null
+          HomeBeater1BludgerShotsFaced?: number | null
           HomeBeater1ID?: number | null
+          HomeBeater1MinPlayed?: number | null
+          HomeBeater1TeammatesProtected?: number | null
+          HomeBeater1TurnoversForced?: number | null
+          HomeBeater2BludgersHit?: number | null
+          HomeBeater2BludgerShotsFaced?: number | null
           HomeBeater2ID?: number | null
+          HomeBeater2MinPlayed?: number | null
+          HomeBeater2TeammatesProtected?: number | null
+          HomeBeater2TurnoversForced?: number | null
           HomeChaser1Goals?: number | null
           HomeChaser1ID?: number | null
+          HomeChaser1MinPlayed?: number | null
+          HomeChaser1PassAtt?: number | null
+          HomeChaser1PassComp?: number | null
+          HomeChaser1ShotAtt?: number | null
+          HomeChaser1ShotScored?: number | null
           HomeChaser2Goals?: number | null
           HomeChaser2ID?: number | null
+          HomeChaser2MinPlayed?: number | null
+          HomeChaser2PassAtt?: number | null
+          HomeChaser2PassComp?: number | null
+          HomeChaser2ShotAtt?: number | null
+          HomeChaser2ShotScored?: number | null
           HomeChaser3Goals?: number | null
           HomeChaser3ID?: number | null
+          HomeChaser3MinPlayed?: number | null
+          HomeChaser3PassAtt?: number | null
+          HomeChaser3PassComp?: number | null
+          HomeChaser3ShotAtt?: number | null
+          HomeChaser3ShotScored?: number | null
           HomeKeeperID?: number | null
+          HomeKeeperMinPlayed?: number | null
+          HomeKeeperPassAtt?: number | null
+          HomeKeeperPassComp?: number | null
           HomeKeeperSaves?: number | null
+          HomeKeeperShotsConceded?: number | null
           HomeKeeperShotsFaced?: number | null
+          HomeKeeperShotsFaced2?: number | null
+          HomeKeeperShotsParried?: number | null
+          HomeKeeperShotsSaved?: number | null
+          HomeSeekerCatchAttempts?: number | null
           HomeSeekerID?: number | null
+          HomeSeekerMinPlayed?: number | null
+          HomeSeekerSnitchSpotted?: number | null
           HomeTeamID?: number | null
           HomeTeamScore?: number | null
           IsNeutralSite?: number | null
@@ -261,32 +401,102 @@ export type Database = {
           WeekID?: number | null
         }
         Update: {
+          AwayBeater1BludgersHit?: number | null
+          AwayBeater1BludgerShotsFaced?: number | null
           AwayBeater1ID?: number | null
+          AwayBeater1MinPlayed?: number | null
+          AwayBeater1TeammatesProtected?: number | null
+          AwayBeater1TurnoversForced?: number | null
+          AwayBeater2BludgersHit?: number | null
+          AwayBeater2BludgerShotsFaced?: number | null
           AwayBeater2ID?: number | null
+          AwayBeater2MinPlayed?: number | null
+          AwayBeater2TeammatesProtected?: number | null
+          AwayBeater2TurnoversForced?: number | null
           AwayChaser1Goals?: number | null
           AwayChaser1ID?: number | null
+          AwayChaser1MinPlayed?: number | null
+          AwayChaser1PassAtt?: number | null
+          AwayChaser1PassComp?: number | null
+          AwayChaser1ShotAtt?: number | null
+          AwayChaser1ShotScored?: number | null
           AwayChaser2Goals?: number | null
           AwayChaser2ID?: number | null
+          AwayChaser2MinPlayed?: number | null
+          AwayChaser2PassAtt?: number | null
+          AwayChaser2PassComp?: number | null
+          AwayChaser2ShotAtt?: number | null
+          AwayChaser2ShotScored?: number | null
           AwayChaser3Goals?: number | null
           AwayChaser3ID?: number | null
+          AwayChaser3MinPlayed?: number | null
+          AwayChaser3PassAtt?: number | null
+          AwayChaser3PassComp?: number | null
+          AwayChaser3ShotAtt?: number | null
+          AwayChaser3ShotScored?: number | null
           AwayKeeperID?: number | null
+          AwayKeeperMinPlayed?: number | null
+          AwayKeeperPassAtt?: number | null
+          AwayKeeperPassComp?: number | null
           AwayKeeperSaves?: number | null
+          AwayKeeperShotsConceded?: number | null
           AwayKeeperShotsFaced?: number | null
+          AwayKeeperShotsFaced2?: number | null
+          AwayKeeperShotsParried?: number | null
+          AwayKeeperShotsSaved?: number | null
+          AwaySeekerCatchAttempts?: number | null
           AwaySeekerID?: number | null
+          AwaySeekerMinPlayed?: number | null
+          AwaySeekerSnitchSpotted?: number | null
           AwayTeamID?: number | null
           AwayTeamScore?: number | null
+          HomeBeater1BludgersHit?: number | null
+          HomeBeater1BludgerShotsFaced?: number | null
           HomeBeater1ID?: number | null
+          HomeBeater1MinPlayed?: number | null
+          HomeBeater1TeammatesProtected?: number | null
+          HomeBeater1TurnoversForced?: number | null
+          HomeBeater2BludgersHit?: number | null
+          HomeBeater2BludgerShotsFaced?: number | null
           HomeBeater2ID?: number | null
+          HomeBeater2MinPlayed?: number | null
+          HomeBeater2TeammatesProtected?: number | null
+          HomeBeater2TurnoversForced?: number | null
           HomeChaser1Goals?: number | null
           HomeChaser1ID?: number | null
+          HomeChaser1MinPlayed?: number | null
+          HomeChaser1PassAtt?: number | null
+          HomeChaser1PassComp?: number | null
+          HomeChaser1ShotAtt?: number | null
+          HomeChaser1ShotScored?: number | null
           HomeChaser2Goals?: number | null
           HomeChaser2ID?: number | null
+          HomeChaser2MinPlayed?: number | null
+          HomeChaser2PassAtt?: number | null
+          HomeChaser2PassComp?: number | null
+          HomeChaser2ShotAtt?: number | null
+          HomeChaser2ShotScored?: number | null
           HomeChaser3Goals?: number | null
           HomeChaser3ID?: number | null
+          HomeChaser3MinPlayed?: number | null
+          HomeChaser3PassAtt?: number | null
+          HomeChaser3PassComp?: number | null
+          HomeChaser3ShotAtt?: number | null
+          HomeChaser3ShotScored?: number | null
           HomeKeeperID?: number | null
+          HomeKeeperMinPlayed?: number | null
+          HomeKeeperPassAtt?: number | null
+          HomeKeeperPassComp?: number | null
           HomeKeeperSaves?: number | null
+          HomeKeeperShotsConceded?: number | null
           HomeKeeperShotsFaced?: number | null
+          HomeKeeperShotsFaced2?: number | null
+          HomeKeeperShotsParried?: number | null
+          HomeKeeperShotsSaved?: number | null
+          HomeSeekerCatchAttempts?: number | null
           HomeSeekerID?: number | null
+          HomeSeekerMinPlayed?: number | null
+          HomeSeekerSnitchSpotted?: number | null
           HomeTeamID?: number | null
           HomeTeamScore?: number | null
           IsNeutralSite?: number | null
@@ -333,6 +543,7 @@ export type Database = {
           FullName: string
           LeagueID: number
           logo_url: string | null
+          nationid: number | null
           Nickname: string | null
           PrimaryColor: string | null
           Rival: string | null
@@ -348,6 +559,7 @@ export type Database = {
           FullName: string
           LeagueID: number
           logo_url?: string | null
+          nationid?: number | null
           Nickname?: string | null
           PrimaryColor?: string | null
           Rival?: string | null
@@ -363,6 +575,7 @@ export type Database = {
           FullName?: string
           LeagueID?: number
           logo_url?: string | null
+          nationid?: number | null
           Nickname?: string | null
           PrimaryColor?: string | null
           Rival?: string | null
@@ -394,16 +607,6 @@ export type Database = {
       }
     }
     Views: {
-      elo: {
-        Row: {
-          current_game_number: number | null
-          MatchID: number | null
-          new_elo: number | null
-          player_name: string | null
-          previous_elo: number | null
-        }
-        Relationships: []
-      }
       elo_new: {
         Row: {
           current_game_number: number | null
@@ -452,6 +655,7 @@ export type Database = {
           homegsc: number | null
           homeminutesplayed: number | null
           homepoints: number | null
+          LeagueID: number | null
           neutralgamesplayed: number | null
           neutralgoalsagainst: number | null
           neutralgoalsfor: number | null
@@ -476,6 +680,7 @@ export type Database = {
           KeeperShotsFaced: number | null
           LeagueName: string | null
           Nation: string | null
+          PlayerID: number | null
           PlayerName: string | null
           Position: string | null
           SeasonID: number | null
