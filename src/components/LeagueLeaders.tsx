@@ -42,11 +42,13 @@ export function LeagueLeaders() {
     setCategory(picked);
 
     Promise.all([
-      supabase.from("stats").select("*").not(picked, "is", null).order(picked, { ascending: false }),
+      fetchAllRows("stats", { select: "*" }),
       supabase.from("players").select("PlayerID, PlayerName"),
       supabase.from("leagues").select("LeagueID, LeagueName").order("LeagueTier").order("LeagueName"),
-    ]).then(([{ data: statsData }, { data: playersData }, { data: leagueData }]) => {
-      if (statsData) setAllStats(statsData as StatRow[]);
+    ]).then(([statsData, { data: playersData }, { data: leagueData }]) => {
+      // Sort by selected category descending
+      statsData.sort((a: any, b: any) => ((b[picked] as number) || 0) - ((a[picked] as number) || 0));
+      setAllStats(statsData as StatRow[]);
       if (playersData) {
         const map: Record<string, number> = {};
         playersData.forEach((p) => { if (p.PlayerName) map[p.PlayerName] = p.PlayerID; });
