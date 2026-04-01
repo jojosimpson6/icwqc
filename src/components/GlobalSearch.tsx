@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAll";
 import { Search } from "lucide-react";
 
 interface SearchResult {
@@ -26,8 +27,8 @@ export function GlobalSearch() {
   useEffect(() => {
     // Load all searchable entities
     Promise.all([
-      supabase.from("players").select("PlayerID, PlayerName").then(({ data }) => data || []),
-      supabase.from("stats").select("PlayerName, SeasonID").then(({ data }) => data || []),
+      fetchAllRows("players", { select: "PlayerID, PlayerName" }),
+      fetchAllRows("stats", { select: "PlayerName, SeasonID" }),
       supabase.from("teams").select("TeamID, FullName").then(({ data }) => data || []),
       supabase.from("leagues").select("LeagueID, LeagueName").then(({ data }) => data || []),
     ]).then(([playerData, statsData, teamData, leagueData]) => {

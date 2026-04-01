@@ -159,7 +159,6 @@ export default function NationPage() {
             .select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,SnitchCaughtTime")
             .in("LeagueID", intlLeagueIds)
             .order("MatchID", { ascending: false })
-            .limit(1000)
             .then(({ data: rData }) => {
               if (rData) setIntlResults(rData as IntlResult[]);
             });

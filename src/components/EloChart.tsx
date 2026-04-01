@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAll";
 import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from "recharts";
 
 const COLORS = [
@@ -54,9 +55,9 @@ export function EloChart() {
   useEffect(() => {
     Promise.all([
       supabase.from("leagues").select("LeagueID, LeagueName").order("LeagueTier").order("LeagueName"),
-      supabase.from("elo_new").select("*").order("Matchday", { ascending: true }).limit(5000),
+      fetchAllRows("elo_new", { select: "*", order: { column: "Matchday", ascending: true } }),
       supabase.from("teams").select("FullName, LeagueID"),
-    ]).then(([{ data: leagueData }, { data: eData }, { data: teamsData }]) => {
+    ]).then(([{ data: leagueData }, eData, { data: teamsData }]) => {
       if (leagueData) setLeagues(leagueData as LeagueOption[]);
 
       const elo = (eData || []).filter((d: any) => d.FullName && d.Matchday && d.elo_rating != null) as EloNewPoint[];

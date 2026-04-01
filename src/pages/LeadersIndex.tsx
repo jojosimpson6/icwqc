@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAll";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 
@@ -153,16 +154,14 @@ export default function LeadersIndex() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const [s1, s2, m1, m2, pl, lg] = await Promise.all([
-        supabase.from("stats" as any).select("*").range(0, 999),
-        supabase.from("stats" as any).select("*").range(1000, 1999),
-        supabase.from("player_season_minutes" as any).select("*").range(0, 999),
-        supabase.from("player_season_minutes" as any).select("*").range(1000, 1999),
+      const [statsData, minData, pl, lg] = await Promise.all([
+        fetchAllRows<RawStat>("stats"),
+        fetchAllRows<MinRow>("player_season_minutes"),
         supabase.from("players").select("PlayerID, PlayerName"),
         supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier"),
       ]);
-      setRawStats([...(s1.data || []), ...(s2.data || [])] as unknown as RawStat[]);
-      setRawMin([...(m1.data || []), ...(m2.data || [])] as unknown as MinRow[]);
+      setRawStats(statsData);
+      setRawMin(minData);
       const pm = new Map<string, number>();
       (pl.data || []).forEach((p: any) => { if (p.PlayerName) pm.set(p.PlayerName, p.PlayerID); });
       setPlayerMap(pm);

@@ -127,8 +127,7 @@ export default function TeamPage() {
       supabase.from("standings").select("*").eq("FullName", teamName).order("SeasonID", { ascending: false }),
       supabase.from("players").select("PlayerID, PlayerName, DOB, NationalityID, Height, Weight, Handedness"),
       supabase.from("results").select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SnitchCaughtTime,LeagueID,SeasonID,WeekID,IsNeutralSite")
-        .or(`HomeTeamID.eq.0,AwayTeamID.eq.0`)
-        .limit(0),
+        .or(`HomeTeamID.eq.0,AwayTeamID.eq.0`),
       supabase.from("teams").select("TeamID, FullName"),
       supabase.from("matchdays").select("MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek"),
       supabase.from("nations").select("NationID, Nation, ValidToDt").order("ValidToDt", { ascending: false }),
@@ -147,7 +146,6 @@ export default function TeamPage() {
           .select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SnitchCaughtTime,LeagueID,SeasonID,WeekID,IsNeutralSite")
           .or(`HomeTeamID.eq.${teamData.TeamID},AwayTeamID.eq.${teamData.TeamID}`)
           .order("MatchID", { ascending: false })
-          .limit(2000)
           .then(({ data: rData }) => {
             if (rData) setMatchResults(rData as MatchResult[]);
           });

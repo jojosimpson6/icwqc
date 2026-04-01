@@ -1,6 +1,7 @@
 import { useEffect, useState, useRef } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAll";
 
 interface GameScore {
   MatchID: number;
@@ -30,13 +31,12 @@ export function ScoreTicker() {
       leagues?.forEach(l => { leagueMap[l.LeagueID] = l.LeagueName || ""; });
 
       // Get recent matchdays ordered by date descending
-      const { data: matchdays } = await supabase
-        .from("matchdays")
-        .select("Matchday, MatchdayWeek, SeasonID, LeagueID")
-        .order("Matchday", { ascending: false })
-        .limit(300);
+      const matchdays = await fetchAllRows("matchdays", {
+        select: "Matchday, MatchdayWeek, SeasonID, LeagueID",
+        order: { column: "Matchday", ascending: false },
+      });
 
-      if (!matchdays || matchdays.length === 0) return;
+      if (matchdays.length === 0) return;
 
       // Group matchdays by date, then try each date until we find one with results
       const dateSet = [...new Set(matchdays.map(md => md.Matchday))];

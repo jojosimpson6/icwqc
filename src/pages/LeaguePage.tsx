@@ -5,6 +5,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { getLeagueTierLabel } from "@/lib/helpers";
 import { useSortableTable } from "@/hooks/useSortableTable";
+import { fetchAllRows } from "@/lib/fetchAll";
 
 interface League {
   LeagueID: number;
@@ -71,6 +72,8 @@ export default function LeaguePage() {
   const [awards, setAwards] = useState<AwardRow[]>([]);
   const [playerMap, setPlayerMap] = useState<Map<number, string>>(new Map());
   const [playerPosMap, setPlayerPosMap] = useState<Map<number, string>>(new Map());
+  const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
+  const [availableSeasons, setAvailableSeasons] = useState<number[]>([]);
 
   useEffect(() => {
     if (!id) return;
@@ -79,15 +82,19 @@ export default function LeaguePage() {
     Promise.all([
       supabase.from("leagues").select("*").eq("LeagueID", lid).single(),
       supabase.from("teams").select("*").eq("LeagueID", lid).order("FullName"),
-      supabase.from("standings").select("*").order("totalpoints", { ascending: false }),
+      fetchAllRows("standings", { select: "*", order: { column: "totalpoints", ascending: false } }),
       supabase.from("awards").select("*").eq("leagueid", lid).order("seasonid", { ascending: false }),
       supabase.from("players").select("PlayerID, PlayerName, Position"),
-    ]).then(([{ data: leagueData }, { data: teamData }, { data: standingsData }, { data: awardsData }, { data: playerData }]) => {
+    ]).then(([{ data: leagueData }, { data: teamData }, standingsData, { data: awardsData }, { data: playerData }]) => {
       if (leagueData) setLeague(leagueData);
       if (teamData) setTeams(teamData);
       if (standingsData && teamData) {
-        const teamNames = new Set(teamData.map((t) => t.FullName));
-        setStandings((standingsData as StandingRow[]).filter((s) => teamNames.has(s.FullName || "")));
+        const teamNames = new Set(teamData.map((t: any) => t.FullName));
+        const filtered = (standingsData as StandingRow[]).filter((s) => teamNames.has(s.FullName || ""));
+        setStandings(filtered);
+        const seasons = [...new Set(filtered.map(s => s.SeasonID).filter(Boolean))].sort((a, b) => (b || 0) - (a || 0)) as number[];
+        setAvailableSeasons(seasons);
+        if (seasons.length > 0) setSelectedSeason(seasons[0]);
       }
       if (awardsData) setAwards(awardsData as AwardRow[]);
       if (playerData) {
@@ -103,8 +110,10 @@ export default function LeaguePage() {
     });
   }, [id]);
 
+  const seasonStandings = standings.filter(s => s.SeasonID === selectedSeason);
+
   const getViewData = () => {
-    return standings.map((s) => {
+    return seasonStandings.map((s) => {
       switch (view) {
         case "home":
           return { ...s, _gp: s.homegamesplayed, _pts: s.homepoints, _gf: s.homegoalsfor, _ga: s.homegoalsagainst, _gsc: s.homegsc };
@@ -121,7 +130,7 @@ export default function LeaguePage() {
   const viewData = getViewData();
   const { sorted, sortKey, sortDir, requestSort } = useSortableTable(viewData, "_pts", "desc");
 
-  const hasNeutral = standings.some((s) => (s.neutralgamesplayed || 0) > 0);
+  const hasNeutral = seasonStandings.some((s) => (s.neutralgamesplayed || 0) > 0);
 
   const thClass = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground cursor-pointer hover:text-foreground select-none";
   const sortIndicator = (key: string) => sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
@@ -168,9 +177,21 @@ export default function LeaguePage() {
               <div className="border border-border rounded overflow-hidden">
                 <div className="bg-table-header px-3 py-2 flex items-center justify-between flex-wrap gap-2">
                   <h3 className="font-display text-sm font-bold text-table-header-foreground">
-                    Standings{standings.length > 0 && standings[0].SeasonID ? ` — ${standings[0].SeasonID - 1}-${standings[0].SeasonID}` : ""}
+                    Standings{selectedSeason ? ` — ${selectedSeason - 1}-${selectedSeason}` : ""}
                   </h3>
-                  <div className="flex gap-1">
+                  <div className="flex items-center gap-2">
+                    {availableSeasons.length > 1 && (
+                      <select
+                        value={selectedSeason ?? ""}
+                        onChange={(e) => setSelectedSeason(parseInt(e.target.value))}
+                        className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
+                      >
+                        {availableSeasons.map(s => (
+                          <option key={s} value={s}>{`${s - 1}–${String(s).slice(-2)}`}</option>
+                        ))}
+                      </select>
+                    )}
+                    <div className="flex gap-1">
                     {(["total", "home", "away", ...(hasNeutral ? ["neutral" as const] : [])] as const).map((v) => (
                       <button
                         key={v}
@@ -184,6 +205,7 @@ export default function LeaguePage() {
                         {v}
                       </button>
                     ))}
+                    </div>
                   </div>
                 </div>
                 <div className="overflow-x-auto">

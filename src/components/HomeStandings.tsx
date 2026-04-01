@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { useSortableTable } from "@/hooks/useSortableTable";
+import { fetchAllRows } from "@/lib/fetchAll";
 
 interface StandingRow {
   FullName: string | null;
@@ -11,6 +12,7 @@ interface StandingRow {
   GoalsAgainst: number | null;
   totalgsc: number | null;
   SeasonID: number | null;
+  LeagueID: number | null;
 }
 
 interface LeagueOption {
@@ -22,14 +24,15 @@ export function HomeStandings() {
   const [standings, setStandings] = useState<StandingRow[]>([]);
   const [leagues, setLeagues] = useState<LeagueOption[]>([]);
   const [selectedLeague, setSelectedLeague] = useState<number>(1);
+  const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   const [teamsByLeague, setTeamsByLeague] = useState<Record<number, string[]>>({});
 
   useEffect(() => {
     Promise.all([
       supabase.from("leagues").select("LeagueID, LeagueName").order("LeagueTier").order("LeagueName"),
       supabase.from("teams").select("TeamID, FullName, LeagueID"),
-      supabase.from("standings").select("*").order("totalpoints", { ascending: false }),
-    ]).then(([{ data: leagueData }, { data: teamData }, { data: standingsData }]) => {
+      fetchAllRows<StandingRow>("standings", { select: "*", order: { column: "totalpoints", ascending: false } }),
+    ]).then(([{ data: leagueData }, { data: teamData }, standingsData]) => {
       if (leagueData) setLeagues(leagueData as LeagueOption[]);
       if (teamData) {
         const map: Record<number, string[]> = {};
@@ -39,12 +42,28 @@ export function HomeStandings() {
         });
         setTeamsByLeague(map);
       }
-      if (standingsData) setStandings(standingsData as StandingRow[]);
+      setStandings(standingsData);
+      // Set default season to latest
+      const seasons = [...new Set(standingsData.map(s => s.SeasonID).filter(Boolean))].sort((a, b) => (b || 0) - (a || 0));
+      if (seasons.length > 0) setSelectedSeason(seasons[0]);
     });
   }, []);
 
   const leagueTeams = teamsByLeague[selectedLeague] || [];
-  const filtered = standings.filter((s) => leagueTeams.includes(s.FullName || ""));
+  const filtered = standings.filter((s) =>
+    leagueTeams.includes(s.FullName || "") && s.SeasonID === selectedSeason
+  );
+
+  const availableSeasons = [...new Set(
+    standings.filter(s => leagueTeams.includes(s.FullName || "")).map(s => s.SeasonID).filter(Boolean)
+  )].sort((a, b) => (b || 0) - (a || 0)) as number[];
+
+  // Reset season when league changes if current season not available
+  useEffect(() => {
+    if (availableSeasons.length > 0 && !availableSeasons.includes(selectedSeason!)) {
+      setSelectedSeason(availableSeasons[0]);
+    }
+  }, [selectedLeague, availableSeasons.join(",")]);
   
   const { sorted, sortKey, sortDir, requestSort } = useSortableTable(filtered, "totalpoints", "desc");
 
@@ -53,11 +72,13 @@ export function HomeStandings() {
   const thClass = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground cursor-pointer hover:text-foreground select-none";
   const sortIndicator = (key: string) => sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
+  const seasonLabel = (id: number) => `${id - 1}–${String(id).slice(-2)}`;
+
   return (
     <div className="border border-border rounded overflow-hidden">
       <div className="bg-table-header px-3 py-2 flex items-center justify-between flex-wrap gap-2">
         <h3 className="font-display text-sm font-bold text-table-header-foreground">
-          {selectedLeagueName} — Standings
+          {selectedLeagueName} — Standings {selectedSeason ? `(${seasonLabel(selectedSeason)})` : ""}
         </h3>
         <div className="flex items-center gap-2">
           <select
@@ -69,6 +90,17 @@ export function HomeStandings() {
               <option key={l.LeagueID} value={l.LeagueID}>{l.LeagueName}</option>
             ))}
           </select>
+          {availableSeasons.length > 1 && (
+            <select
+              value={selectedSeason ?? ""}
+              onChange={(e) => setSelectedSeason(parseInt(e.target.value))}
+              className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
+            >
+              {availableSeasons.map(s => (
+                <option key={s} value={s}>{seasonLabel(s)}</option>
+              ))}
+            </select>
+          )}
           <Link to={`/league/${selectedLeague}`} className="text-xs text-table-header-foreground/70 hover:text-table-header-foreground font-sans whitespace-nowrap">
             Full Standings →
           </Link>
