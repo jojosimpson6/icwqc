@@ -779,7 +779,18 @@ export default function TeamPage() {
                               {pid ? <Link to={`/player/${pid}`}>{p.PlayerName}</Link> : p.PlayerName}
                             </td>
                             <td className="px-3 py-1.5 text-muted-foreground text-xs">{posDisplay}</td>
-                            <td className="px-3 py-1.5 text-right font-mono text-xs">{pInfo?.DOB ? calculateAge(pInfo.DOB) : "—"}</td>
+                            <td className="px-3 py-1.5 text-right font-mono text-xs">{(() => {
+                              if (!pInfo?.DOB || !rosterSeasonId) return "—";
+                              const firstDate = firstMatchDateMap.get(rosterSeasonId);
+                              if (!firstDate) return "—";
+                              const [fy, fm, fd] = firstDate.split("-").map(Number);
+                              const refDate = new Date(fy, fm - 1, fd);
+                              const birth = new Date(pInfo.DOB);
+                              let age = refDate.getFullYear() - birth.getFullYear();
+                              const m = refDate.getMonth() - birth.getMonth();
+                              if (m < 0 || (m === 0 && refDate.getDate() < birth.getDate())) age--;
+                              return age;
+                            })()}</td>
                             <td className="px-3 py-1.5 text-xs">
                               {pInfo?.NationalityID ? (
                                 <Link to={`/nation/${pInfo.NationalityID}`} className="text-accent hover:underline">
