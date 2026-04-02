@@ -606,7 +606,7 @@ export default function TeamPage() {
 
         {activeTab === "register" && (
           <div className="space-y-6">
-            {domesticRegister.length > 0 && <RegisterTable rows={domesticRegister} title="Domestic League Register" />}
+            {domesticRegister.length > 0 && <RegisterTable rows={domesticRegister} title="Domestic League Register" isDomestic />}
             {cupRegister.length > 0 && <RegisterTable rows={cupRegister} title="Cup Competition Register" />}
             {championsLeagueRegister.length > 0 && <RegisterTable rows={championsLeagueRegister} title="Champions League Register" />}
             {seasonRegister.length === 0 && <p className="text-muted-foreground font-sans text-sm">No season data available.</p>}
