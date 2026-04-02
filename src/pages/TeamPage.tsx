@@ -193,16 +193,23 @@ export default function TeamPage() {
       }
       if (playerData) setPlayers(playerData);
 
-      if (standData && standData.length > 0) {
-        buildSeasonRegister(teamName, standData as StandingRow[], statsData as StatLine[]);
+      // Build register from stats (works even without standings for cups/CL)
+      if (statsData && (statsData as StatLine[]).length > 0) {
+        buildSeasonRegister(teamName, standData as StandingRow[] || [], statsData as StatLine[]);
       }
     });
   }, [name]);
 
   async function buildSeasonRegister(teamName: string, standings: StandingRow[], stats: StatLine[]) {
-    const seasonLeagueMap = new Map<number, string>();
+    // Build a map of all (SeasonID, LeagueName) combos from stats
+    const seasonLeaguePairs = new Map<string, { seasonId: number; leagueName: string }>();
     (stats || []).forEach(s => {
-      if (s.SeasonID && s.LeagueName) seasonLeagueMap.set(s.SeasonID, s.LeagueName);
+      if (s.SeasonID && s.LeagueName) {
+        const key = `${s.SeasonID}|${s.LeagueName}`;
+        if (!seasonLeaguePairs.has(key)) {
+          seasonLeaguePairs.set(key, { seasonId: s.SeasonID, leagueName: s.LeagueName });
+        }
+      }
     });
 
     const { data: leagueData } = await supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier");
@@ -224,49 +231,100 @@ export default function TeamPage() {
       teamsByLeagueId.set(t.LeagueID, arr);
     });
 
+    // Build a standings lookup by (SeasonID, LeagueID)
+    const standingsMap = new Map<string, StandingRow>();
+    standings.forEach(s => {
+      if (s.SeasonID) {
+        // Standings only exist for domestic leagues (IDs 1-14)
+        // Map by SeasonID alone since a team has one standing per season per domestic league
+        standingsMap.set(String(s.SeasonID), s);
+      }
+    });
+
     const registerRows: SeasonRegisterRow[] = [];
-    for (const standing of standings) {
-      if (!standing.SeasonID) continue;
-      const leagueN = seasonLeagueMap.get(standing.SeasonID) || leagueName;
+    
+    // Process each unique (season, league) pair
+    for (const { seasonId, leagueName: leagueN } of seasonLeaguePairs.values()) {
       const tier = leagueTierMap.get(leagueN) || 1;
       const leagueId = leagueIdByName.get(leagueN);
-      const leagueTeamNames = leagueId ? teamsByLeagueId.get(leagueId) || [] : [];
+      
+      // For domestic leagues (1-14), use standings data
+      if (leagueId && leagueId >= 1 && leagueId <= 14) {
+        const standing = standingsMap.get(String(seasonId));
+        if (!standing) continue;
+        
+        const leagueTeamNames = teamsByLeagueId.get(leagueId) || [];
 
-      const { data: allTeamStandings } = await supabase.from("standings")
-        .select("FullName, totalpoints")
-        .eq("SeasonID", standing.SeasonID)
-        .order("totalpoints", { ascending: false });
+        const { data: allTeamStandings } = await supabase.from("standings")
+          .select("FullName, totalpoints")
+          .eq("SeasonID", seasonId)
+          .order("totalpoints", { ascending: false });
 
-      let position: number | null = null;
-      let isChampion = false;
-      if (allTeamStandings && allTeamStandings.length > 0) {
-        // Filter to only teams in the same league
-        const leagueStandings = leagueTeamNames.length > 0
-          ? allTeamStandings.filter(t => leagueTeamNames.includes(t.FullName || ""))
-          : allTeamStandings;
-        const idx = leagueStandings.findIndex(t => t.FullName === teamName);
-        if (idx >= 0) {
-          position = idx + 1;
-          isChampion = idx === 0;
+        let position: number | null = null;
+        let isChampion = false;
+        if (allTeamStandings && allTeamStandings.length > 0) {
+          const leagueStandings = leagueTeamNames.length > 0
+            ? allTeamStandings.filter(t => leagueTeamNames.includes(t.FullName || ""))
+            : allTeamStandings;
+          const idx = leagueStandings.findIndex(t => t.FullName === teamName);
+          if (idx >= 0) {
+            position = idx + 1;
+            isChampion = idx === 0;
+          }
         }
-      }
 
-      registerRows.push({
-        SeasonID: standing.SeasonID,
-        LeagueName: leagueN,
-        LeagueTier: tier,
-        LeagueID: leagueId || 0,
-        position,
-        isChampion,
-        totalgamesplayed: standing.totalgamesplayed,
-        totalpoints: standing.totalpoints,
-        GoalsFor: standing.GoalsFor,
-        GoalsAgainst: standing.GoalsAgainst,
-        totalgsc: standing.totalgsc,
-      });
+        registerRows.push({
+          SeasonID: seasonId,
+          LeagueName: leagueN,
+          LeagueTier: tier,
+          LeagueID: leagueId,
+          position,
+          isChampion,
+          totalgamesplayed: standing.totalgamesplayed,
+          totalpoints: standing.totalpoints,
+          GoalsFor: standing.GoalsFor,
+          GoalsAgainst: standing.GoalsAgainst,
+          totalgsc: standing.totalgsc,
+        });
+      } else {
+        // For cups/CL (no standings), compute from match results
+        const teamId = team?.TeamID;
+        if (!teamId || !leagueId) continue;
+        
+        const { data: cupResults } = await supabase.from("results")
+          .select("HomeTeamID, AwayTeamID, HomeTeamScore, AwayTeamScore")
+          .eq("LeagueID", leagueId)
+          .eq("SeasonID", seasonId)
+          .or(`HomeTeamID.eq.${teamId},AwayTeamID.eq.${teamId}`);
+        
+        let gp = 0, gf = 0, ga = 0, wins = 0;
+        (cupResults || []).forEach(r => {
+          gp++;
+          const isHome = r.HomeTeamID === teamId;
+          const ts = isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
+          const os = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
+          gf += ts;
+          ga += os;
+          if (ts > os) wins++;
+        });
+        
+        registerRows.push({
+          SeasonID: seasonId,
+          LeagueName: leagueN,
+          LeagueTier: tier,
+          LeagueID: leagueId,
+          position: null,
+          isChampion: false,
+          totalgamesplayed: gp,
+          totalpoints: null,
+          GoalsFor: gf,
+          GoalsAgainst: ga,
+          totalgsc: null,
+        });
+      }
     }
 
-    registerRows.sort((a, b) => b.SeasonID - a.SeasonID);
+    registerRows.sort((a, b) => b.SeasonID - a.SeasonID || a.LeagueID - b.LeagueID);
     setSeasonRegister(registerRows);
   }
 
@@ -407,7 +465,7 @@ export default function TeamPage() {
     );
   }
 
-  const RegisterTable = ({ rows, title }: { rows: SeasonRegisterRow[]; title: string }) => (
+  const RegisterTable = ({ rows, title, isDomestic }: { rows: SeasonRegisterRow[]; title: string; isDomestic?: boolean }) => (
     <div className="border border-border rounded overflow-hidden">
       <div className="px-3 py-2" style={headerStyle || undefined}>
         <h3 className={`font-display text-sm font-bold ${headerStyle ? "" : "text-table-header-foreground bg-table-header"}`}
@@ -421,21 +479,35 @@ export default function TeamPage() {
             <tr className="bg-secondary">
               <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
               <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">League</th>
-              <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pos</th>
+              {isDomestic && <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pos</th>}
               <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GP</th>
-              <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pts</th>
+              {isDomestic && <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pts</th>}
+              {!isDomestic && <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">W-L</th>}
               <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GF</th>
               <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GA</th>
               <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GD</th>
-              <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GSC</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row, i) => {
               const gd = (row.GoalsFor || 0) - (row.GoalsAgainst || 0);
               const posClass = row.isChampion ? "font-bold text-yellow-500" : "";
+              // Compute W-L for non-domestic
+              const cupWins = !isDomestic ? (() => {
+                const tid = team?.TeamID;
+                if (!tid) return { w: 0, l: 0 };
+                const matches = matchResults.filter(r => r.LeagueID === row.LeagueID && r.SeasonID === row.SeasonID);
+                let w = 0, l = 0;
+                matches.forEach(r => {
+                  const isHome = r.HomeTeamID === tid;
+                  const ts = isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
+                  const os = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
+                  if (ts > os) w++; else if (os > ts) l++;
+                });
+                return { w, l };
+              })() : null;
               return (
-                <tr key={row.SeasonID} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
+                <tr key={`${row.SeasonID}-${row.LeagueID}`} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
                   <td className="px-3 py-1.5">
                     <button
                       onClick={() => { setRosterSeasonId(row.SeasonID); setActiveTab("roster"); }}
@@ -444,16 +516,20 @@ export default function TeamPage() {
                       {seasonLabel(row.SeasonID)}
                     </button>
                   </td>
-                  <td className="px-3 py-1.5 text-xs text-muted-foreground">{row.LeagueName}</td>
-                  <td className={`px-3 py-1.5 text-right font-mono ${posClass}`}>
-                    {row.isChampion ? "🏆 1st" : row.position != null ? ordinal(row.position) : "—"}
+                  <td className="px-3 py-1.5 text-xs text-muted-foreground">
+                    <Link to={`/league/${row.LeagueID}`} className="hover:text-accent hover:underline">{row.LeagueName}</Link>
                   </td>
+                  {isDomestic && (
+                    <td className={`px-3 py-1.5 text-right font-mono ${posClass}`}>
+                      {row.isChampion ? "🏆 1st" : row.position != null ? ordinal(row.position) : "—"}
+                    </td>
+                  )}
                   <td className="px-3 py-1.5 text-right font-mono">{row.totalgamesplayed ?? "—"}</td>
-                  <td className="px-3 py-1.5 text-right font-mono">{row.totalpoints ?? "—"}</td>
+                  {isDomestic && <td className="px-3 py-1.5 text-right font-mono">{row.totalpoints ?? "—"}</td>}
+                  {!isDomestic && <td className="px-3 py-1.5 text-right font-mono">{cupWins ? `${cupWins.w}W–${cupWins.l}L` : "—"}</td>}
                   <td className="px-3 py-1.5 text-right font-mono">{row.GoalsFor ?? "—"}</td>
                   <td className="px-3 py-1.5 text-right font-mono">{row.GoalsAgainst ?? "—"}</td>
                   <td className={`px-3 py-1.5 text-right font-mono ${gd > 0 ? "text-green-600" : gd < 0 ? "text-destructive" : ""}`}>{gd > 0 ? "+" : ""}{gd}</td>
-                  <td className="px-3 py-1.5 text-right font-mono">{row.totalgsc ?? "—"}</td>
                 </tr>
               );
             })}
@@ -530,7 +606,7 @@ export default function TeamPage() {
 
         {activeTab === "register" && (
           <div className="space-y-6">
-            {domesticRegister.length > 0 && <RegisterTable rows={domesticRegister} title="Domestic League Register" />}
+            {domesticRegister.length > 0 && <RegisterTable rows={domesticRegister} title="Domestic League Register" isDomestic />}
             {cupRegister.length > 0 && <RegisterTable rows={cupRegister} title="Cup Competition Register" />}
             {championsLeagueRegister.length > 0 && <RegisterTable rows={championsLeagueRegister} title="Champions League Register" />}
             {seasonRegister.length === 0 && <p className="text-muted-foreground font-sans text-sm">No season data available.</p>}

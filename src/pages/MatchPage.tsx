@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAll";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 
@@ -60,13 +61,13 @@ export default function MatchPage() {
 
     Promise.all([
       supabase.from("results").select("*").eq("MatchID", mid).single(),
-      supabase.from("players").select("PlayerID, PlayerName"),
+      fetchAllRows("players", { select: "PlayerID, PlayerName" }),
       supabase.from("teams").select("TeamID, FullName"),
-    ]).then(([{ data: matchData }, { data: playerData }, { data: teamData }]) => {
+    ]).then(([{ data: matchData }, playerData, { data: teamData }]) => {
       if (matchData) setMatch(matchData as MatchResult);
       
       const pm = new Map<number, { name: string; id: number }>();
-      (playerData || []).forEach(p => {
+      (playerData || []).forEach((p: any) => {
         if (p.PlayerID && p.PlayerName) pm.set(p.PlayerID, { name: p.PlayerName, id: p.PlayerID });
       });
       setPlayerMap(pm);
