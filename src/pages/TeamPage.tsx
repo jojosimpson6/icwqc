@@ -465,7 +465,7 @@ export default function TeamPage() {
     );
   }
 
-  const RegisterTable = ({ rows, title }: { rows: SeasonRegisterRow[]; title: string }) => (
+  const RegisterTable = ({ rows, title, isDomestic }: { rows: SeasonRegisterRow[]; title: string; isDomestic?: boolean }) => (
     <div className="border border-border rounded overflow-hidden">
       <div className="px-3 py-2" style={headerStyle || undefined}>
         <h3 className={`font-display text-sm font-bold ${headerStyle ? "" : "text-table-header-foreground bg-table-header"}`}
@@ -479,21 +479,35 @@ export default function TeamPage() {
             <tr className="bg-secondary">
               <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
               <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">League</th>
-              <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pos</th>
+              {isDomestic && <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pos</th>}
               <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GP</th>
-              <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pts</th>
+              {isDomestic && <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pts</th>}
+              {!isDomestic && <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">W-L</th>}
               <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GF</th>
               <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GA</th>
               <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GD</th>
-              <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GSC</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((row, i) => {
               const gd = (row.GoalsFor || 0) - (row.GoalsAgainst || 0);
               const posClass = row.isChampion ? "font-bold text-yellow-500" : "";
+              // Compute W-L for non-domestic
+              const cupWins = !isDomestic ? (() => {
+                const tid = team?.TeamID;
+                if (!tid) return { w: 0, l: 0 };
+                const matches = matchResults.filter(r => r.LeagueID === row.LeagueID && r.SeasonID === row.SeasonID);
+                let w = 0, l = 0;
+                matches.forEach(r => {
+                  const isHome = r.HomeTeamID === tid;
+                  const ts = isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
+                  const os = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
+                  if (ts > os) w++; else if (os > ts) l++;
+                });
+                return { w, l };
+              })() : null;
               return (
-                <tr key={row.SeasonID} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
+                <tr key={`${row.SeasonID}-${row.LeagueID}`} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
                   <td className="px-3 py-1.5">
                     <button
                       onClick={() => { setRosterSeasonId(row.SeasonID); setActiveTab("roster"); }}
@@ -502,16 +516,20 @@ export default function TeamPage() {
                       {seasonLabel(row.SeasonID)}
                     </button>
                   </td>
-                  <td className="px-3 py-1.5 text-xs text-muted-foreground">{row.LeagueName}</td>
-                  <td className={`px-3 py-1.5 text-right font-mono ${posClass}`}>
-                    {row.isChampion ? "🏆 1st" : row.position != null ? ordinal(row.position) : "—"}
+                  <td className="px-3 py-1.5 text-xs text-muted-foreground">
+                    <Link to={`/league/${row.LeagueID}`} className="hover:text-accent hover:underline">{row.LeagueName}</Link>
                   </td>
+                  {isDomestic && (
+                    <td className={`px-3 py-1.5 text-right font-mono ${posClass}`}>
+                      {row.isChampion ? "🏆 1st" : row.position != null ? ordinal(row.position) : "—"}
+                    </td>
+                  )}
                   <td className="px-3 py-1.5 text-right font-mono">{row.totalgamesplayed ?? "—"}</td>
-                  <td className="px-3 py-1.5 text-right font-mono">{row.totalpoints ?? "—"}</td>
+                  {isDomestic && <td className="px-3 py-1.5 text-right font-mono">{row.totalpoints ?? "—"}</td>}
+                  {!isDomestic && <td className="px-3 py-1.5 text-right font-mono">{cupWins ? `${cupWins.w}W–${cupWins.l}L` : "—"}</td>}
                   <td className="px-3 py-1.5 text-right font-mono">{row.GoalsFor ?? "—"}</td>
                   <td className="px-3 py-1.5 text-right font-mono">{row.GoalsAgainst ?? "—"}</td>
                   <td className={`px-3 py-1.5 text-right font-mono ${gd > 0 ? "text-green-600" : gd < 0 ? "text-destructive" : ""}`}>{gd > 0 ? "+" : ""}{gd}</td>
-                  <td className="px-3 py-1.5 text-right font-mono">{row.totalgsc ?? "—"}</td>
                 </tr>
               );
             })}
