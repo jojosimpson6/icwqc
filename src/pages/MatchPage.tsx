@@ -62,11 +62,11 @@ export default function MatchPage() {
       supabase.from("results").select("*").eq("MatchID", mid).single(),
       fetchAllRows("players", { select: "PlayerID, PlayerName" }),
       supabase.from("teams").select("TeamID, FullName"),
-    ]).then(([{ data: matchData }, { data: playerData }, { data: teamData }]) => {
+    ]).then(([{ data: matchData }, playerData, { data: teamData }]) => {
       if (matchData) setMatch(matchData as MatchResult);
       
       const pm = new Map<number, { name: string; id: number }>();
-      (playerData || []).forEach(p => {
+      (playerData || []).forEach((p: any) => {
         if (p.PlayerID && p.PlayerName) pm.set(p.PlayerID, { name: p.PlayerName, id: p.PlayerID });
       });
       setPlayerMap(pm);
