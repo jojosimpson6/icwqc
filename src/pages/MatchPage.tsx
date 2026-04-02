@@ -60,7 +60,7 @@ export default function MatchPage() {
 
     Promise.all([
       supabase.from("results").select("*").eq("MatchID", mid).single(),
-      supabase.from("players").select("PlayerID, PlayerName"),
+      fetchAllRows("players", { select: "PlayerID, PlayerName" }),
       supabase.from("teams").select("TeamID, FullName"),
     ]).then(([{ data: matchData }, { data: playerData }, { data: teamData }]) => {
       if (matchData) setMatch(matchData as MatchResult);
