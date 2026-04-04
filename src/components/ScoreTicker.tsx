@@ -26,7 +26,7 @@ export function ScoreTicker() {
         supabase.from("leagues").select("LeagueID, LeagueName"),
       ]);
       const teamMap: Record<number, string> = {};
-      teams?.forEach(t => { teamMap[t.TeamID] = t.FullName; });
+      (teams || []).forEach((t: any) => { teamMap[t.TeamID] = t.FullName; });
       const leagueMap: Record<number, string> = {};
       leagues?.forEach(l => { leagueMap[l.LeagueID] = l.LeagueName || ""; });
 
