@@ -5,34 +5,6 @@ import { fetchAllRows } from "@/lib/fetchAll";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 
-interface MatchResult {
-  MatchID: number;
-  HomeTeamID: number | null;
-  AwayTeamID: number | null;
-  HomeTeamScore: number | null;
-  AwayTeamScore: number | null;
-  SnitchCaughtTime: number | null;
-  SnitchCaughtBy: number | null; // This is a TeamID, not PlayerID
-  LeagueID: number | null;
-  SeasonID: number | null;
-  WeekID: number | null;
-  IsNeutralSite: number | null;
-  HomeChaser1ID: number | null; HomeChaser1Goals: number | null;
-  HomeChaser2ID: number | null; HomeChaser2Goals: number | null;
-  HomeChaser3ID: number | null; HomeChaser3Goals: number | null;
-  AwayChaser1ID: number | null; AwayChaser1Goals: number | null;
-  AwayChaser2ID: number | null; AwayChaser2Goals: number | null;
-  AwayChaser3ID: number | null; AwayChaser3Goals: number | null;
-  HomeKeeperID: number | null; HomeKeeperSaves: number | null; HomeKeeperShotsFaced: number | null;
-  AwayKeeperID: number | null; AwayKeeperSaves: number | null; AwayKeeperShotsFaced: number | null;
-  HomeSeekerID: number | null;
-  AwaySeekerID: number | null;
-  HomeBeater1ID: number | null;
-  HomeBeater2ID: number | null;
-  AwayBeater1ID: number | null;
-  AwayBeater2ID: number | null;
-}
-
 type PlayerMap = Map<number, { name: string; id: number }>;
 
 function playerLink(id: number | null, playerMap: PlayerMap) {
@@ -47,9 +19,14 @@ function seasonLabel(id: number | null): string {
   return `${id - 1}–${String(id).slice(-2)}`;
 }
 
+function pct(num: number, den: number): string {
+  if (den === 0) return "—";
+  return ((num / den) * 100).toFixed(1) + "%";
+}
+
 export default function MatchPage() {
   const { id } = useParams();
-  const [match, setMatch] = useState<MatchResult | null>(null);
+  const [match, setMatch] = useState<any>(null);
   const [playerMap, setPlayerMap] = useState<PlayerMap>(new Map());
   const [teamMap, setTeamMap] = useState<Map<number, string>>(new Map());
   const [leagueName, setLeagueName] = useState("");
@@ -62,10 +39,10 @@ export default function MatchPage() {
     Promise.all([
       supabase.from("results").select("*").eq("MatchID", mid).single(),
       fetchAllRows("players", { select: "PlayerID, PlayerName" }),
-      supabase.from("teams").select("TeamID, FullName"),
-    ]).then(([{ data: matchData }, playerData, { data: teamData }]) => {
-      if (matchData) setMatch(matchData as MatchResult);
-      
+      fetchAllRows("teams", { select: "TeamID, FullName" }),
+    ]).then(([{ data: matchData }, playerData, teamData]) => {
+      if (matchData) setMatch(matchData);
+
       const pm = new Map<number, { name: string; id: number }>();
       (playerData || []).forEach((p: any) => {
         if (p.PlayerID && p.PlayerName) pm.set(p.PlayerID, { name: p.PlayerName, id: p.PlayerID });
@@ -73,7 +50,7 @@ export default function MatchPage() {
       setPlayerMap(pm);
 
       const tm = new Map<number, string>();
-      (teamData || []).forEach(t => { if (t.TeamID) tm.set(t.TeamID, t.FullName); });
+      (teamData || []).forEach((t: any) => { if (t.TeamID) tm.set(t.TeamID, t.FullName); });
       setTeamMap(tm);
 
       if (matchData?.LeagueID) {
@@ -116,7 +93,6 @@ export default function MatchPage() {
   const homeWin = (match.HomeTeamScore || 0) > (match.AwayTeamScore || 0);
   const awayWin = (match.AwayTeamScore || 0) > (match.HomeTeamScore || 0);
 
-  // SnitchCaughtBy is a TeamID — resolve to the correct seeker
   const snitchCatcherTeamId = match.SnitchCaughtBy;
   const snitchCatcherPlayerId = snitchCatcherTeamId === match.HomeTeamID
     ? match.HomeSeekerID
@@ -126,38 +102,161 @@ export default function MatchPage() {
   const homeCaughtSnitch = snitchCatcherTeamId === match.HomeTeamID;
   const awayCaughtSnitch = snitchCatcherTeamId === match.AwayTeamID;
 
+  // Check if extended stats are available (95-96+)
+  const hasExtendedStats = (match.HomeChaser1MinPlayed != null && match.HomeChaser1MinPlayed > 0) ||
+    (match.HomeChaser1PassAtt != null && match.HomeChaser1PassAtt > 0) ||
+    (match.HomeBeater1BludgersHit != null && match.HomeBeater1BludgersHit > 0);
+
   const thClass = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground";
   const tdClass = "px-3 py-1.5 text-sm font-sans";
 
-  // Box score component for one side
   const BoxScore = ({ side }: { side: "home" | "away" }) => {
     const isHome = side === "home";
     const teamName = isHome ? homeTeam : awayTeam;
+
     const chasers = isHome
       ? [
-          { id: match.HomeChaser1ID, goals: match.HomeChaser1Goals },
-          { id: match.HomeChaser2ID, goals: match.HomeChaser2Goals },
-          { id: match.HomeChaser3ID, goals: match.HomeChaser3Goals },
+          { id: match.HomeChaser1ID, goals: match.HomeChaser1Goals, passAtt: match.HomeChaser1PassAtt, passComp: match.HomeChaser1PassComp, shotAtt: match.HomeChaser1ShotAtt, shotScored: match.HomeChaser1ShotScored, min: match.HomeChaser1MinPlayed },
+          { id: match.HomeChaser2ID, goals: match.HomeChaser2Goals, passAtt: match.HomeChaser2PassAtt, passComp: match.HomeChaser2PassComp, shotAtt: match.HomeChaser2ShotAtt, shotScored: match.HomeChaser2ShotScored, min: match.HomeChaser2MinPlayed },
+          { id: match.HomeChaser3ID, goals: match.HomeChaser3Goals, passAtt: match.HomeChaser3PassAtt, passComp: match.HomeChaser3PassComp, shotAtt: match.HomeChaser3ShotAtt, shotScored: match.HomeChaser3ShotScored, min: match.HomeChaser3MinPlayed },
         ]
       : [
-          { id: match.AwayChaser1ID, goals: match.AwayChaser1Goals },
-          { id: match.AwayChaser2ID, goals: match.AwayChaser2Goals },
-          { id: match.AwayChaser3ID, goals: match.AwayChaser3Goals },
+          { id: match.AwayChaser1ID, goals: match.AwayChaser1Goals, passAtt: match.AwayChaser1PassAtt, passComp: match.AwayChaser1PassComp, shotAtt: match.AwayChaser1ShotAtt, shotScored: match.AwayChaser1ShotScored, min: match.AwayChaser1MinPlayed },
+          { id: match.AwayChaser2ID, goals: match.AwayChaser2Goals, passAtt: match.AwayChaser2PassAtt, passComp: match.AwayChaser2PassComp, shotAtt: match.AwayChaser2ShotAtt, shotScored: match.AwayChaser2ShotScored, min: match.AwayChaser2MinPlayed },
+          { id: match.AwayChaser3ID, goals: match.AwayChaser3Goals, passAtt: match.AwayChaser3PassAtt, passComp: match.AwayChaser3PassComp, shotAtt: match.AwayChaser3ShotAtt, shotScored: match.AwayChaser3ShotScored, min: match.AwayChaser3MinPlayed },
         ];
+
     const beaters = isHome
-      ? [match.HomeBeater1ID, match.HomeBeater2ID]
-      : [match.AwayBeater1ID, match.AwayBeater2ID];
-    const keeperId = isHome ? match.HomeKeeperID : match.AwayKeeperID;
-    const keeperSaves = isHome ? match.HomeKeeperSaves : match.AwayKeeperSaves;
-    const keeperSF = isHome ? match.HomeKeeperShotsFaced : match.AwayKeeperShotsFaced;
-    const seekerId = isHome ? match.HomeSeekerID : match.AwaySeekerID;
-    const caughtSnitch = isHome ? homeCaughtSnitch : awayCaughtSnitch;
-    // Shots faced by the opposing team's keeper = shots allowed by this team's beaters
-    const oppSF = isHome ? match.AwayKeeperShotsFaced : match.HomeKeeperShotsFaced;
+      ? [
+          { id: match.HomeBeater1ID, bludgersHit: match.HomeBeater1BludgersHit, turnovers: match.HomeBeater1TurnoversForced, protected: match.HomeBeater1TeammatesProtected, min: match.HomeBeater1MinPlayed, bsf: match.HomeBeater1BludgerShotsFaced },
+          { id: match.HomeBeater2ID, bludgersHit: match.HomeBeater2BludgersHit, turnovers: match.HomeBeater2TurnoversForced, protected: match.HomeBeater2TeammatesProtected, min: match.HomeBeater2MinPlayed, bsf: match.HomeBeater2BludgerShotsFaced },
+        ]
+      : [
+          { id: match.AwayBeater1ID, bludgersHit: match.AwayBeater1BludgersHit, turnovers: match.AwayBeater1TurnoversForced, protected: match.AwayBeater1TeammatesProtected, min: match.AwayBeater1MinPlayed, bsf: match.AwayBeater1BludgerShotsFaced },
+          { id: match.AwayBeater2ID, bludgersHit: match.AwayBeater2BludgersHit, turnovers: match.AwayBeater2TurnoversForced, protected: match.AwayBeater2TeammatesProtected, min: match.AwayBeater2MinPlayed, bsf: match.AwayBeater2BludgerShotsFaced },
+        ];
+
+    const keeper = isHome
+      ? { id: match.HomeKeeperID, saves: match.HomeKeeperSaves, sf: match.HomeKeeperShotsFaced, sf2: match.HomeKeeperShotsFaced2, saved: match.HomeKeeperShotsSaved, parried: match.HomeKeeperShotsParried, conceded: match.HomeKeeperShotsConceded, passAtt: match.HomeKeeperPassAtt, passComp: match.HomeKeeperPassComp, min: match.HomeKeeperMinPlayed }
+      : { id: match.AwayKeeperID, saves: match.AwayKeeperSaves, sf: match.AwayKeeperShotsFaced, sf2: match.AwayKeeperShotsFaced2, saved: match.AwayKeeperShotsSaved, parried: match.AwayKeeperShotsParried, conceded: match.AwayKeeperShotsConceded, passAtt: match.AwayKeeperPassAtt, passComp: match.AwayKeeperPassComp, min: match.AwayKeeperMinPlayed };
+
+    const seeker = isHome
+      ? { id: match.HomeSeekerID, caught: homeCaughtSnitch, min: match.HomeSeekerMinPlayed, spotted: match.HomeSeekerSnitchSpotted, attempts: match.HomeSeekerCatchAttempts }
+      : { id: match.AwaySeekerID, caught: awayCaughtSnitch, min: match.AwaySeekerMinPlayed, spotted: match.AwaySeekerSnitchSpotted, attempts: match.AwaySeekerCatchAttempts };
 
     let rowIdx = 0;
     const rowClass = () => { const c = rowIdx % 2 === 0 ? "bg-card" : "bg-table-stripe"; rowIdx++; return c; };
 
+    if (hasExtendedStats) {
+      // Extended box score with all new stats
+      return (
+        <div className="border border-border rounded overflow-hidden">
+          <div className="bg-table-header px-3 py-2">
+            <h3 className="font-display text-sm font-bold text-table-header-foreground">{teamName}</h3>
+          </div>
+          <div className="overflow-x-auto">
+            {/* Chasers */}
+            <table className="w-full text-sm mb-0">
+              <thead>
+                <tr className="bg-secondary">
+                  <th className={`${thClass} text-left`}>Chasers</th>
+                  <th className={`${thClass} text-right`}>Min</th>
+                  <th className={`${thClass} text-right`}>Goals</th>
+                  <th className={`${thClass} text-right`}>Sh</th>
+                  <th className={`${thClass} text-right`}>Sh%</th>
+                  <th className={`${thClass} text-right`}>Pass</th>
+                  <th className={`${thClass} text-right`}>Pass%</th>
+                </tr>
+              </thead>
+              <tbody>
+                {chasers.filter(c => c.id).map((c) => (
+                  <tr key={c.id} className={`border-t border-border ${rowClass()}`}>
+                    <td className={tdClass}>{playerLink(c.id, playerMap)}</td>
+                    <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{c.min ?? "—"}</td>
+                    <td className={`${tdClass} text-right font-mono font-bold`}>{c.goals ?? 0}</td>
+                    <td className={`${tdClass} text-right font-mono`}>{c.shotScored ?? 0}/{c.shotAtt ?? 0}</td>
+                    <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{pct(c.shotScored ?? 0, c.shotAtt ?? 0)}</td>
+                    <td className={`${tdClass} text-right font-mono`}>{c.passComp ?? 0}/{c.passAtt ?? 0}</td>
+                    <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{pct(c.passComp ?? 0, c.passAtt ?? 0)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {/* Beaters */}
+            <table className="w-full text-sm mb-0">
+              <thead>
+                <tr className="bg-secondary border-t-2 border-border">
+                  <th className={`${thClass} text-left`}>Beaters</th>
+                  <th className={`${thClass} text-right`}>Min</th>
+                  <th className={`${thClass} text-right`}>BH</th>
+                  <th className={`${thClass} text-right`}>TF</th>
+                  <th className={`${thClass} text-right`}>TP</th>
+                  <th className={`${thClass} text-right`}>BSF</th>
+                </tr>
+              </thead>
+              <tbody>
+                {beaters.filter(b => b.id).map((b) => (
+                  <tr key={b.id} className={`border-t border-border ${rowClass()}`}>
+                    <td className={tdClass}>{playerLink(b.id, playerMap)}</td>
+                    <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{b.min ?? "—"}</td>
+                    <td className={`${tdClass} text-right font-mono font-bold`}>{b.bludgersHit ?? 0}</td>
+                    <td className={`${tdClass} text-right font-mono`}>{b.turnovers ?? 0}</td>
+                    <td className={`${tdClass} text-right font-mono`}>{b.protected ?? 0}</td>
+                    <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{b.bsf ?? 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {/* Keeper */}
+            <table className="w-full text-sm mb-0">
+              <thead>
+                <tr className="bg-secondary border-t-2 border-border">
+                  <th className={`${thClass} text-left`}>Keeper</th>
+                  <th className={`${thClass} text-right`}>Min</th>
+                  <th className={`${thClass} text-right`}>SV</th>
+                  <th className={`${thClass} text-right`}>SF</th>
+                  <th className={`${thClass} text-right`}>Sv%</th>
+                  <th className={`${thClass} text-right`}>Pass%</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className={`border-t border-border ${rowClass()}`}>
+                  <td className={tdClass}>{playerLink(keeper.id, playerMap)}</td>
+                  <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{keeper.min ?? "—"}</td>
+                  <td className={`${tdClass} text-right font-mono font-bold`}>{keeper.saves ?? 0}</td>
+                  <td className={`${tdClass} text-right font-mono`}>{keeper.sf ?? 0}</td>
+                  <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{pct(keeper.saves ?? 0, keeper.sf ?? 0)}</td>
+                  <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{pct(keeper.passComp ?? 0, keeper.passAtt ?? 0)}</td>
+                </tr>
+              </tbody>
+            </table>
+            {/* Seeker */}
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-secondary border-t-2 border-border">
+                  <th className={`${thClass} text-left`}>Seeker</th>
+                  <th className={`${thClass} text-right`}>Min</th>
+                  <th className={`${thClass} text-right`}>Caught</th>
+                  <th className={`${thClass} text-right`}>Spotted</th>
+                  <th className={`${thClass} text-right`}>Attempts</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr className={`border-t border-border ${rowClass()}`}>
+                  <td className={tdClass}>{playerLink(seeker.id, playerMap)}</td>
+                  <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{seeker.min ?? "—"}</td>
+                  <td className={`${tdClass} text-right font-mono font-bold`}>{seeker.caught ? "✓" : "—"}</td>
+                  <td className={`${tdClass} text-right font-mono`}>{seeker.spotted ?? 0}</td>
+                  <td className={`${tdClass} text-right font-mono`}>{seeker.attempts ?? 0}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    }
+
+    // Basic box score (pre 95-96)
     return (
       <div className="border border-border rounded overflow-hidden">
         <div className="bg-table-header px-3 py-2">
@@ -180,22 +279,22 @@ export default function MatchPage() {
                   <td className={`${tdClass} text-right font-mono`}>{c.goals ?? 0} goals</td>
                 </tr>
               ))}
-              {beaters.filter(Boolean).map((bId) => (
-                <tr key={bId} className={`border-t border-border ${rowClass()}`}>
-                  <td className={tdClass}>{playerLink(bId, playerMap)}</td>
+              {beaters.filter(b => b.id).map((b) => (
+                <tr key={b.id} className={`border-t border-border ${rowClass()}`}>
+                  <td className={tdClass}>{playerLink(b.id, playerMap)}</td>
                   <td className={`${tdClass} text-muted-foreground`}>Beater</td>
-                  <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{oppSF ?? "—"} SA</td>
+                  <td className={`${tdClass} text-right font-mono text-muted-foreground`}>—</td>
                 </tr>
               ))}
               <tr className={`border-t border-border ${rowClass()}`}>
-                <td className={tdClass}>{playerLink(keeperId, playerMap)}</td>
+                <td className={tdClass}>{playerLink(keeper.id, playerMap)}</td>
                 <td className={`${tdClass} text-muted-foreground`}>Keeper</td>
-                <td className={`${tdClass} text-right font-mono`}>{keeperSaves ?? 0}/{keeperSF ?? 0} saves</td>
+                <td className={`${tdClass} text-right font-mono`}>{keeper.saves ?? 0}/{keeper.sf ?? 0} saves</td>
               </tr>
               <tr className={`border-t border-border ${rowClass()}`}>
-                <td className={tdClass}>{playerLink(seekerId, playerMap)}</td>
+                <td className={tdClass}>{playerLink(seeker.id, playerMap)}</td>
                 <td className={`${tdClass} text-muted-foreground`}>Seeker</td>
-                <td className={`${tdClass} text-right font-mono`}>{caughtSnitch ? "✓ Caught" : "—"}</td>
+                <td className={`${tdClass} text-right font-mono`}>{seeker.caught ? "✓ Caught" : "—"}</td>
               </tr>
             </tbody>
           </table>

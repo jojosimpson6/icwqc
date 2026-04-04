@@ -179,22 +179,22 @@ export default function TeamPage() {
       });
       setNations(nm);
 
-      if (statsData) {
+      if (statsData && statsData.length > 0) {
         setAllStats(statsData as StatLine[]);
-        const seasons = [...new Set((statsData as StatLine[]).map(s => s.SeasonID).filter(Boolean))].sort((a, b) => (b || 0) - (a || 0));
+        const seasons = [...new Set((statsData as StatLine[]).map((s: any) => s.SeasonID).filter(Boolean))].sort((a, b) => (b || 0) - (a || 0));
         const latestSeason = seasons[0] || null;
         setRosterSeasonId(latestSeason);
-        setCurrentRoster((statsData as StatLine[]).filter(s => s.SeasonID === latestSeason));
+        setCurrentRoster((statsData as StatLine[]).filter((s: any) => s.SeasonID === latestSeason));
       }
       if (standData && standData.length > 0) {
         setAllStandings(standData as StandingRow[]);
         setCurrentStanding((standData as StandingRow[])[0]);
       }
-      if (playerData) setPlayers(playerData);
+      if (playerData) setPlayers(playerData as PlayerInfo[]);
 
       // Build register from stats (works even without standings for cups/CL)
-      if (statsData && (statsData as StatLine[]).length > 0) {
-        buildSeasonRegister(teamName, standData as StandingRow[] || [], statsData as StatLine[]);
+      if (statsData && statsData.length > 0) {
+        buildSeasonRegister(teamName, (standData || []) as StandingRow[], statsData as StatLine[]);
       }
     });
   }, [name]);
