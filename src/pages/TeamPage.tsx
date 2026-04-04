@@ -291,11 +291,14 @@ export default function TeamPage() {
         const teamId = team?.TeamID;
         if (!teamId || !leagueId) continue;
         
-        const { data: cupResults } = await supabase.from("results")
-          .select("HomeTeamID, AwayTeamID, HomeTeamScore, AwayTeamScore")
-          .eq("LeagueID", leagueId)
-          .eq("SeasonID", seasonId)
-          .or(`HomeTeamID.eq.${teamId},AwayTeamID.eq.${teamId}`);
+        const cupResults = await fetchAllRows("results", {
+          select: "HomeTeamID, AwayTeamID, HomeTeamScore, AwayTeamScore",
+          filters: [
+            { method: "eq", args: ["LeagueID", leagueId] },
+            { method: "eq", args: ["SeasonID", seasonId] },
+            { method: "or", args: [`HomeTeamID.eq.${teamId},AwayTeamID.eq.${teamId}`] },
+          ],
+        });
         
         let gp = 0, gf = 0, ga = 0, wins = 0;
         (cupResults || []).forEach(r => {
