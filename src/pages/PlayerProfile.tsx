@@ -160,8 +160,8 @@ export default function PlayerProfile() {
       if (!pData?.PlayerName) return;
       const playerName = pData.PlayerName;
 
-      supabase.from("stats").select("*").eq("PlayerName", playerName).order("SeasonID", { ascending: true }).then(({ data: sData }) => {
-        if (!sData) return;
+      fetchAllRows("stats", { select: "*", filters: [{ method: "eq", args: ["PlayerName", playerName] }], order: { column: "SeasonID", ascending: true } }).then((sData) => {
+        if (!sData || sData.length === 0) return;
         setStats(sData as StatLine[]);
         if (sData.length > 0) {
           setMostRecentTeam(sData[sData.length - 1].FullName || "");
