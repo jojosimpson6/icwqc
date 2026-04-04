@@ -211,10 +211,10 @@ export default function TeamPage() {
       }
     });
 
-    const { data: leagueData } = await supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier");
+    const leagueData = await fetchAllRows("leagues", { select: "LeagueID, LeagueName, LeagueTier" });
     const leagueTierMap = new Map<string, number>();
     const leagueIdByName = new Map<string, number>();
-    (leagueData || []).forEach(l => {
+    (leagueData || []).forEach((l: any) => {
       if (l.LeagueName) {
         leagueTierMap.set(l.LeagueName, l.LeagueTier || 1);
         leagueIdByName.set(l.LeagueName, l.LeagueID);
@@ -222,9 +222,9 @@ export default function TeamPage() {
     });
 
     // Get all teams grouped by league for filtering standings
-    const { data: allTeamsData } = await supabase.from("teams").select("FullName, LeagueID");
+    const allTeamsForReg = await fetchAllRows("teams", { select: "FullName, LeagueID" });
     const teamsByLeagueId = new Map<number, string[]>();
-    (allTeamsData || []).forEach(t => {
+    (allTeamsForReg || []).forEach((t: any) => {
       const arr = teamsByLeagueId.get(t.LeagueID) || [];
       arr.push(t.FullName);
       teamsByLeagueId.set(t.LeagueID, arr);
