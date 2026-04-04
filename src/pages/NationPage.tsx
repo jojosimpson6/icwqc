@@ -110,12 +110,11 @@ export default function NationPage() {
             if (rData) setIntlResults(rData as IntlResult[]);
           });
       } else if (intlLeagueIds.length > 0) {
-        // Fallback: show all intl results
-        supabase.from("results")
-          .select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,SnitchCaughtTime")
-          .in("LeagueID", intlLeagueIds)
-          .order("MatchID", { ascending: false })
-          .then(({ data: rData }) => {
+        fetchAllRows("results", {
+          select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,SnitchCaughtTime",
+          filters: [{ method: "in", args: ["LeagueID", intlLeagueIds] }],
+          order: { column: "MatchID", ascending: false },
+        }).then((rData) => {
             if (rData) setIntlResults(rData as IntlResult[]);
           });
       }
