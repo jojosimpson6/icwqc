@@ -78,10 +78,10 @@ export default function NationPage() {
 
     Promise.all([
       supabase.from("nations").select("*").eq("NationID", nid).order("ValidToDt", { ascending: false }).limit(1),
-      supabase.from("players").select("PlayerID, PlayerName, Position, DOB, Height, headshot_url").eq("NationalityID", nid).order("PlayerName"),
-      supabase.from("teams").select("TeamID, FullName, PrimaryColor, logo_url, nationid, LeagueID"),
+      fetchAllRows("players", { select: "PlayerID, PlayerName, Position, DOB, Height, headshot_url", filters: [{ method: "eq", args: ["NationalityID", nid] }], order: { column: "PlayerName", ascending: true } }),
+      fetchAllRows("teams", { select: "TeamID, FullName, PrimaryColor, logo_url, nationid, LeagueID" }),
       supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier"),
-    ]).then(([{ data: nationData }, { data: playerData }, { data: teamsData }, { data: leaguesData }]) => {
+    ]).then(([{ data: nationData }, playerData, teamsData, { data: leaguesData }]) => {
       if (nationData?.[0]) setNation(nationData[0] as Nation);
       if (playerData) setPlayers(playerData as PlayerRow[]);
 
