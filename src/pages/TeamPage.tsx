@@ -126,13 +126,13 @@ export default function TeamPage() {
 
     Promise.all([
       supabase.from("teams").select("*").eq("FullName", teamName).single(),
-      supabase.from("stats").select("*").eq("FullName", teamName),
-      supabase.from("standings").select("*").eq("FullName", teamName).order("SeasonID", { ascending: false }),
+      fetchAllRows("stats", { select: "*", filters: [{ method: "eq", args: ["FullName", teamName] }] }),
+      fetchAllRows("standings", { select: "*", filters: [{ method: "eq", args: ["FullName", teamName] }], order: { column: "SeasonID", ascending: false } }),
       fetchAllRows("players", { select: "PlayerID, PlayerName, DOB, NationalityID, Height, Weight, Handedness" }),
-      supabase.from("teams").select("TeamID, FullName"),
+      fetchAllRows("teams", { select: "TeamID, FullName" }),
       fetchAllRows("matchdays", { select: "MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek" }),
-      supabase.from("nations").select("NationID, Nation, ValidToDt").order("ValidToDt", { ascending: false }),
-    ]).then(([{ data: teamData }, { data: statsData }, { data: standData }, playerData, { data: allTeamsData }, mdData, { data: nationData }]) => {
+      fetchAllRows("nations", { select: "NationID, Nation, ValidToDt", order: { column: "ValidToDt", ascending: false } }),
+    ]).then(([{ data: teamData }, statsData, standData, playerData, allTeamsData, mdData, nationData]) => {
       if (teamData) {
         setTeam(teamData);
         supabase.from("leagues").select("LeagueName").eq("LeagueID", teamData.LeagueID).single().then(({ data: ld }) => {
