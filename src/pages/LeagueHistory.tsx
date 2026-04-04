@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { getLeagueTierLabel } from "@/lib/helpers";
+import { fetchAllRows } from "@/lib/fetchAll";
 
 interface League {
   LeagueID: number;
