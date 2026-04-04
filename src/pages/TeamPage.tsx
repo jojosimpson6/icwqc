@@ -174,8 +174,7 @@ export default function TeamPage() {
       setFirstMatchDateMap(firstMatchDates);
 
       const nm = new Map<number, string>();
-      // Data is ordered by ValidToDt desc, so first entry per NationID is the most current name
-      (nationData || []).forEach((n: { NationID: number; Nation: string | null }) => {
+      (nationData || []).forEach((n: any) => {
         if (n.NationID && n.Nation && !nm.has(n.NationID)) nm.set(n.NationID, n.Nation);
       });
       setNations(nm);
