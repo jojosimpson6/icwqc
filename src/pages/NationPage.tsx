@@ -102,11 +102,11 @@ export default function NationPage() {
         setNationalTeam({ TeamID: natTeam.TeamID, FullName: natTeam.FullName, PrimaryColor: natTeam.PrimaryColor, logo_url: natTeam.logo_url });
 
         // Fetch intl results for this national team specifically
-        supabase.from("results")
-          .select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,SnitchCaughtTime")
-          .or(`HomeTeamID.eq.${natTeam.TeamID},AwayTeamID.eq.${natTeam.TeamID}`)
-          .order("MatchID", { ascending: false })
-          .then(({ data: rData }) => {
+        fetchAllRows("results", {
+          select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,SnitchCaughtTime",
+          filters: [{ method: "or", args: [`HomeTeamID.eq.${natTeam.TeamID},AwayTeamID.eq.${natTeam.TeamID}`] }],
+          order: { column: "MatchID", ascending: false },
+        }).then((rData) => {
             if (rData) setIntlResults(rData as IntlResult[]);
           });
       } else if (intlLeagueIds.length > 0) {
