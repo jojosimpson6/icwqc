@@ -160,11 +160,11 @@ export default function PlayerProfile() {
       if (!pData?.PlayerName) return;
       const playerName = pData.PlayerName;
 
-      supabase.from("stats").select("*").eq("PlayerName", playerName).order("SeasonID", { ascending: true }).then(({ data: sData }) => {
-        if (!sData) return;
+      fetchAllRows("stats", { select: "*", filters: [{ method: "eq", args: ["PlayerName", playerName] }], order: { column: "SeasonID", ascending: true } }).then((sData) => {
+        if (!sData || sData.length === 0) return;
         setStats(sData as StatLine[]);
         if (sData.length > 0) {
-          setMostRecentTeam(sData[sData.length - 1].FullName || "");
+          setMostRecentTeam((sData[sData.length - 1] as any).FullName || "");
         }
 
         // Detect all positions played
@@ -188,15 +188,16 @@ export default function PlayerProfile() {
 
         if (allOrFilters.length > 0) {
           Promise.all([
-            supabase.from("results")
-              .select("MatchID,SeasonID,LeagueID,WeekID,SnitchCaughtTime,SnitchCaughtBy,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,HomeKeeperShotsFaced,AwayKeeperShotsFaced,HomeKeeperID,AwayKeeperID,HomeKeeperSaves,AwayKeeperSaves,HomeBeater1ID,HomeBeater2ID,AwayBeater1ID,AwayBeater2ID,HomeSeekerID,AwaySeekerID,HomeChaser1ID,HomeChaser1Goals,HomeChaser2ID,HomeChaser2Goals,HomeChaser3ID,HomeChaser3Goals,AwayChaser1ID,AwayChaser1Goals,AwayChaser2ID,AwayChaser2Goals,AwayChaser3ID,AwayChaser3Goals,IsNeutralSite")
-              .or(allOrFilters.join(","))
-              .order("MatchID", { ascending: false }),
+            fetchAllRows("results", {
+              select: "MatchID,SeasonID,LeagueID,WeekID,SnitchCaughtTime,SnitchCaughtBy,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,HomeKeeperShotsFaced,AwayKeeperShotsFaced,HomeKeeperID,AwayKeeperID,HomeKeeperSaves,AwayKeeperSaves,HomeBeater1ID,HomeBeater2ID,AwayBeater1ID,AwayBeater2ID,HomeSeekerID,AwaySeekerID,HomeChaser1ID,HomeChaser1Goals,HomeChaser2ID,HomeChaser2Goals,HomeChaser3ID,HomeChaser3Goals,AwayChaser1ID,AwayChaser1Goals,AwayChaser2ID,AwayChaser2Goals,AwayChaser3ID,AwayChaser3Goals,IsNeutralSite",
+              filters: [{ method: "or", args: [allOrFilters.join(",")] }],
+              order: { column: "MatchID", ascending: false },
+            }),
             supabase.from("leagues").select("LeagueID,LeagueName"),
-            supabase.from("teams").select("TeamID, FullName"),
+            fetchAllRows("teams", { select: "TeamID, FullName" }),
             fetchAllRows("matchdays", { select: "MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek" }),
-          ]).then(([{ data: matchData }, { data: leaguesData }, { data: teamsData }, mdData]) => {
-            if (!matchData) return;
+          ]).then(([matchData, { data: leaguesData }, teamsData, mdData]) => {
+            if (!matchData || matchData.length === 0) return;
 
             const leagueNameMap = new Map<number, string>();
             (leaguesData || []).forEach((l: { LeagueID: number; LeagueName: string | null }) => {
@@ -204,7 +205,7 @@ export default function PlayerProfile() {
             });
 
             const teamNameMap = new Map<number, string>();
-            (teamsData || []).forEach((t: { TeamID: number; FullName: string }) => {
+            (teamsData || []).forEach((t: any) => {
               if (t.TeamID) teamNameMap.set(t.TeamID, t.FullName);
             });
 
@@ -312,10 +313,11 @@ export default function PlayerProfile() {
         const seasonIds = [...new Set(sData.map(s => s.SeasonID).filter(Boolean))] as number[];
         if (seasonIds.length === 0) return;
 
-        supabase.from("stats").select("PlayerName,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,GamesPlayed,Position,SeasonID,LeagueName")
-          .in("SeasonID" as never, seasonIds)
-          .then(({ data: allSeasonStats }) => {
-            if (!allSeasonStats) return;
+        fetchAllRows("stats", {
+          select: "PlayerName,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,GamesPlayed,Position,SeasonID,LeagueName",
+          filters: [{ method: "in", args: ["SeasonID", seasonIds] }],
+        }).then((allSeasonStats) => {
+            if (!allSeasonStats || allSeasonStats.length === 0) return;
             const maxMap = new Map<string, Map<string, number>>();
             const awardEntries: LeagueLeaderEntry[] = [];
 

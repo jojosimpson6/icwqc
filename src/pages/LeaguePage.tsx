@@ -101,13 +101,13 @@ export default function LeaguePage() {
 
     Promise.all([
       supabase.from("leagues").select("*").eq("LeagueID", lid).single(),
-      supabase.from("teams").select("*").eq("LeagueID", lid).order("FullName"),
+      fetchAllRows("teams", { select: "*", filters: [{ method: "eq", args: ["LeagueID", lid] }], order: { column: "FullName", ascending: true } }),
       fetchAllRows<StandingRow>("standings", { select: "*", order: { column: "totalpoints", ascending: false } }),
-      supabase.from("awards").select("*").eq("leagueid", lid).order("seasonid", { ascending: false }),
+      fetchAllRows("awards", { select: "*", filters: [{ method: "eq", args: ["leagueid", lid] }], order: { column: "seasonid", ascending: false } }),
       fetchAllRows("players", { select: "PlayerID, PlayerName, Position" }),
-      supabase.from("teams").select("TeamID, FullName"),
+      fetchAllRows("teams", { select: "TeamID, FullName" }),
       fetchAllRows("matchdays", { select: "SeasonID, LeagueID, MatchdayWeek, Matchday" }),
-    ]).then(([{ data: leagueData }, { data: teamData }, standingsData, { data: awardsData }, playerData, { data: allTeamsData }, mdData]) => {
+    ]).then(([{ data: leagueData }, teamData, standingsData, awardsData, playerData, allTeamsData, mdData]) => {
       if (leagueData) setLeague(leagueData);
       if (teamData) setTeams(teamData);
 

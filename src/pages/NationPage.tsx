@@ -5,6 +5,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { getNationFlag, formatHeight, calculateAge } from "@/lib/helpers";
 import { useSortableTable } from "@/hooks/useSortableTable";
+import { fetchAllRows } from "@/lib/fetchAll";
 
 interface Nation {
   NationID: number;
@@ -77,10 +78,10 @@ export default function NationPage() {
 
     Promise.all([
       supabase.from("nations").select("*").eq("NationID", nid).order("ValidToDt", { ascending: false }).limit(1),
-      supabase.from("players").select("PlayerID, PlayerName, Position, DOB, Height, headshot_url").eq("NationalityID", nid).order("PlayerName"),
-      supabase.from("teams").select("TeamID, FullName, PrimaryColor, logo_url, nationid, LeagueID"),
+      fetchAllRows("players", { select: "PlayerID, PlayerName, Position, DOB, Height, headshot_url", filters: [{ method: "eq", args: ["NationalityID", nid] }], order: { column: "PlayerName", ascending: true } }),
+      fetchAllRows("teams", { select: "TeamID, FullName, PrimaryColor, logo_url, nationid, LeagueID" }),
       supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier"),
-    ]).then(([{ data: nationData }, { data: playerData }, { data: teamsData }, { data: leaguesData }]) => {
+    ]).then(([{ data: nationData }, playerData, teamsData, { data: leaguesData }]) => {
       if (nationData?.[0]) setNation(nationData[0] as Nation);
       if (playerData) setPlayers(playerData as PlayerRow[]);
 
@@ -101,27 +102,26 @@ export default function NationPage() {
         setNationalTeam({ TeamID: natTeam.TeamID, FullName: natTeam.FullName, PrimaryColor: natTeam.PrimaryColor, logo_url: natTeam.logo_url });
 
         // Fetch intl results for this national team specifically
-        supabase.from("results")
-          .select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,SnitchCaughtTime")
-          .or(`HomeTeamID.eq.${natTeam.TeamID},AwayTeamID.eq.${natTeam.TeamID}`)
-          .order("MatchID", { ascending: false })
-          .then(({ data: rData }) => {
+        fetchAllRows("results", {
+          select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,SnitchCaughtTime",
+          filters: [{ method: "or", args: [`HomeTeamID.eq.${natTeam.TeamID},AwayTeamID.eq.${natTeam.TeamID}`] }],
+          order: { column: "MatchID", ascending: false },
+        }).then((rData) => {
             if (rData) setIntlResults(rData as IntlResult[]);
           });
       } else if (intlLeagueIds.length > 0) {
-        // Fallback: show all intl results
-        supabase.from("results")
-          .select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,SnitchCaughtTime")
-          .in("LeagueID", intlLeagueIds)
-          .order("MatchID", { ascending: false })
-          .then(({ data: rData }) => {
+        fetchAllRows("results", {
+          select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,SnitchCaughtTime",
+          filters: [{ method: "in", args: ["LeagueID", intlLeagueIds] }],
+          order: { column: "MatchID", ascending: false },
+        }).then((rData) => {
             if (rData) setIntlResults(rData as IntlResult[]);
           });
       }
 
       if (playerData && playerData.length > 0) {
         const playerNames = playerData.map((p: any) => p.PlayerName).filter(Boolean);
-        supabase.from("stats").select("*").in("PlayerName", playerNames).then(({ data: statsData }) => {
+        fetchAllRows("stats", { select: "*", filters: [{ method: "in", args: ["PlayerName", playerNames] }] }).then((statsData) => {
           if (!statsData) return;
 
           const recordMap = new Map<number, CareerRecord>();

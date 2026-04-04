@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { getLeagueTierLabel } from "@/lib/helpers";
+import { fetchAllRows } from "@/lib/fetchAll";
 
 interface League {
   LeagueID: number;
@@ -50,11 +51,11 @@ export default function LeagueHistory() {
 
     Promise.all([
       supabase.from("leagues").select("*").eq("LeagueID", lid).single(),
-      supabase.from("teams").select("TeamID, FullName").eq("LeagueID", lid),
-      supabase.from("standings").select("*").order("totalpoints", { ascending: false }),
-      supabase.from("awards").select("*").eq("leagueid", lid).order("seasonid", { ascending: false }),
-      supabase.from("players").select("PlayerID, PlayerName"),
-    ]).then(([{ data: leagueData }, { data: teamData }, { data: standingsData }, { data: awardsData }, { data: playerData }]) => {
+      fetchAllRows("teams", { select: "TeamID, FullName", filters: [{ method: "eq", args: ["LeagueID", lid] }] }),
+      fetchAllRows("standings", { select: "*", order: { column: "totalpoints", ascending: false } }),
+      fetchAllRows("awards", { select: "*", filters: [{ method: "eq", args: ["leagueid", lid] }], order: { column: "seasonid", ascending: false } }),
+      fetchAllRows("players", { select: "PlayerID, PlayerName" }),
+    ]).then(([{ data: leagueData }, teamData, standingsData, awardsData, playerData]) => {
       if (leagueData) setLeague(leagueData);
 
       const tMap: Record<number, string> = {};

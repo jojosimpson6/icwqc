@@ -126,13 +126,13 @@ export default function TeamPage() {
 
     Promise.all([
       supabase.from("teams").select("*").eq("FullName", teamName).single(),
-      supabase.from("stats").select("*").eq("FullName", teamName),
-      supabase.from("standings").select("*").eq("FullName", teamName).order("SeasonID", { ascending: false }),
+      fetchAllRows("stats", { select: "*", filters: [{ method: "eq", args: ["FullName", teamName] }] }),
+      fetchAllRows("standings", { select: "*", filters: [{ method: "eq", args: ["FullName", teamName] }], order: { column: "SeasonID", ascending: false } }),
       fetchAllRows("players", { select: "PlayerID, PlayerName, DOB, NationalityID, Height, Weight, Handedness" }),
-      supabase.from("teams").select("TeamID, FullName"),
+      fetchAllRows("teams", { select: "TeamID, FullName" }),
       fetchAllRows("matchdays", { select: "MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek" }),
-      supabase.from("nations").select("NationID, Nation, ValidToDt").order("ValidToDt", { ascending: false }),
-    ]).then(([{ data: teamData }, { data: statsData }, { data: standData }, playerData, { data: allTeamsData }, mdData, { data: nationData }]) => {
+      fetchAllRows("nations", { select: "NationID, Nation, ValidToDt", order: { column: "ValidToDt", ascending: false } }),
+    ]).then(([{ data: teamData }, statsData, standData, playerData, allTeamsData, mdData, nationData]) => {
       if (teamData) {
         setTeam(teamData);
         supabase.from("leagues").select("LeagueName").eq("LeagueID", teamData.LeagueID).single().then(({ data: ld }) => {
@@ -143,17 +143,17 @@ export default function TeamPage() {
           setRivalTeamName(teamData.Rival);
         }
 
-        supabase.from("results")
-          .select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SnitchCaughtTime,LeagueID,SeasonID,WeekID,IsNeutralSite")
-          .or(`HomeTeamID.eq.${teamData.TeamID},AwayTeamID.eq.${teamData.TeamID}`)
-          .order("MatchID", { ascending: false })
-          .then(({ data: rData }) => {
+        fetchAllRows("results", {
+          select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SnitchCaughtTime,LeagueID,SeasonID,WeekID,IsNeutralSite",
+          filters: [{ method: "or", args: [`HomeTeamID.eq.${teamData.TeamID},AwayTeamID.eq.${teamData.TeamID}`] }],
+          order: { column: "MatchID", ascending: false },
+        }).then((rData) => {
             if (rData) setMatchResults(rData as MatchResult[]);
           });
       }
 
       const tm = new Map<number, string>();
-      (allTeamsData || []).forEach(t => { if (t.TeamID) tm.set(t.TeamID, t.FullName); });
+      (allTeamsData || []).forEach((t: any) => { if (t.TeamID) tm.set(t.TeamID, t.FullName); });
       setTeamMapState(tm);
 
       const mdm = new Map<number, string>();
@@ -174,28 +174,27 @@ export default function TeamPage() {
       setFirstMatchDateMap(firstMatchDates);
 
       const nm = new Map<number, string>();
-      // Data is ordered by ValidToDt desc, so first entry per NationID is the most current name
-      (nationData || []).forEach((n: { NationID: number; Nation: string | null }) => {
+      (nationData || []).forEach((n: any) => {
         if (n.NationID && n.Nation && !nm.has(n.NationID)) nm.set(n.NationID, n.Nation);
       });
       setNations(nm);
 
-      if (statsData) {
+      if (statsData && statsData.length > 0) {
         setAllStats(statsData as StatLine[]);
-        const seasons = [...new Set((statsData as StatLine[]).map(s => s.SeasonID).filter(Boolean))].sort((a, b) => (b || 0) - (a || 0));
+        const seasons = [...new Set((statsData as StatLine[]).map((s: any) => s.SeasonID).filter(Boolean))].sort((a, b) => (b || 0) - (a || 0));
         const latestSeason = seasons[0] || null;
         setRosterSeasonId(latestSeason);
-        setCurrentRoster((statsData as StatLine[]).filter(s => s.SeasonID === latestSeason));
+        setCurrentRoster((statsData as StatLine[]).filter((s: any) => s.SeasonID === latestSeason));
       }
       if (standData && standData.length > 0) {
         setAllStandings(standData as StandingRow[]);
         setCurrentStanding((standData as StandingRow[])[0]);
       }
-      if (playerData) setPlayers(playerData);
+      if (playerData) setPlayers(playerData as PlayerInfo[]);
 
       // Build register from stats (works even without standings for cups/CL)
-      if (statsData && (statsData as StatLine[]).length > 0) {
-        buildSeasonRegister(teamName, standData as StandingRow[] || [], statsData as StatLine[]);
+      if (statsData && statsData.length > 0) {
+        buildSeasonRegister(teamName, (standData || []) as StandingRow[], statsData as StatLine[]);
       }
     });
   }, [name]);
@@ -212,10 +211,10 @@ export default function TeamPage() {
       }
     });
 
-    const { data: leagueData } = await supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier");
+    const leagueData = await fetchAllRows("leagues", { select: "LeagueID, LeagueName, LeagueTier" });
     const leagueTierMap = new Map<string, number>();
     const leagueIdByName = new Map<string, number>();
-    (leagueData || []).forEach(l => {
+    (leagueData || []).forEach((l: any) => {
       if (l.LeagueName) {
         leagueTierMap.set(l.LeagueName, l.LeagueTier || 1);
         leagueIdByName.set(l.LeagueName, l.LeagueID);
@@ -223,9 +222,9 @@ export default function TeamPage() {
     });
 
     // Get all teams grouped by league for filtering standings
-    const { data: allTeamsData } = await supabase.from("teams").select("FullName, LeagueID");
+    const allTeamsForReg = await fetchAllRows("teams", { select: "FullName, LeagueID" });
     const teamsByLeagueId = new Map<number, string[]>();
-    (allTeamsData || []).forEach(t => {
+    (allTeamsForReg || []).forEach((t: any) => {
       const arr = teamsByLeagueId.get(t.LeagueID) || [];
       arr.push(t.FullName);
       teamsByLeagueId.set(t.LeagueID, arr);
@@ -255,10 +254,11 @@ export default function TeamPage() {
         
         const leagueTeamNames = teamsByLeagueId.get(leagueId) || [];
 
-        const { data: allTeamStandings } = await supabase.from("standings")
-          .select("FullName, totalpoints")
-          .eq("SeasonID", seasonId)
-          .order("totalpoints", { ascending: false });
+        const allTeamStandings = await fetchAllRows("standings", {
+          select: "FullName, totalpoints",
+          filters: [{ method: "eq", args: ["SeasonID", seasonId] }],
+          order: { column: "totalpoints", ascending: false },
+        });
 
         let position: number | null = null;
         let isChampion = false;
@@ -291,11 +291,14 @@ export default function TeamPage() {
         const teamId = team?.TeamID;
         if (!teamId || !leagueId) continue;
         
-        const { data: cupResults } = await supabase.from("results")
-          .select("HomeTeamID, AwayTeamID, HomeTeamScore, AwayTeamScore")
-          .eq("LeagueID", leagueId)
-          .eq("SeasonID", seasonId)
-          .or(`HomeTeamID.eq.${teamId},AwayTeamID.eq.${teamId}`);
+        const cupResults = await fetchAllRows("results", {
+          select: "HomeTeamID, AwayTeamID, HomeTeamScore, AwayTeamScore",
+          filters: [
+            { method: "eq", args: ["LeagueID", leagueId] },
+            { method: "eq", args: ["SeasonID", seasonId] },
+            { method: "or", args: [`HomeTeamID.eq.${teamId},AwayTeamID.eq.${teamId}`] },
+          ],
+        });
         
         let gp = 0, gf = 0, ga = 0, wins = 0;
         (cupResults || []).forEach(r => {

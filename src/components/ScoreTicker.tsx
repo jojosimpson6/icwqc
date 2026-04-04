@@ -21,12 +21,12 @@ export function ScoreTicker() {
   useEffect(() => {
     async function fetchLatestScores() {
       // Get reference data
-      const [{ data: teams }, { data: leagues }] = await Promise.all([
-        supabase.from("teams").select("TeamID, FullName"),
+      const [teams, { data: leagues }] = await Promise.all([
+        fetchAllRows("teams", { select: "TeamID, FullName" }),
         supabase.from("leagues").select("LeagueID, LeagueName"),
       ]);
       const teamMap: Record<number, string> = {};
-      teams?.forEach(t => { teamMap[t.TeamID] = t.FullName; });
+      (teams || []).forEach((t: any) => { teamMap[t.TeamID] = t.FullName; });
       const leagueMap: Record<number, string> = {};
       leagues?.forEach(l => { leagueMap[l.LeagueID] = l.LeagueName || ""; });
 
