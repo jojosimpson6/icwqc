@@ -205,7 +205,7 @@ export default function PlayerProfile() {
             });
 
             const teamNameMap = new Map<number, string>();
-            (teamsData || []).forEach((t: { TeamID: number; FullName: string }) => {
+            (teamsData || []).forEach((t: any) => {
               if (t.TeamID) teamNameMap.set(t.TeamID, t.FullName);
             });
 
