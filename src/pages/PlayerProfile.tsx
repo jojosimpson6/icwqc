@@ -164,7 +164,7 @@ export default function PlayerProfile() {
         if (!sData || sData.length === 0) return;
         setStats(sData as StatLine[]);
         if (sData.length > 0) {
-          setMostRecentTeam(sData[sData.length - 1].FullName || "");
+          setMostRecentTeam((sData[sData.length - 1] as any).FullName || "");
         }
 
         // Detect all positions played
