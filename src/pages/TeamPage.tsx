@@ -153,7 +153,7 @@ export default function TeamPage() {
       }
 
       const tm = new Map<number, string>();
-      (allTeamsData || []).forEach(t => { if (t.TeamID) tm.set(t.TeamID, t.FullName); });
+      (allTeamsData || []).forEach((t: any) => { if (t.TeamID) tm.set(t.TeamID, t.FullName); });
       setTeamMapState(tm);
 
       const mdm = new Map<number, string>();
