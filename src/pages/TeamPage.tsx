@@ -254,10 +254,11 @@ export default function TeamPage() {
         
         const leagueTeamNames = teamsByLeagueId.get(leagueId) || [];
 
-        const { data: allTeamStandings } = await supabase.from("standings")
-          .select("FullName, totalpoints")
-          .eq("SeasonID", seasonId)
-          .order("totalpoints", { ascending: false });
+        const allTeamStandings = await fetchAllRows("standings", {
+          select: "FullName, totalpoints",
+          filters: [{ method: "eq", args: ["SeasonID", seasonId] }],
+          order: { column: "totalpoints", ascending: false },
+        });
 
         let position: number | null = null;
         let isChampion = false;
