@@ -313,10 +313,11 @@ export default function PlayerProfile() {
         const seasonIds = [...new Set(sData.map(s => s.SeasonID).filter(Boolean))] as number[];
         if (seasonIds.length === 0) return;
 
-        supabase.from("stats").select("PlayerName,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,GamesPlayed,Position,SeasonID,LeagueName")
-          .in("SeasonID" as never, seasonIds)
-          .then(({ data: allSeasonStats }) => {
-            if (!allSeasonStats) return;
+        fetchAllRows("stats", {
+          select: "PlayerName,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,GamesPlayed,Position,SeasonID,LeagueName",
+          filters: [{ method: "in", args: ["SeasonID", seasonIds] }],
+        }).then((allSeasonStats) => {
+            if (!allSeasonStats || allSeasonStats.length === 0) return;
             const maxMap = new Map<string, Map<string, number>>();
             const awardEntries: LeagueLeaderEntry[] = [];
 
