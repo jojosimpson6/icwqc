@@ -143,11 +143,11 @@ export default function TeamPage() {
           setRivalTeamName(teamData.Rival);
         }
 
-        supabase.from("results")
-          .select("MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SnitchCaughtTime,LeagueID,SeasonID,WeekID,IsNeutralSite")
-          .or(`HomeTeamID.eq.${teamData.TeamID},AwayTeamID.eq.${teamData.TeamID}`)
-          .order("MatchID", { ascending: false })
-          .then(({ data: rData }) => {
+        fetchAllRows("results", {
+          select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SnitchCaughtTime,LeagueID,SeasonID,WeekID,IsNeutralSite",
+          filters: [{ method: "or", args: [`HomeTeamID.eq.${teamData.TeamID},AwayTeamID.eq.${teamData.TeamID}`] }],
+          order: { column: "MatchID", ascending: false },
+        }).then((rData) => {
             if (rData) setMatchResults(rData as MatchResult[]);
           });
       }
