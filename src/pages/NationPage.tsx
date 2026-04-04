@@ -5,6 +5,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { getNationFlag, formatHeight, calculateAge } from "@/lib/helpers";
 import { useSortableTable } from "@/hooks/useSortableTable";
+import { fetchAllRows } from "@/lib/fetchAll";
 
 interface Nation {
   NationID: number;
