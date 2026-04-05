@@ -55,6 +55,7 @@ export function LeagueLeaders() {
       if (leagueData) setLeagues(leagueData as LeagueOption[]);
       // Get available seasons from matchdays (lightweight)
       const seasons = [...new Set((mdData || []).map((m: any) => m.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number));
+      setAvailableSeasons(seasons as number[]);
       if (seasons.length > 0) setSelectedSeason(seasons[0] as number);
     });
   }, []);
