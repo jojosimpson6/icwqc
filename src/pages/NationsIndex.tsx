@@ -18,8 +18,8 @@ export default function NationsIndex() {
   useEffect(() => {
     Promise.all([
       supabase.from("nations").select("NationID, Nation, ValidToDt").order("ValidToDt", { ascending: false }),
-      supabase.from("players").select("NationalityID"),
-    ]).then(([{ data: nationData }, { data: playerData }]) => {
+      fetchAllRows("players", { select: "NationalityID" }),
+    ]).then(([{ data: nationData }, playerData]) => {
       // Get most current name per NationID
       const nameMap = new Map<number, string>();
       (nationData || []).forEach((n: any) => {

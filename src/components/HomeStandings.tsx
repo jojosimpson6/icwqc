@@ -30,9 +30,9 @@ export function HomeStandings() {
   useEffect(() => {
     Promise.all([
       supabase.from("leagues").select("LeagueID, LeagueName").order("LeagueTier").order("LeagueName"),
-      supabase.from("teams").select("TeamID, FullName, LeagueID"),
+      fetchAllRows("teams", { select: "TeamID, FullName, LeagueID" }),
       fetchAllRows<StandingRow>("standings", { select: "*", order: { column: "totalpoints", ascending: false } }),
-    ]).then(([{ data: leagueData }, { data: teamData }, standingsData]) => {
+    ]).then(([{ data: leagueData }, teamData, standingsData]) => {
       if (leagueData) setLeagues(leagueData as LeagueOption[]);
       if (teamData) {
         const map: Record<number, string[]> = {};

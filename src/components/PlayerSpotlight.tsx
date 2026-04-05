@@ -22,10 +22,10 @@ export function PlayerSpotlight() {
 
   useEffect(() => {
     Promise.all([
-      supabase.from("players").select("*"),
+      fetchAllRows("players", { select: "*" }),
       supabase.from("nations").select("*"),
-      supabase.from("stats").select("PlayerName, FullName, SeasonID, Position, GamesPlayed").order("SeasonID", { ascending: false }),
-    ]).then(([{ data: playerData }, { data: nationData }, { data: statsData }]) => {
+      fetchAllRows("stats", { select: "PlayerName, FullName, SeasonID, Position, GamesPlayed", order: { column: "SeasonID", ascending: false } }),
+    ]).then(([playerData, { data: nationData }, statsData]) => {
       if (playerData) {
         const shuffled = [...playerData].sort(() => Math.random() - 0.5).slice(0, 6);
         setPlayers(shuffled);
