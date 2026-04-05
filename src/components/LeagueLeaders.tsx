@@ -71,22 +71,12 @@ export function LeagueLeaders() {
     });
   }, [selectedSeason]);
 
-  // Available seasons based on league filter
+  // Filter by league within the already-season-filtered stats
   const leagueFilteredStats = selectedLeague === "all"
     ? allStats
     : allStats.filter(s => s.LeagueName === selectedLeague);
 
-  const availableSeasons = [...new Set(leagueFilteredStats.map(s => s.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number)) as number[];
-
-  // Reset season when league changes
-  useEffect(() => {
-    if (availableSeasons.length > 0 && !availableSeasons.includes(selectedSeason!)) {
-      setSelectedSeason(availableSeasons[0]);
-    }
-  }, [selectedLeague, availableSeasons.join(",")]);
-
   const filtered = leagueFilteredStats
-    .filter(s => s.SeasonID === selectedSeason)
     .sort((a, b) => ((b[category] as number) || 0) - ((a[category] as number) || 0))
     .slice(0, 10);
 
