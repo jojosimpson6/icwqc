@@ -37,6 +37,7 @@ export function LeagueLeaders() {
   const [leagues, setLeagues] = useState<LeagueOption[]>([]);
   const [selectedLeague, setSelectedLeague] = useState<string>("all");
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
+  const [availableSeasons, setAvailableSeasons] = useState<number[]>([]);
 
   useEffect(() => {
     const cats: StatCategory[] = ["Goals", "GoldenSnitchCatches", "KeeperSaves", "GamesPlayed"];
@@ -44,40 +45,38 @@ export function LeagueLeaders() {
     setCategory(picked);
 
     Promise.all([
-      fetchAllRows("stats", { select: "*" }),
-      supabase.from("players").select("PlayerID, PlayerName"),
+      fetchAllRows("players", { select: "PlayerID, PlayerName" }),
       supabase.from("leagues").select("LeagueID, LeagueName").order("LeagueTier").order("LeagueName"),
-    ]).then(([statsData, { data: playersData }, { data: leagueData }]) => {
-      statsData.sort((a: any, b: any) => ((b[picked] as number) || 0) - ((a[picked] as number) || 0));
-      setAllStats(statsData as StatRow[]);
-      if (playersData) {
-        const map: Record<string, number> = {};
-        playersData.forEach((p) => { if (p.PlayerName) map[p.PlayerName] = p.PlayerID; });
-        setPlayerMap(map);
-      }
+      fetchAllRows("matchdays", { select: "SeasonID" }),
+    ]).then(([playersData, { data: leagueData }, mdData]) => {
+      const map: Record<string, number> = {};
+      (playersData || []).forEach((p: any) => { if (p.PlayerName) map[p.PlayerName] = p.PlayerID; });
+      setPlayerMap(map);
       if (leagueData) setLeagues(leagueData as LeagueOption[]);
-      // Set default season to latest
-      const seasons = [...new Set((statsData as StatRow[]).map(s => s.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number));
+      // Get available seasons from matchdays (lightweight)
+      const seasons = [...new Set((mdData || []).map((m: any) => m.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number));
+      setAvailableSeasons(seasons as number[]);
       if (seasons.length > 0) setSelectedSeason(seasons[0] as number);
     });
   }, []);
 
-  // Available seasons based on league filter
+  // Fetch stats only for the selected season
+  useEffect(() => {
+    if (!selectedSeason) return;
+    fetchAllRows("stats", {
+      select: "*",
+      filters: [{ method: "eq", args: ["SeasonID", selectedSeason] }],
+    }).then((statsData) => {
+      setAllStats(statsData as StatRow[]);
+    });
+  }, [selectedSeason]);
+
+  // Filter by league within the already-season-filtered stats
   const leagueFilteredStats = selectedLeague === "all"
     ? allStats
     : allStats.filter(s => s.LeagueName === selectedLeague);
 
-  const availableSeasons = [...new Set(leagueFilteredStats.map(s => s.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number)) as number[];
-
-  // Reset season when league changes
-  useEffect(() => {
-    if (availableSeasons.length > 0 && !availableSeasons.includes(selectedSeason!)) {
-      setSelectedSeason(availableSeasons[0]);
-    }
-  }, [selectedLeague, availableSeasons.join(",")]);
-
   const filtered = leagueFilteredStats
-    .filter(s => s.SeasonID === selectedSeason)
     .sort((a, b) => ((b[category] as number) || 0) - ((a[category] as number) || 0))
     .slice(0, 10);
 

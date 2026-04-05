@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAll";
 import { formatHeight, getNationFlag } from "@/lib/helpers";
 
 interface Player {
@@ -20,47 +21,55 @@ export function PlayerSpotlight() {
   const [playerPositions, setPlayerPositions] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    Promise.all([
-      supabase.from("players").select("*"),
-      supabase.from("nations").select("*"),
-      supabase.from("stats").select("PlayerName, FullName, SeasonID, Position, GamesPlayed").order("SeasonID", { ascending: false }),
-    ]).then(([{ data: playerData }, { data: nationData }, { data: statsData }]) => {
-      if (playerData) {
-        const shuffled = [...playerData].sort(() => Math.random() - 0.5).slice(0, 6);
-        setPlayers(shuffled);
-      }
-      if (nationData) {
-        const map: Record<number, string> = {};
-        nationData.forEach((n) => { if (n.NationID) map[n.NationID] = n.Nation || ""; });
-        setNations(map);
-      }
-      if (statsData) {
-        const teamMap: Record<string, string> = {};
-        // For multi-position players, determine primary position (most GP)
-        const posGpMap: Record<string, Record<string, number>> = {};
-        statsData.forEach((s) => {
-          if (s.PlayerName && s.FullName && !teamMap[s.PlayerName]) {
-            teamMap[s.PlayerName] = s.FullName;
-          }
-          if (s.PlayerName && s.Position) {
-            if (!posGpMap[s.PlayerName]) posGpMap[s.PlayerName] = {};
-            posGpMap[s.PlayerName][s.Position] = (posGpMap[s.PlayerName][s.Position] || 0) + (s.GamesPlayed || 0);
-          }
-        });
-        setPlayerTeams(teamMap);
-
-        // Determine primary position by most GP
-        const primaryPosMap: Record<string, string> = {};
-        Object.entries(posGpMap).forEach(([name, posMap]) => {
-          let bestPos = "";
-          let bestGP = 0;
-          Object.entries(posMap).forEach(([pos, gp]) => {
-            if (gp > bestGP) { bestGP = gp; bestPos = pos; }
+    // First get available seasons to find the latest
+    fetchAllRows("matchdays", { select: "SeasonID" }).then((mdData) => {
+      const seasons = [...new Set((mdData || []).map((m: any) => m.SeasonID).filter(Boolean))].sort((a, b) => b - a);
+      const latestSeason = seasons[0] || 1998;
+      
+      Promise.all([
+        fetchAllRows("players", { select: "*" }),
+        supabase.from("nations").select("*"),
+        // Only fetch stats for the latest season to avoid timeout
+        fetchAllRows("stats", {
+          select: "PlayerName, FullName, SeasonID, Position, GamesPlayed",
+          filters: [{ method: "eq", args: ["SeasonID", latestSeason] }],
+        }),
+      ]).then(([playerData, { data: nationData }, statsData]) => {
+        if (playerData) {
+          const shuffled = [...playerData].sort(() => Math.random() - 0.5).slice(0, 6);
+          setPlayers(shuffled);
+        }
+        if (nationData) {
+          const map: Record<number, string> = {};
+          nationData.forEach((n) => { if (n.NationID) map[n.NationID] = n.Nation || ""; });
+          setNations(map);
+        }
+        if (statsData) {
+          const teamMap: Record<string, string> = {};
+          const posGpMap: Record<string, Record<string, number>> = {};
+          statsData.forEach((s: any) => {
+            if (s.PlayerName && s.FullName && !teamMap[s.PlayerName]) {
+              teamMap[s.PlayerName] = s.FullName;
+            }
+            if (s.PlayerName && s.Position) {
+              if (!posGpMap[s.PlayerName]) posGpMap[s.PlayerName] = {};
+              posGpMap[s.PlayerName][s.Position] = (posGpMap[s.PlayerName][s.Position] || 0) + (s.GamesPlayed || 0);
+            }
           });
-          primaryPosMap[name] = bestPos;
-        });
-        setPlayerPositions(primaryPosMap);
-      }
+          setPlayerTeams(teamMap);
+
+          const primaryPosMap: Record<string, string> = {};
+          Object.entries(posGpMap).forEach(([name, posMap]) => {
+            let bestPos = "";
+            let bestGP = 0;
+            Object.entries(posMap).forEach(([pos, gp]) => {
+              if (gp > bestGP) { bestGP = gp; bestPos = pos; }
+            });
+            primaryPosMap[name] = bestPos;
+          });
+          setPlayerPositions(primaryPosMap);
+        }
+      });
     });
   }, []);
 

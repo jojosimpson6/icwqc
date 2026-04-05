@@ -28,8 +28,8 @@ export function GlobalSearch() {
     // Load all searchable entities
     Promise.all([
       fetchAllRows("players", { select: "PlayerID, PlayerName" }),
-      fetchAllRows("stats", { select: "PlayerName, SeasonID" }),
-      supabase.from("teams").select("TeamID, FullName").then(({ data }) => data || []),
+      fetchAllRows("player_season_minutes", { select: "PlayerName, SeasonID" }),
+      fetchAllRows("teams", { select: "TeamID, FullName" }),
       supabase.from("leagues").select("LeagueID, LeagueName").then(({ data }) => data || []),
     ]).then(([playerData, statsData, teamData, leagueData]) => {
       // Build player season ranges
