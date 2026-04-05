@@ -309,105 +309,89 @@ export default function PlayerProfile() {
           });
         }
 
-        // League leaders logic
+        // League leaders logic - fetch one season at a time to avoid timeout
         const seasonIds = [...new Set(sData.map(s => s.SeasonID).filter(Boolean))] as number[];
         if (seasonIds.length === 0) return;
 
-        fetchAllRows("stats", {
-          select: "PlayerName,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,GamesPlayed,Position,SeasonID,LeagueName",
-          filters: [{ method: "in", args: ["SeasonID", seasonIds] }],
-        }).then((allSeasonStats) => {
-            if (!allSeasonStats || allSeasonStats.length === 0) return;
-            const maxMap = new Map<string, Map<string, number>>();
-            const awardEntries: LeagueLeaderEntry[] = [];
+        const maxMap = new Map<string, Map<string, number>>();
+        const awardEntries: LeagueLeaderEntry[] = [];
 
-            const grouped = new Map<string, typeof allSeasonStats>();
-            allSeasonStats.forEach((r: Record<string, unknown>) => {
-              const key = `${r.SeasonID}|${r.LeagueName}`;
-              if (!grouped.has(key)) grouped.set(key, []);
-              grouped.get(key)!.push(r as typeof allSeasonStats[0]);
-            });
-
-            const bySeason = new Map<number, typeof allSeasonStats>();
-            allSeasonStats.forEach((r: Record<string, unknown>) => {
-              const sid = r.SeasonID as number;
-              if (!bySeason.has(sid)) bySeason.set(sid, []);
-              bySeason.get(sid)!.push(r as typeof allSeasonStats[0]);
-            });
-
-            grouped.forEach((rows, pairKey) => {
-              const [sidStr, ln] = pairKey.split("|");
-              const sid = parseInt(sidStr);
-              const statMaxes = new Map<string, number>();
-
-              const chasers = rows.filter((r: Record<string, unknown>) => r.Position === "Chaser");
-              if (chasers.length) {
-                const sorted = [...chasers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.Goals as number) || 0) - ((a.Goals as number) || 0));
-                statMaxes.set("Goals", (sorted[0]?.Goals as number) || 0);
-                const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
-                if (rank > 0 && rank <= 5) awardEntries.push({ SeasonID: sid, LeagueName: ln, stat: "Goals", value: (sorted[rank - 1]?.Goals as number) || 0, rank, scope: "league" });
-              }
-              const seekers = rows.filter((r: Record<string, unknown>) => r.Position === "Seeker");
-              if (seekers.length) {
-                const sorted = [...seekers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.GoldenSnitchCatches as number) || 0) - ((a.GoldenSnitchCatches as number) || 0));
-                statMaxes.set("GoldenSnitchCatches", (sorted[0]?.GoldenSnitchCatches as number) || 0);
-                const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
-                if (rank > 0 && rank <= 5) awardEntries.push({ SeasonID: sid, LeagueName: ln, stat: "Golden Snitch Catches", value: (sorted[rank - 1]?.GoldenSnitchCatches as number) || 0, rank, scope: "league" });
-              }
-              const keepers = rows.filter((r: Record<string, unknown>) => r.Position === "Keeper");
-              if (keepers.length) {
-                const sorted = [...keepers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.KeeperSaves as number) || 0) - ((a.KeeperSaves as number) || 0));
-                statMaxes.set("KeeperSaves", (sorted[0]?.KeeperSaves as number) || 0);
-                const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
-                if (rank > 0 && rank <= 5) awardEntries.push({ SeasonID: sid, LeagueName: ln, stat: "Keeper Saves", value: (sorted[rank - 1]?.KeeperSaves as number) || 0, rank, scope: "league" });
-              }
-
-              maxMap.set(pairKey, statMaxes);
-            });
-
-            bySeason.forEach((rows, sid) => {
-              const chasers = rows.filter((r: Record<string, unknown>) => r.Position === "Chaser");
-              if (chasers.length) {
-                const sorted = [...chasers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.Goals as number) || 0) - ((a.Goals as number) || 0));
-                const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
-                if (rank > 0 && rank <= 10) {
-                  const alreadyInLeague = awardEntries.some(e => e.SeasonID === sid && e.stat === "Goals" && e.scope === "league");
-                  if (!alreadyInLeague) {
-                    awardEntries.push({ SeasonID: sid, LeagueName: "All Leagues", stat: "Goals", value: (sorted[rank - 1]?.Goals as number) || 0, rank, scope: "combined" });
-                  }
-                }
-              }
-              const seekers = rows.filter((r: Record<string, unknown>) => r.Position === "Seeker");
-              if (seekers.length) {
-                const sorted = [...seekers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.GoldenSnitchCatches as number) || 0) - ((a.GoldenSnitchCatches as number) || 0));
-                const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
-                if (rank > 0 && rank <= 10) {
-                  const alreadyInLeague = awardEntries.some(e => e.SeasonID === sid && e.stat === "Golden Snitch Catches" && e.scope === "league");
-                  if (!alreadyInLeague) {
-                    awardEntries.push({ SeasonID: sid, LeagueName: "All Leagues", stat: "Golden Snitch Catches", value: (sorted[rank - 1]?.GoldenSnitchCatches as number) || 0, rank, scope: "combined" });
-                  }
-                }
-              }
-              const keepers = rows.filter((r: Record<string, unknown>) => r.Position === "Keeper");
-              if (keepers.length) {
-                const sorted = [...keepers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.KeeperSaves as number) || 0) - ((a.KeeperSaves as number) || 0));
-                const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
-                if (rank > 0 && rank <= 10) {
-                  const alreadyInLeague = awardEntries.some(e => e.SeasonID === sid && e.stat === "Keeper Saves" && e.scope === "league");
-                  if (!alreadyInLeague) {
-                    awardEntries.push({ SeasonID: sid, LeagueName: "All Leagues", stat: "Keeper Saves", value: (sorted[rank - 1]?.KeeperSaves as number) || 0, rank, scope: "combined" });
-                  }
-                }
-              }
-            });
-
-            setLeagueMaxes(maxMap);
-            awardEntries.sort((a, b) => {
-              if (a.scope !== b.scope) return a.scope === "league" ? -1 : 1;
-              return b.SeasonID - a.SeasonID;
-            });
-            setLeagueLeaders(awardEntries);
+        for (const sid of seasonIds) {
+          const seasonStats = await fetchAllRows("stats", {
+            select: "PlayerName,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,GamesPlayed,Position,SeasonID,LeagueName",
+            filters: [{ method: "eq", args: ["SeasonID", sid] }],
           });
+          if (!seasonStats || seasonStats.length === 0) continue;
+
+          const grouped = new Map<string, typeof seasonStats>();
+          seasonStats.forEach((r: Record<string, unknown>) => {
+            const key = `${r.SeasonID}|${r.LeagueName}`;
+            if (!grouped.has(key)) grouped.set(key, []);
+            grouped.get(key)!.push(r as typeof seasonStats[0]);
+          });
+
+          grouped.forEach((rows, pairKey) => {
+            const [, ln] = pairKey.split("|");
+            const statMaxes = new Map<string, number>();
+
+            const chasers = rows.filter((r: Record<string, unknown>) => r.Position === "Chaser");
+            if (chasers.length) {
+              const sorted = [...chasers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.Goals as number) || 0) - ((a.Goals as number) || 0));
+              statMaxes.set("Goals", (sorted[0]?.Goals as number) || 0);
+              const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
+              if (rank > 0 && rank <= 5) awardEntries.push({ SeasonID: sid, LeagueName: ln, stat: "Goals", value: (sorted[rank - 1]?.Goals as number) || 0, rank, scope: "league" });
+            }
+            const seekers = rows.filter((r: Record<string, unknown>) => r.Position === "Seeker");
+            if (seekers.length) {
+              const sorted = [...seekers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.GoldenSnitchCatches as number) || 0) - ((a.GoldenSnitchCatches as number) || 0));
+              statMaxes.set("GoldenSnitchCatches", (sorted[0]?.GoldenSnitchCatches as number) || 0);
+              const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
+              if (rank > 0 && rank <= 5) awardEntries.push({ SeasonID: sid, LeagueName: ln, stat: "Golden Snitch Catches", value: (sorted[rank - 1]?.GoldenSnitchCatches as number) || 0, rank, scope: "league" });
+            }
+            const keepers = rows.filter((r: Record<string, unknown>) => r.Position === "Keeper");
+            if (keepers.length) {
+              const sorted = [...keepers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.KeeperSaves as number) || 0) - ((a.KeeperSaves as number) || 0));
+              statMaxes.set("KeeperSaves", (sorted[0]?.KeeperSaves as number) || 0);
+              const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
+              if (rank > 0 && rank <= 5) awardEntries.push({ SeasonID: sid, LeagueName: ln, stat: "Keeper Saves", value: (sorted[rank - 1]?.KeeperSaves as number) || 0, rank, scope: "league" });
+            }
+
+            maxMap.set(pairKey, statMaxes);
+          });
+
+          // Combined all-league rankings for this season
+          const allChasers = seasonStats.filter((r: Record<string, unknown>) => r.Position === "Chaser");
+          if (allChasers.length) {
+            const sorted = [...allChasers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.Goals as number) || 0) - ((a.Goals as number) || 0));
+            const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
+            if (rank > 0 && rank <= 10 && !awardEntries.some(e => e.SeasonID === sid && e.stat === "Goals" && e.scope === "league")) {
+              awardEntries.push({ SeasonID: sid, LeagueName: "All Leagues", stat: "Goals", value: (sorted[rank - 1]?.Goals as number) || 0, rank, scope: "combined" });
+            }
+          }
+          const allSeekers = seasonStats.filter((r: Record<string, unknown>) => r.Position === "Seeker");
+          if (allSeekers.length) {
+            const sorted = [...allSeekers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.GoldenSnitchCatches as number) || 0) - ((a.GoldenSnitchCatches as number) || 0));
+            const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
+            if (rank > 0 && rank <= 10 && !awardEntries.some(e => e.SeasonID === sid && e.stat === "Golden Snitch Catches" && e.scope === "league")) {
+              awardEntries.push({ SeasonID: sid, LeagueName: "All Leagues", stat: "Golden Snitch Catches", value: (sorted[rank - 1]?.GoldenSnitchCatches as number) || 0, rank, scope: "combined" });
+            }
+          }
+          const allKeepers = seasonStats.filter((r: Record<string, unknown>) => r.Position === "Keeper");
+          if (allKeepers.length) {
+            const sorted = [...allKeepers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.KeeperSaves as number) || 0) - ((a.KeeperSaves as number) || 0));
+            const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
+            if (rank > 0 && rank <= 10 && !awardEntries.some(e => e.SeasonID === sid && e.stat === "Keeper Saves" && e.scope === "league")) {
+              awardEntries.push({ SeasonID: sid, LeagueName: "All Leagues", stat: "Keeper Saves", value: (sorted[rank - 1]?.KeeperSaves as number) || 0, rank, scope: "combined" });
+            }
+          }
+        }
+
+        setLeagueMaxes(maxMap);
+        awardEntries.sort((a, b) => {
+          if (a.scope !== b.scope) return a.scope === "league" ? -1 : 1;
+          return b.SeasonID - a.SeasonID;
+        });
+        setLeagueLeaders(awardEntries);
       });
     });
   }, [id]);
