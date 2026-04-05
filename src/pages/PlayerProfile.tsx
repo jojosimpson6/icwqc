@@ -160,7 +160,7 @@ export default function PlayerProfile() {
       if (!pData?.PlayerName) return;
       const playerName = pData.PlayerName;
 
-      fetchAllRows("stats", { select: "*", filters: [{ method: "eq", args: ["PlayerName", playerName] }], order: { column: "SeasonID", ascending: true } }).then((sData) => {
+      fetchAllRows("stats", { select: "*", filters: [{ method: "eq", args: ["PlayerName", playerName] }], order: { column: "SeasonID", ascending: true } }).then(async (sData) => {
         if (!sData || sData.length === 0) return;
         setStats(sData as StatLine[]);
         if (sData.length > 0) {
