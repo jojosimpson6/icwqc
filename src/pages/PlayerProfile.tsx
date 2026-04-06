@@ -242,9 +242,14 @@ export default function PlayerProfile() {
 
             const minsMap = new Map<string, number>();
             const sfMap = new Map<string, number>();
+            const extMap: ExtendedStatsMap = new Map();
             const logEntries: MatchLogEntry[] = [];
-            // Deduplicate by MatchID (player could match multiple position filters)
             const seenMatchIds = new Set<number>();
+
+            const getExt = (key: string): ExtendedStats => {
+              if (!extMap.has(key)) extMap.set(key, { passAtt: 0, passComp: 0, shotAtt: 0, shotScored: 0, bludgersHit: 0, turnoversForced: 0, teammatesProtected: 0, bludgerShotsFaced: 0, snitchSpotted: 0, catchAttempts: 0, keeperShotsSaved: 0, keeperShotsParried: 0, keeperShotsConceded: 0 });
+              return extMap.get(key)!;
+            };
 
             matchData.forEach((r: Record<string, unknown>) => {
               const matchId = r.MatchID as number;
@@ -261,7 +266,6 @@ export default function PlayerProfile() {
               const homePlayerIds = [r.HomeChaser1ID, r.HomeChaser2ID, r.HomeChaser3ID, r.HomeKeeperID, r.HomeSeekerID, r.HomeBeater1ID, r.HomeBeater2ID];
               const isHome = homePlayerIds.includes(pid);
 
-              // Determine which position this player played in this match
               let matchPos: string | null = null;
               if ([r.HomeChaser1ID, r.HomeChaser2ID, r.HomeChaser3ID, r.AwayChaser1ID, r.AwayChaser2ID, r.AwayChaser3ID].includes(pid)) matchPos = "Chaser";
               else if ([r.HomeSeekerID, r.AwaySeekerID].includes(pid)) matchPos = "Seeker";
@@ -269,10 +273,41 @@ export default function PlayerProfile() {
               else if ([r.HomeBeater1ID, r.HomeBeater2ID, r.AwayBeater1ID, r.AwayBeater2ID].includes(pid)) matchPos = "Beater";
 
               if (matchPos === "Beater" || matchPos === "Keeper") {
-                const sf = isHome
-                  ? (r.HomeKeeperShotsFaced as number) || 0
-                  : (r.AwayKeeperShotsFaced as number) || 0;
+                const sf = isHome ? (r.HomeKeeperShotsFaced as number) || 0 : (r.AwayKeeperShotsFaced as number) || 0;
                 sfMap.set(key, (sfMap.get(key) || 0) + sf);
+              }
+
+              // Aggregate extended stats
+              const ext = getExt(key);
+              if (matchPos === "Chaser") {
+                const prefix = isHome ? "Home" : "Away";
+                const chaserNum = isHome
+                  ? (r.HomeChaser1ID === pid ? 1 : r.HomeChaser2ID === pid ? 2 : 3)
+                  : (r.AwayChaser1ID === pid ? 1 : r.AwayChaser2ID === pid ? 2 : 3);
+                ext.passAtt += (r[`${prefix}Chaser${chaserNum}PassAtt`] as number) || 0;
+                ext.passComp += (r[`${prefix}Chaser${chaserNum}PassComp`] as number) || 0;
+                ext.shotAtt += (r[`${prefix}Chaser${chaserNum}ShotAtt`] as number) || 0;
+                ext.shotScored += (r[`${prefix}Chaser${chaserNum}ShotScored`] as number) || 0;
+              } else if (matchPos === "Keeper") {
+                const prefix = isHome ? "Home" : "Away";
+                ext.passAtt += (r[`${prefix}KeeperPassAtt`] as number) || 0;
+                ext.passComp += (r[`${prefix}KeeperPassComp`] as number) || 0;
+                ext.keeperShotsSaved += (r[`${prefix}KeeperShotsSaved`] as number) || 0;
+                ext.keeperShotsParried += (r[`${prefix}KeeperShotsParried`] as number) || 0;
+                ext.keeperShotsConceded += (r[`${prefix}KeeperShotsConceded`] as number) || 0;
+              } else if (matchPos === "Beater") {
+                const prefix = isHome ? "Home" : "Away";
+                const beaterNum = isHome
+                  ? (r.HomeBeater1ID === pid ? 1 : 2)
+                  : (r.AwayBeater1ID === pid ? 1 : 2);
+                ext.bludgersHit += (r[`${prefix}Beater${beaterNum}BludgersHit`] as number) || 0;
+                ext.turnoversForced += (r[`${prefix}Beater${beaterNum}TurnoversForced`] as number) || 0;
+                ext.teammatesProtected += (r[`${prefix}Beater${beaterNum}TeammatesProtected`] as number) || 0;
+                ext.bludgerShotsFaced += (r[`${prefix}Beater${beaterNum}BludgerShotsFaced`] as number) || 0;
+              } else if (matchPos === "Seeker") {
+                const prefix = isHome ? "Home" : "Away";
+                ext.snitchSpotted += (r[`${prefix}SeekerSnitchSpotted`] as number) || 0;
+                ext.catchAttempts += (r[`${prefix}SeekerCatchAttempts`] as number) || 0;
               }
 
               const oppId = isHome ? (r.AwayTeamID as number) : (r.HomeTeamID as number);
@@ -304,8 +339,11 @@ export default function PlayerProfile() {
                 const myTeam = isHome ? (r.HomeTeamID as number) : (r.AwayTeamID as number);
                 statStr = snitchTeam === myTeam ? "✓ Caught" : "—";
               } else if (matchPos === "Beater") {
-                const sf = isHome ? (r.HomeKeeperShotsFaced as number) || 0 : (r.AwayKeeperShotsFaced as number) || 0;
-                statStr = `${sf} SA`;
+                const prefix = isHome ? "Home" : "Away";
+                const beaterNum = isHome ? (r.HomeBeater1ID === pid ? 1 : 2) : (r.AwayBeater1ID === pid ? 1 : 2);
+                const bh = (r[`${prefix}Beater${beaterNum}BludgersHit`] as number) || 0;
+                const tf = (r[`${prefix}Beater${beaterNum}TurnoversForced`] as number) || 0;
+                statStr = bh > 0 || tf > 0 ? `${bh} BH, ${tf} TF` : `${(isHome ? (r.HomeKeeperShotsFaced as number) : (r.AwayKeeperShotsFaced as number)) || 0} SA`;
               }
 
               logEntries.push({
@@ -323,6 +361,7 @@ export default function PlayerProfile() {
 
             setMinutesMap(minsMap);
             setShotsFacedMap(sfMap);
+            setExtStatsMap(extMap);
             setMatchLog(logEntries);
             setFirstMatchDateMap(fmdMap);
           });
