@@ -636,13 +636,20 @@ export default function PlayerProfile() {
                     <th className={`${thClass} text-right`}>GP</th>
                     <th className={`${thClass} text-right`}>Min</th>
                     {isChaser && <th className={`${thClass} text-right`}>Goals</th>}
+                    {isChaser && <th className={`${thClass} text-right`}>Sh%</th>}
+                    {isChaser && <th className={`${thClass} text-right`}>Pass%</th>}
                     {isChaser && <th className={`${thClass} text-right`}>Min/G</th>}
                     {isSeeker && <th className={`${thClass} text-right`}>GSC</th>}
                     {isSeeker && <th className={`${thClass} text-right`}>Snitch%</th>}
+                    {isSeeker && <th className={`${thClass} text-right`}>Spotted</th>}
+                    {isSeeker && <th className={`${thClass} text-right`}>CatchAtt</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>Saves</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>SF</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>Sv%</th>}
-                    {isKeeper && <th className={`${thClass} text-right`}>Sv/GP</th>}
+                    {isKeeper && <th className={`${thClass} text-right`}>Pass%</th>}
+                    {isBeater && <th className={`${thClass} text-right`}>BH</th>}
+                    {isBeater && <th className={`${thClass} text-right`}>TF</th>}
+                    {isBeater && <th className={`${thClass} text-right`}>TP</th>}
                     {isBeater && <th className={`${thClass} text-right`}>SF/GP</th>}
                   </tr>
                 </thead>
@@ -668,10 +675,18 @@ export default function PlayerProfile() {
                     const mKey = `${s.SeasonID}|${s.LeagueName}`;
                     const mins = minutesMap.get(mKey) || 0;
                     const minsClass = allTimeClass(mins, allTimeMinutes);
+                    const ext = extStatsMap.get(mKey);
 
                     const minPerGoal = rowIsChaser && (s.Goals || 0) > 0 && mins > 0
                       ? (mins / (s.Goals || 1)).toFixed(1)
                       : null;
+
+                    const shotPct = rowIsChaser && ext && ext.shotAtt > 0
+                      ? ((ext.shotScored / ext.shotAtt) * 100).toFixed(1) + "%"
+                      : "—";
+                    const passPctChaser = rowIsChaser && ext && ext.passAtt > 0
+                      ? ((ext.passComp / ext.passAtt) * 100).toFixed(1) + "%"
+                      : "—";
 
                     const snitchPct = rowIsSeeker && (s.GamesPlayed || 0) > 0
                       ? (((s.GoldenSnitchCatches || 0) / (s.GamesPlayed || 1)) * 100).toFixed(1) + "%"
@@ -680,12 +695,12 @@ export default function PlayerProfile() {
                     const svPct = rowIsKeeper && s.KeeperShotsFaced
                       ? ((s.KeeperSaves || 0) / s.KeeperShotsFaced * 100).toFixed(1) + "%"
                       : "—";
-                    const svPerGP = rowIsKeeper && (s.GamesPlayed || 0) > 0
-                      ? ((s.KeeperSaves || 0) / (s.GamesPlayed || 1)).toFixed(2)
+                    const passPctKeeper = rowIsKeeper && ext && ext.passAtt > 0
+                      ? ((ext.passComp / ext.passAtt) * 100).toFixed(1) + "%"
                       : "—";
 
                     const sfFromResults = shotsFacedMap.get(mKey) || 0;
-                    const sfPerGP = (rowIsBeater || rowIsKeeper) && (s.GamesPlayed || 0) > 0 && sfFromResults > 0
+                    const sfPerGP = rowIsBeater && (s.GamesPlayed || 0) > 0 && sfFromResults > 0
                       ? (sfFromResults / (s.GamesPlayed || 1)).toFixed(2)
                       : "—";
 
@@ -703,58 +718,69 @@ export default function PlayerProfile() {
                         <td className={`px-3 py-1.5 text-right font-mono ${allTimeClass(s.GamesPlayed || 0, allTimeGP)} text-foreground`}>{s.GamesPlayed}</td>
                         <td className={`px-3 py-1.5 text-right font-mono ${minsClass} text-foreground`}>{fmtMin(mins)}</td>
                         {isChaser && <td className={`px-3 py-1.5 text-right font-mono ${rowIsChaser ? goalsClass : ""} text-foreground`}>{rowIsChaser ? (s.Goals || 0) : "—"}</td>}
+                        {isChaser && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsChaser ? shotPct : "—"}</td>}
+                        {isChaser && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsChaser ? passPctChaser : "—"}</td>}
                         {isChaser && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsChaser ? (minPerGoal ?? "—") : "—"}</td>}
                         {isSeeker && <td className={`px-3 py-1.5 text-right font-mono ${rowIsSeeker ? gscClass : ""} text-foreground`}>{rowIsSeeker ? (s.GoldenSnitchCatches || 0) : "—"}</td>}
                         {isSeeker && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsSeeker ? snitchPct : "—"}</td>}
+                        {isSeeker && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsSeeker && ext ? ext.snitchSpotted : "—"}</td>}
+                        {isSeeker && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsSeeker && ext ? ext.catchAttempts : "—"}</td>}
                         {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? savesClass : ""} text-foreground`}>{rowIsKeeper ? (s.KeeperSaves || 0) : "—"}</td>}
                         {isKeeper && <td className={`${tdClass} text-right font-mono`}>{rowIsKeeper ? (s.KeeperShotsFaced || 0) : "—"}</td>}
                         {isKeeper && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsKeeper ? svPct : "—"}</td>}
-                        {isKeeper && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsKeeper ? svPerGP : "—"}</td>}
+                        {isKeeper && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsKeeper ? passPctKeeper : "—"}</td>}
+                        {isBeater && <td className={`${tdClass} text-right font-mono`}>{rowIsBeater && ext ? ext.bludgersHit : "—"}</td>}
+                        {isBeater && <td className={`${tdClass} text-right font-mono`}>{rowIsBeater && ext ? ext.turnoversForced : "—"}</td>}
+                        {isBeater && <td className={`${tdClass} text-right font-mono`}>{rowIsBeater && ext ? ext.teammatesProtected : "—"}</td>}
                         {isBeater && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsBeater ? sfPerGP : "—"}</td>}
                       </tr>
                     );
                   })}
-                  <tr className="border-t-2 border-primary bg-primary/5 font-bold">
-                    <td className="px-3 py-1.5 text-primary font-mono" colSpan={positionsPlayed.length > 1 ? 5 : 4}>Career Totals</td>
-                    <td className="px-3 py-1.5 text-right font-mono text-primary">{careerTotals.gp}</td>
-                    <td className="px-3 py-1.5 text-right font-mono text-primary">{careerTotals.minutes > 0 ? careerTotals.minutes : "—"}</td>
-                    {isChaser && <td className="px-3 py-1.5 text-right font-mono text-primary">{careerTotals.goals}</td>}
-                    {isChaser && (
-                      <td className="px-3 py-1.5 text-right font-mono text-primary">
-                        {careerTotals.minutes > 0 && careerTotals.goals > 0 ? (careerTotals.minutes / careerTotals.goals).toFixed(1) : "—"}
-                      </td>
-                    )}
-                    {isSeeker && <td className="px-3 py-1.5 text-right font-mono text-primary">{careerTotals.gsc}</td>}
-                    {isSeeker && (
-                      <td className="px-3 py-1.5 text-right font-mono text-primary">
-                        {careerTotals.gp > 0 ? ((careerTotals.gsc / careerTotals.gp) * 100).toFixed(1) + "%" : "—"}
-                      </td>
-                    )}
-                    {isKeeper && <td className="px-3 py-1.5 text-right font-mono text-primary">{careerTotals.saves}</td>}
-                    {isKeeper && <td className="px-3 py-1.5 text-right font-mono text-primary">{careerTotals.shotsFaced}</td>}
-                    {isKeeper && (
-                      <td className="px-3 py-1.5 text-right font-mono text-primary">
-                        {careerTotals.shotsFaced ? ((careerTotals.saves / careerTotals.shotsFaced) * 100).toFixed(1) + "%" : "—"}
-                      </td>
-                    )}
-                    {isKeeper && (
-                      <td className="px-3 py-1.5 text-right font-mono text-primary">
-                        {careerTotals.gp > 0 ? (careerTotals.saves / careerTotals.gp).toFixed(2) : "—"}
-                      </td>
-                    )}
-                    {isBeater && (
-                      <td className="px-3 py-1.5 text-right font-mono text-primary">
-                        {careerTotals.gp > 0 && careerTotals.shotsFaced > 0 ? (careerTotals.shotsFaced / careerTotals.gp).toFixed(2) : "—"}
-                      </td>
-                    )}
-                  </tr>
+                  {(() => {
+                    const careerExt: ExtendedStats = { passAtt: 0, passComp: 0, shotAtt: 0, shotScored: 0, bludgersHit: 0, turnoversForced: 0, teammatesProtected: 0, bludgerShotsFaced: 0, snitchSpotted: 0, catchAttempts: 0, keeperShotsSaved: 0, keeperShotsParried: 0, keeperShotsConceded: 0 };
+                    extStatsMap.forEach(v => {
+                      careerExt.passAtt += v.passAtt; careerExt.passComp += v.passComp;
+                      careerExt.shotAtt += v.shotAtt; careerExt.shotScored += v.shotScored;
+                      careerExt.bludgersHit += v.bludgersHit; careerExt.turnoversForced += v.turnoversForced;
+                      careerExt.teammatesProtected += v.teammatesProtected; careerExt.bludgerShotsFaced += v.bludgerShotsFaced;
+                      careerExt.snitchSpotted += v.snitchSpotted; careerExt.catchAttempts += v.catchAttempts;
+                      careerExt.keeperShotsSaved += v.keeperShotsSaved; careerExt.keeperShotsParried += v.keeperShotsParried;
+                      careerExt.keeperShotsConceded += v.keeperShotsConceded;
+                    });
+                    const ct = "px-3 py-1.5 text-right font-mono text-primary";
+                    return (
+                      <tr className="border-t-2 border-primary bg-primary/5 font-bold">
+                        <td className="px-3 py-1.5 text-primary font-mono" colSpan={positionsPlayed.length > 1 ? 5 : 4}>Career Totals</td>
+                        <td className={ct}>{careerTotals.gp}</td>
+                        <td className={ct}>{careerTotals.minutes > 0 ? careerTotals.minutes : "—"}</td>
+                        {isChaser && <td className={ct}>{careerTotals.goals}</td>}
+                        {isChaser && <td className={ct}>{careerExt.shotAtt > 0 ? ((careerExt.shotScored / careerExt.shotAtt) * 100).toFixed(1) + "%" : "—"}</td>}
+                        {isChaser && <td className={ct}>{careerExt.passAtt > 0 ? ((careerExt.passComp / careerExt.passAtt) * 100).toFixed(1) + "%" : "—"}</td>}
+                        {isChaser && <td className={ct}>{careerTotals.minutes > 0 && careerTotals.goals > 0 ? (careerTotals.minutes / careerTotals.goals).toFixed(1) : "—"}</td>}
+                        {isSeeker && <td className={ct}>{careerTotals.gsc}</td>}
+                        {isSeeker && <td className={ct}>{careerTotals.gp > 0 ? ((careerTotals.gsc / careerTotals.gp) * 100).toFixed(1) + "%" : "—"}</td>}
+                        {isSeeker && <td className={ct}>{careerExt.snitchSpotted}</td>}
+                        {isSeeker && <td className={ct}>{careerExt.catchAttempts}</td>}
+                        {isKeeper && <td className={ct}>{careerTotals.saves}</td>}
+                        {isKeeper && <td className={ct}>{careerTotals.shotsFaced}</td>}
+                        {isKeeper && <td className={ct}>{careerTotals.shotsFaced ? ((careerTotals.saves / careerTotals.shotsFaced) * 100).toFixed(1) + "%" : "—"}</td>}
+                        {isKeeper && <td className={ct}>{careerExt.passAtt > 0 ? ((careerExt.passComp / careerExt.passAtt) * 100).toFixed(1) + "%" : "—"}</td>}
+                        {isBeater && <td className={ct}>{careerExt.bludgersHit}</td>}
+                        {isBeater && <td className={ct}>{careerExt.turnoversForced}</td>}
+                        {isBeater && <td className={ct}>{careerExt.teammatesProtected}</td>}
+                        {isBeater && <td className={ct}>{careerTotals.gp > 0 && careerTotals.shotsFaced > 0 ? (careerTotals.shotsFaced / careerTotals.gp).toFixed(2) : "—"}</td>}
+                      </tr>
+                    );
+                  })()}
                 </tbody>
               </table>
             </div>
-            <div className="px-3 py-1.5 bg-secondary/50 text-xs text-muted-foreground font-sans flex gap-4">
-              <span><span className="font-bold text-foreground">Bold</span> = league leader (top 5)</span>
-              <span><span className="font-bold text-[hsl(var(--highlight))]">Gold</span> = career best season</span>
-              <span><span className="font-bold text-primary">Bold primary</span> = career total</span>
+            <div className="px-3 py-1.5 bg-secondary/50 text-xs text-muted-foreground font-sans flex gap-4 flex-wrap">
+              <span><span className="font-bold text-foreground">Bold</span> = league leader</span>
+              <span><span className="font-bold text-[hsl(var(--highlight))]">Gold</span> = career best</span>
+              {isChaser && <span>Sh% = Shooting%, Pass% = Passing%</span>}
+              {isBeater && <span>BH = Bludgers Hit, TF = Turnovers Forced, TP = Teammates Protected</span>}
+              {isSeeker && <span>Spotted = Snitch Spottings, CatchAtt = Catch Attempts</span>}
             </div>
           </div>
 
