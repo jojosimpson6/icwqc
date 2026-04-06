@@ -45,6 +45,24 @@ interface LeagueLeaderEntry {
 
 type MinutesMap = Map<string, number>;
 
+interface ExtendedStats {
+  passAtt: number;
+  passComp: number;
+  shotAtt: number;
+  shotScored: number;
+  bludgersHit: number;
+  turnoversForced: number;
+  teammatesProtected: number;
+  bludgerShotsFaced: number;
+  snitchSpotted: number;
+  catchAttempts: number;
+  keeperShotsSaved: number;
+  keeperShotsParried: number;
+  keeperShotsConceded: number;
+}
+
+type ExtendedStatsMap = Map<string, ExtendedStats>;
+
 interface MatchLogEntry {
   MatchID: number;
   SeasonID: number | null;
