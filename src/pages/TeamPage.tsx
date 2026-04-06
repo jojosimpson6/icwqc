@@ -288,8 +288,8 @@ export default function TeamPage() {
         });
       } else {
         // For cups/CL (no standings), compute from match results
-        const teamId = team?.TeamID;
-        if (!teamId || !leagueId) continue;
+        const tid = teamId;
+        if (!tid || !leagueId) continue;
         
         const cupResults = await fetchAllRows("results", {
           select: "HomeTeamID, AwayTeamID, HomeTeamScore, AwayTeamScore",
