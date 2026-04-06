@@ -496,10 +496,10 @@ export default function PlayerProfile() {
   const allTimeGP = Math.max(0, ...stats.map(s => s.GamesPlayed || 0));
   const allTimeMinutes = minutesMap.size > 0 ? Math.max(0, ...[...minutesMap.values()]) : 0;
 
-  const byCompetition = new Map<string, { gp: number; goals: number; gsc: number; saves: number; shotsFaced: number; minutes: number }>();
+  const byCompetition = new Map<string, { gp: number; goals: number; gsc: number; saves: number; shotsFaced: number; minutes: number; ext: ExtendedStats }>();
   stats.forEach((s) => {
     const key = s.LeagueName || "Unknown";
-    const existing = byCompetition.get(key) || { gp: 0, goals: 0, gsc: 0, saves: 0, shotsFaced: 0, minutes: 0 };
+    const existing = byCompetition.get(key) || { gp: 0, goals: 0, gsc: 0, saves: 0, shotsFaced: 0, minutes: 0, ext: { passAtt: 0, passComp: 0, shotAtt: 0, shotScored: 0, bludgersHit: 0, turnoversForced: 0, teammatesProtected: 0, bludgerShotsFaced: 0, snitchSpotted: 0, catchAttempts: 0, keeperShotsSaved: 0, keeperShotsParried: 0, keeperShotsConceded: 0 } };
     existing.gp += s.GamesPlayed || 0;
     existing.goals += s.Goals || 0;
     existing.gsc += s.GoldenSnitchCatches || 0;
@@ -507,6 +507,14 @@ export default function PlayerProfile() {
     existing.shotsFaced += s.KeeperShotsFaced || 0;
     const mKey = `${s.SeasonID}|${s.LeagueName}`;
     existing.minutes += minutesMap.get(mKey) || 0;
+    const ext = extStatsMap.get(mKey);
+    if (ext) {
+      existing.ext.passAtt += ext.passAtt; existing.ext.passComp += ext.passComp;
+      existing.ext.shotAtt += ext.shotAtt; existing.ext.shotScored += ext.shotScored;
+      existing.ext.bludgersHit += ext.bludgersHit; existing.ext.turnoversForced += ext.turnoversForced;
+      existing.ext.teammatesProtected += ext.teammatesProtected; existing.ext.bludgerShotsFaced += ext.bludgerShotsFaced;
+      existing.ext.snitchSpotted += ext.snitchSpotted; existing.ext.catchAttempts += ext.catchAttempts;
+    }
     byCompetition.set(key, existing);
   });
 
