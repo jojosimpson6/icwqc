@@ -194,7 +194,7 @@ export default function TeamPage() {
 
       // Build register from stats (works even without standings for cups/CL)
       if (statsData && statsData.length > 0) {
-        buildSeasonRegister(teamName, (standData || []) as StandingRow[], statsData as StatLine[]);
+        buildSeasonRegister(teamName, (standData || []) as StandingRow[], statsData as StatLine[], teamData?.TeamID ?? null);
       }
     });
   }, [name]);
