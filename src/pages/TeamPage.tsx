@@ -194,12 +194,12 @@ export default function TeamPage() {
 
       // Build register from stats (works even without standings for cups/CL)
       if (statsData && statsData.length > 0) {
-        buildSeasonRegister(teamName, (standData || []) as StandingRow[], statsData as StatLine[]);
+        buildSeasonRegister(teamName, (standData || []) as StandingRow[], statsData as StatLine[], teamData?.TeamID ?? null);
       }
     });
   }, [name]);
 
-  async function buildSeasonRegister(teamName: string, standings: StandingRow[], stats: StatLine[]) {
+  async function buildSeasonRegister(teamName: string, standings: StandingRow[], stats: StatLine[], teamId: number | null) {
     // Build a map of all (SeasonID, LeagueName) combos from stats
     const seasonLeaguePairs = new Map<string, { seasonId: number; leagueName: string }>();
     (stats || []).forEach(s => {
@@ -288,22 +288,22 @@ export default function TeamPage() {
         });
       } else {
         // For cups/CL (no standings), compute from match results
-        const teamId = team?.TeamID;
-        if (!teamId || !leagueId) continue;
+        const tid = teamId;
+        if (!tid || !leagueId) continue;
         
         const cupResults = await fetchAllRows("results", {
           select: "HomeTeamID, AwayTeamID, HomeTeamScore, AwayTeamScore",
           filters: [
             { method: "eq", args: ["LeagueID", leagueId] },
             { method: "eq", args: ["SeasonID", seasonId] },
-            { method: "or", args: [`HomeTeamID.eq.${teamId},AwayTeamID.eq.${teamId}`] },
+            { method: "or", args: [`HomeTeamID.eq.${tid},AwayTeamID.eq.${tid}`] },
           ],
         });
         
         let gp = 0, gf = 0, ga = 0, wins = 0;
         (cupResults || []).forEach(r => {
           gp++;
-          const isHome = r.HomeTeamID === teamId;
+          const isHome = r.HomeTeamID === tid;
           const ts = isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
           const os = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
           gf += ts;
