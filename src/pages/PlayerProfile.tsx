@@ -135,6 +135,7 @@ export default function PlayerProfile() {
   const [minutesMap, setMinutesMap] = useState<MinutesMap>(new Map());
   const [shotsFacedMap, setShotsFacedMap] = useState<MinutesMap>(new Map());
   const [extStatsMap, setExtStatsMap] = useState<ExtendedStatsMap>(new Map());
+  const [matchLog, setMatchLog] = useState<MatchLogEntry[]>([]);
   const [matchLogOpen, setMatchLogOpen] = useState(true);
   const [matchLogSeason, setMatchLogSeason] = useState<number | "all">("all");
   const [matchLogSortKey, setMatchLogSortKey] = useState<string>("date");
