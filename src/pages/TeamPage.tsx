@@ -199,7 +199,7 @@ export default function TeamPage() {
     });
   }, [name]);
 
-  async function buildSeasonRegister(teamName: string, standings: StandingRow[], stats: StatLine[]) {
+  async function buildSeasonRegister(teamName: string, standings: StandingRow[], stats: StatLine[], teamId: number | null) {
     // Build a map of all (SeasonID, LeagueName) combos from stats
     const seasonLeaguePairs = new Map<string, { seasonId: number; leagueName: string }>();
     (stats || []).forEach(s => {
