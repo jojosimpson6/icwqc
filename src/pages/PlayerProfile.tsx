@@ -805,13 +805,20 @@ export default function PlayerProfile() {
                     <th className={`${thClass} text-right`}>GP</th>
                     <th className={`${thClass} text-right`}>Min</th>
                     {isChaser && <th className={`${thClass} text-right`}>Goals</th>}
+                    {isChaser && <th className={`${thClass} text-right`}>Sh%</th>}
+                    {isChaser && <th className={`${thClass} text-right`}>Pass%</th>}
                     {isChaser && <th className={`${thClass} text-right`}>Min/G</th>}
                     {isSeeker && <th className={`${thClass} text-right`}>GSC</th>}
                     {isSeeker && <th className={`${thClass} text-right`}>Snitch%</th>}
+                    {isSeeker && <th className={`${thClass} text-right`}>Spotted</th>}
+                    {isSeeker && <th className={`${thClass} text-right`}>CatchAtt</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>Saves</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>SF</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>Sv%</th>}
-                    {isKeeper && <th className={`${thClass} text-right`}>Sv/GP</th>}
+                    {isKeeper && <th className={`${thClass} text-right`}>Pass%</th>}
+                    {isBeater && <th className={`${thClass} text-right`}>BH</th>}
+                    {isBeater && <th className={`${thClass} text-right`}>TF</th>}
+                    {isBeater && <th className={`${thClass} text-right`}>TP</th>}
                     {isBeater && <th className={`${thClass} text-right`}>SF/GP</th>}
                   </tr>
                 </thead>
@@ -822,34 +829,21 @@ export default function PlayerProfile() {
                       <td className={`${tdClass} text-right font-mono`}>{totals.gp}</td>
                       <td className={`${tdClass} text-right font-mono`}>{totals.minutes > 0 ? totals.minutes : "—"}</td>
                       {isChaser && <td className={`${tdClass} text-right font-mono`}>{totals.goals}</td>}
-                      {isChaser && (
-                        <td className={`${tdClass} text-right font-mono text-muted-foreground`}>
-                          {totals.minutes > 0 && totals.goals > 0 ? (totals.minutes / totals.goals).toFixed(1) : "—"}
-                        </td>
-                      )}
+                      {isChaser && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.ext.shotAtt > 0 ? ((totals.ext.shotScored / totals.ext.shotAtt) * 100).toFixed(1) + "%" : "—"}</td>}
+                      {isChaser && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.ext.passAtt > 0 ? ((totals.ext.passComp / totals.ext.passAtt) * 100).toFixed(1) + "%" : "—"}</td>}
+                      {isChaser && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.minutes > 0 && totals.goals > 0 ? (totals.minutes / totals.goals).toFixed(1) : "—"}</td>}
                       {isSeeker && <td className={`${tdClass} text-right font-mono`}>{totals.gsc}</td>}
-                      {isSeeker && (
-                        <td className={`${tdClass} text-right font-mono text-muted-foreground`}>
-                          {totals.gp > 0 ? ((totals.gsc / totals.gp) * 100).toFixed(1) + "%" : "—"}
-                        </td>
-                      )}
+                      {isSeeker && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.gp > 0 ? ((totals.gsc / totals.gp) * 100).toFixed(1) + "%" : "—"}</td>}
+                      {isSeeker && <td className={`${tdClass} text-right font-mono`}>{totals.ext.snitchSpotted}</td>}
+                      {isSeeker && <td className={`${tdClass} text-right font-mono`}>{totals.ext.catchAttempts}</td>}
                       {isKeeper && <td className={`${tdClass} text-right font-mono`}>{totals.saves}</td>}
                       {isKeeper && <td className={`${tdClass} text-right font-mono`}>{totals.shotsFaced}</td>}
-                      {isKeeper && (
-                        <td className={`${tdClass} text-right font-mono text-muted-foreground`}>
-                          {totals.shotsFaced ? ((totals.saves / totals.shotsFaced) * 100).toFixed(1) + "%" : "—"}
-                        </td>
-                      )}
-                      {isKeeper && (
-                        <td className={`${tdClass} text-right font-mono text-muted-foreground`}>
-                          {totals.gp > 0 ? (totals.saves / totals.gp).toFixed(2) : "—"}
-                        </td>
-                      )}
-                      {isBeater && (
-                        <td className={`${tdClass} text-right font-mono text-muted-foreground`}>
-                          {totals.gp > 0 && totals.shotsFaced > 0 ? (totals.shotsFaced / totals.gp).toFixed(2) : "—"}
-                        </td>
-                      )}
+                      {isKeeper && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.shotsFaced ? ((totals.saves / totals.shotsFaced) * 100).toFixed(1) + "%" : "—"}</td>}
+                      {isKeeper && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.ext.passAtt > 0 ? ((totals.ext.passComp / totals.ext.passAtt) * 100).toFixed(1) + "%" : "—"}</td>}
+                      {isBeater && <td className={`${tdClass} text-right font-mono`}>{totals.ext.bludgersHit}</td>}
+                      {isBeater && <td className={`${tdClass} text-right font-mono`}>{totals.ext.turnoversForced}</td>}
+                      {isBeater && <td className={`${tdClass} text-right font-mono`}>{totals.ext.teammatesProtected}</td>}
+                      {isBeater && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.gp > 0 && totals.shotsFaced > 0 ? (totals.shotsFaced / totals.gp).toFixed(2) : "—"}</td>}
                     </tr>
                   ))}
                 </tbody>
