@@ -296,14 +296,14 @@ export default function TeamPage() {
           filters: [
             { method: "eq", args: ["LeagueID", leagueId] },
             { method: "eq", args: ["SeasonID", seasonId] },
-            { method: "or", args: [`HomeTeamID.eq.${teamId},AwayTeamID.eq.${teamId}`] },
+            { method: "or", args: [`HomeTeamID.eq.${tid},AwayTeamID.eq.${tid}`] },
           ],
         });
         
         let gp = 0, gf = 0, ga = 0, wins = 0;
         (cupResults || []).forEach(r => {
           gp++;
-          const isHome = r.HomeTeamID === teamId;
+          const isHome = r.HomeTeamID === tid;
           const ts = isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
           const os = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
           gf += ts;
