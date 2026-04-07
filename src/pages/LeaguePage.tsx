@@ -295,10 +295,20 @@ export default function LeaguePage() {
         if (home) { home.gp++; home.gf += hs; home.ga += as_; }
         if (away) { away.gp++; away.gf += as_; away.ga += hs; }
         if (hs > as_) {
-          if (home) { home.w++; home.pts += 3; }
+          const diff = hs - as_;
+          let bonus = 0;
+          if (diff > 150) bonus = 5;
+          else if (diff > 100) bonus = 3;
+          else if (diff > 50) bonus = 1;
+          if (home) { home.w++; home.pts += 2 + bonus; }
           if (away) away.l++;
         } else if (as_ > hs) {
-          if (away) { away.w++; away.pts += 3; }
+          const diff = as_ - hs;
+          let bonus = 0;
+          if (diff > 150) bonus = 5;
+          else if (diff > 100) bonus = 3;
+          else if (diff > 50) bonus = 1;
+          if (away) { away.w++; away.pts += 2 + bonus; }
           if (home) home.l++;
         } else {
           if (home) { home.d++; home.pts += 1; }
