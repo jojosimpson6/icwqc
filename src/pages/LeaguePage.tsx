@@ -295,10 +295,20 @@ export default function LeaguePage() {
         if (home) { home.gp++; home.gf += hs; home.ga += as_; }
         if (away) { away.gp++; away.gf += as_; away.ga += hs; }
         if (hs > as_) {
-          if (home) { home.w++; home.pts += 3; }
+          const diff = hs - as_;
+          let bonus = 0;
+          if (diff > 150) bonus = 5;
+          else if (diff > 100) bonus = 3;
+          else if (diff > 50) bonus = 1;
+          if (home) { home.w++; home.pts += 2 + bonus; }
           if (away) away.l++;
         } else if (as_ > hs) {
-          if (away) { away.w++; away.pts += 3; }
+          const diff = as_ - hs;
+          let bonus = 0;
+          if (diff > 150) bonus = 5;
+          else if (diff > 100) bonus = 3;
+          else if (diff > 50) bonus = 1;
+          if (away) { away.w++; away.pts += 2 + bonus; }
           if (home) home.l++;
         } else {
           if (home) { home.d++; home.pts += 1; }
@@ -505,8 +515,9 @@ export default function LeaguePage() {
                             <tr className="bg-secondary">
                               <th className="px-2 py-1 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">#</th>
                               <th className="px-2 py-1 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</th>
-                              <th className="px-2 py-1 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GP</th>
+                             <th className="px-2 py-1 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GP</th>
                               <th className="px-2 py-1 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">W</th>
+                              <th className="px-2 py-1 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">D</th>
                               <th className="px-2 py-1 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">L</th>
                               <th className="px-2 py-1 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GF</th>
                               <th className="px-2 py-1 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GA</th>
@@ -526,6 +537,7 @@ export default function LeaguePage() {
                                   </td>
                                   <td className="px-2 py-1 text-right font-mono">{s.gp}</td>
                                   <td className="px-2 py-1 text-right font-mono">{s.w}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{s.d}</td>
                                   <td className="px-2 py-1 text-right font-mono">{s.l}</td>
                                   <td className="px-2 py-1 text-right font-mono">{s.gf}</td>
                                   <td className="px-2 py-1 text-right font-mono">{s.ga}</td>

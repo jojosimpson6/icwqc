@@ -28,7 +28,7 @@ export function PlayerSpotlight() {
       
       Promise.all([
         fetchAllRows("players", { select: "*" }),
-        supabase.from("nations").select("*"),
+        supabase.from("nations").select("NationID, Nation, ValidToDt").order("ValidToDt", { ascending: false }),
         // Only fetch stats for the latest season to avoid timeout
         fetchAllRows("stats", {
           select: "PlayerName, FullName, SeasonID, Position, GamesPlayed",
@@ -41,7 +41,7 @@ export function PlayerSpotlight() {
         }
         if (nationData) {
           const map: Record<number, string> = {};
-          nationData.forEach((n) => { if (n.NationID) map[n.NationID] = n.Nation || ""; });
+          nationData.forEach((n: any) => { if (n.NationID && !map[n.NationID]) map[n.NationID] = n.Nation || ""; });
           setNations(map);
         }
         if (statsData) {
