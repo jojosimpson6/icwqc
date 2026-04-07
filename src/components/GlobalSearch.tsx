@@ -9,6 +9,7 @@ interface SearchResult {
   id: number | string;
   name: string;
   subtitle: string;
+  isActive?: boolean;
 }
 
 export function GlobalSearch() {
@@ -19,23 +20,22 @@ export function GlobalSearch() {
   const containerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
-  // Cache data on mount
-  const [players, setPlayers] = useState<{ PlayerID: number; PlayerName: string; seasons: string }[]>([]);
+  const [players, setPlayers] = useState<{ PlayerID: number; PlayerName: string; seasons: string; isActive: boolean }[]>([]);
   const [teams, setTeams] = useState<{ TeamID: number; FullName: string }[]>([]);
   const [leagues, setLeagues] = useState<{ LeagueID: number; LeagueName: string }[]>([]);
 
   useEffect(() => {
-    // Load all searchable entities
     Promise.all([
       fetchAllRows("players", { select: "PlayerID, PlayerName" }),
       fetchAllRows("player_season_minutes", { select: "PlayerName, SeasonID" }),
       fetchAllRows("teams", { select: "TeamID, FullName" }),
       supabase.from("leagues").select("LeagueID, LeagueName").then(({ data }) => data || []),
     ]).then(([playerData, statsData, teamData, leagueData]) => {
-      // Build player season ranges
       const seasonMap = new Map<string, { min: number; max: number }>();
+      let globalMaxSeason = 0;
       statsData.forEach((s: any) => {
         if (!s.PlayerName || !s.SeasonID) return;
+        if (s.SeasonID > globalMaxSeason) globalMaxSeason = s.SeasonID;
         const existing = seasonMap.get(s.PlayerName);
         if (existing) {
           existing.min = Math.min(existing.min, s.SeasonID);
@@ -45,17 +45,16 @@ export function GlobalSearch() {
         }
       });
 
-      const formatSeason = (year: number) => `${year - 1}-${year}`;
-
       setPlayers(
         playerData.map((p: any) => {
           const range = seasonMap.get(p.PlayerName);
           const seasons = range
             ? range.min === range.max
-              ? formatSeason(range.min)
-              : `${formatSeason(range.min)} to ${formatSeason(range.max)}`
+              ? `${range.min - 1}–${String(range.min).slice(-2)}`
+              : `${range.min - 1}–${String(range.max).slice(-2)}`
             : "";
-          return { PlayerID: p.PlayerID, PlayerName: p.PlayerName || "", seasons };
+          const isActive = range ? range.max === globalMaxSeason : false;
+          return { PlayerID: p.PlayerID, PlayerName: p.PlayerName || "", seasons, isActive };
         })
       );
       setTeams(teamData.map((t: any) => ({ TeamID: t.TeamID, FullName: t.FullName || "" })));
@@ -75,7 +74,7 @@ export function GlobalSearch() {
       .filter((p) => p.PlayerName.toLowerCase().includes(q))
       .slice(0, 5)
       .forEach((p) =>
-        matched.push({ type: "player", id: p.PlayerID, name: p.PlayerName, subtitle: p.seasons })
+        matched.push({ type: "player", id: p.PlayerID, name: p.PlayerName, subtitle: p.seasons, isActive: p.isActive })
       );
 
     teams
@@ -160,7 +159,7 @@ export function GlobalSearch() {
                 {typeLabel[r.type]}
               </span>
               <div className="flex-1 min-w-0">
-                <p className="font-medium text-foreground truncate">{r.name}</p>
+                <p className={`text-foreground truncate ${r.isActive ? "font-bold" : "font-medium"}`}>{r.name}</p>
                 {r.subtitle && (
                   <p className="text-xs text-muted-foreground truncate">{r.subtitle}</p>
                 )}

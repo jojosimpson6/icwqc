@@ -537,6 +537,7 @@ export default function LeaguePage() {
                                   </td>
                                   <td className="px-2 py-1 text-right font-mono">{s.gp}</td>
                                   <td className="px-2 py-1 text-right font-mono">{s.w}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{s.d}</td>
                                   <td className="px-2 py-1 text-right font-mono">{s.l}</td>
                                   <td className="px-2 py-1 text-right font-mono">{s.gf}</td>
                                   <td className="px-2 py-1 text-right font-mono">{s.ga}</td>
