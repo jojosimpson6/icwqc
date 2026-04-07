@@ -28,7 +28,7 @@ export function PlayerSpotlight() {
       
       Promise.all([
         fetchAllRows("players", { select: "*" }),
-        supabase.from("nations").select("*"),
+        supabase.from("nations").select("NationID, Nation, ValidToDt").order("ValidToDt", { ascending: false }),
         // Only fetch stats for the latest season to avoid timeout
         fetchAllRows("stats", {
           select: "PlayerName, FullName, SeasonID, Position, GamesPlayed",
