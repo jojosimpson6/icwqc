@@ -515,8 +515,9 @@ export default function LeaguePage() {
                             <tr className="bg-secondary">
                               <th className="px-2 py-1 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">#</th>
                               <th className="px-2 py-1 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</th>
-                              <th className="px-2 py-1 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GP</th>
+                             <th className="px-2 py-1 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GP</th>
                               <th className="px-2 py-1 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">W</th>
+                              <th className="px-2 py-1 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">D</th>
                               <th className="px-2 py-1 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">L</th>
                               <th className="px-2 py-1 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GF</th>
                               <th className="px-2 py-1 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GA</th>
