@@ -41,7 +41,12 @@ export function PlayerSpotlight() {
         }
         if (nationData) {
           const map: Record<number, string> = {};
-          nationData.forEach((n: any) => { if (n.NationID && !map[n.NationID]) map[n.NationID] = n.Nation || ""; });
+          // Order by ValidToDt desc means most recent is first — use first occurrence per NationID
+          [...nationData].sort((a: any, b: any) => {
+            if (!a.ValidToDt) return -1;
+            if (!b.ValidToDt) return 1;
+            return b.ValidToDt.localeCompare(a.ValidToDt);
+          }).forEach((n: any) => { if (n.NationID && !map[n.NationID]) map[n.NationID] = n.Nation || ""; });
           setNations(map);
         }
         if (statsData) {
