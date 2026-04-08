@@ -94,6 +94,57 @@ function ordinal(n: number): string {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
+// Determine what stage a team reached in a knockout tournament
+function getCupStage(matches: { homeId: number; awayId: number; homeScore: number; awayScore: number; weekId: number }[], teamId: number, isCL: boolean): string {
+  if (matches.length === 0) return "—";
+
+  // For CL: weeks 1-6 are group stage, 7+ are knockout
+  // For cups: all weeks are knockout
+  const knockoutMatches = isCL
+    ? matches.filter(m => m.weekId > 6)
+    : matches;
+  const groupMatches = isCL ? matches.filter(m => m.weekId <= 6) : [];
+
+  if (isCL && groupMatches.length > 0 && knockoutMatches.length === 0) {
+    return "Group Stage";
+  }
+
+  // Find the latest week the team played in
+  const teamMatches = knockoutMatches.filter(m => m.homeId === teamId || m.awayId === teamId);
+  if (teamMatches.length === 0) {
+    if (isCL && groupMatches.length > 0) return "Group Stage";
+    return "—";
+  }
+
+  // Check if they won their last match (to determine stage reached vs eliminated)
+  const lastMatch = [...teamMatches].sort((a, b) => b.weekId - a.weekId)[0];
+  const isHome = lastMatch.homeId === teamId;
+  const teamScore = isHome ? lastMatch.homeScore : lastMatch.awayScore;
+  const oppScore = isHome ? lastMatch.awayScore : lastMatch.homeScore;
+  const wonLast = teamScore > oppScore;
+
+  // Count unique weeks to determine total rounds
+  const allWeeks = [...new Set(knockoutMatches.map(m => m.weekId))].sort((a, b) => a - b);
+  const lastWeekIdx = allWeeks.indexOf(lastMatch.weekId);
+  const totalRounds = allWeeks.length;
+  const roundsFromEnd = totalRounds - 1 - lastWeekIdx; // 0 = final, 1 = semi, 2 = quarter, etc.
+
+  // How many matches were in the final week (to gauge round size)
+  const finalWeekMatches = knockoutMatches.filter(m => m.weekId === allWeeks[allWeeks.length - 1]).length;
+
+  if (wonLast && roundsFromEnd === 0) return "🏆 Champion";
+  if (!wonLast && roundsFromEnd === 0) return isCL ? "CL Final" : "Final";
+  if (roundsFromEnd === 1) return isCL ? "CL Semi-finals" : "Semi-finals";
+  if (roundsFromEnd === 2) return "Quarter-finals";
+  if (roundsFromEnd === 3) return "Round of 16";
+  if (roundsFromEnd === 4) return "Round of 32";
+
+  // For cup competitions (non-CL), use round number
+  const roundNum = lastWeekIdx + 1;
+  if (isCL) return `Round of ${Math.pow(2, roundsFromEnd + 1)}`;
+  return roundNum === 1 ? "First Round" : roundNum === 2 ? "Second Round" : `Round ${roundNum}`;
+}
+
 export default function TeamPage() {
   const { name } = useParams();
   const [team, setTeam] = useState<Team | null>(null);
@@ -116,6 +167,7 @@ export default function TeamPage() {
   const [rivalTeamName, setRivalTeamName] = useState<string | null>(null);
   const [resultsOpen, setResultsOpen] = useState(true);
   const [h2hOpen, setH2hOpen] = useState(true);
+  const [overallDebutMap, setOverallDebutMap] = useState<Map<string, number>>(new Map());
   // Result sort
   const [resultSortKey, setResultSortKey] = useState<string>("date");
   const [resultSortDir, setResultSortDir] = useState<"asc" | "desc">("asc");
@@ -185,6 +237,24 @@ export default function TeamPage() {
         const latestSeason = seasons[0] || null;
         setRosterSeasonId(latestSeason);
         setCurrentRoster((statsData as StatLine[]).filter((s: any) => s.SeasonID === latestSeason));
+
+        // Fetch all-player stats to get overall debut (not team debut)
+        const playerNames = [...new Set((statsData as StatLine[]).map((s: any) => s.PlayerName).filter(Boolean))];
+        if (playerNames.length > 0) {
+          fetchAllRows("stats", {
+            select: "PlayerName, SeasonID",
+            filters: [{ method: "in", args: ["PlayerName", playerNames] }],
+          }).then((allPlayerStats: any) => {
+            const debutMap = new Map<string, number>();
+            (allPlayerStats || []).forEach((s: any) => {
+              if (s.PlayerName && s.SeasonID) {
+                const existing = debutMap.get(s.PlayerName);
+                if (!existing || s.SeasonID < existing) debutMap.set(s.PlayerName, s.SeasonID);
+              }
+            });
+            setOverallDebutMap(debutMap);
+          });
+        }
       }
       if (standData && standData.length > 0) {
         setAllStandings(standData as StandingRow[]);
@@ -447,17 +517,6 @@ export default function TeamPage() {
     else rivalRecord.draws++;
   });
 
-  // Earliest season a player appeared = debut year
-  const playerDebutMap = new Map<string, number>();
-  allStats.forEach(s => {
-    if (s.PlayerName && s.SeasonID) {
-      const existing = playerDebutMap.get(s.PlayerName);
-      if (!existing || s.SeasonID < existing) {
-        playerDebutMap.set(s.PlayerName, s.SeasonID);
-      }
-    }
-  });
-
   if (!team) {
     return (
       <div className="min-h-screen bg-background flex flex-col">
@@ -468,7 +527,7 @@ export default function TeamPage() {
     );
   }
 
-  const RegisterTable = ({ rows, title, isDomestic }: { rows: SeasonRegisterRow[]; title: string; isDomestic?: boolean }) => (
+  const RegisterTable = ({ rows, title, isDomestic, isCL }: { rows: SeasonRegisterRow[]; title: string; isDomestic?: boolean; isCL?: boolean }) => (
     <div className="border border-border rounded overflow-hidden">
       <div className="px-3 py-2" style={headerStyle || undefined}>
         <h3 className={`font-display text-sm font-bold ${headerStyle ? "" : "text-table-header-foreground bg-table-header"}`}
@@ -485,7 +544,7 @@ export default function TeamPage() {
               {isDomestic && <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pos</th>}
               <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GP</th>
               {isDomestic && <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pts</th>}
-              {!isDomestic && <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">W-L</th>}
+              {!isDomestic && <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Stage Reached</th>}
               <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GF</th>
               <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GA</th>
               <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GD</th>
@@ -495,19 +554,19 @@ export default function TeamPage() {
             {rows.map((row, i) => {
               const gd = (row.GoalsFor || 0) - (row.GoalsAgainst || 0);
               const posClass = row.isChampion ? "font-bold text-yellow-500" : "";
-              // Compute W-L for non-domestic
-              const cupWins = !isDomestic ? (() => {
+              // Compute stage reached for non-domestic
+              const stageReached = !isDomestic ? (() => {
                 const tid = team?.TeamID;
-                if (!tid) return { w: 0, l: 0 };
+                if (!tid) return "—";
                 const matches = matchResults.filter(r => r.LeagueID === row.LeagueID && r.SeasonID === row.SeasonID);
-                let w = 0, l = 0;
-                matches.forEach(r => {
-                  const isHome = r.HomeTeamID === tid;
-                  const ts = isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
-                  const os = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
-                  if (ts > os) w++; else if (os > ts) l++;
-                });
-                return { w, l };
+                const matchData = matches.map(r => ({
+                  homeId: r.HomeTeamID || 0,
+                  awayId: r.AwayTeamID || 0,
+                  homeScore: r.HomeTeamScore || 0,
+                  awayScore: r.AwayTeamScore || 0,
+                  weekId: r.WeekID || 0,
+                }));
+                return getCupStage(matchData, tid, !!isCL);
               })() : null;
               return (
                 <tr key={`${row.SeasonID}-${row.LeagueID}`} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
@@ -529,7 +588,11 @@ export default function TeamPage() {
                   )}
                   <td className="px-3 py-1.5 text-right font-mono">{row.totalgamesplayed ?? "—"}</td>
                   {isDomestic && <td className="px-3 py-1.5 text-right font-mono">{row.totalpoints ?? "—"}</td>}
-                  {!isDomestic && <td className="px-3 py-1.5 text-right font-mono">{cupWins ? `${cupWins.w}W–${cupWins.l}L` : "—"}</td>}
+                  {!isDomestic && (
+                    <td className={`px-3 py-1.5 font-sans text-sm ${stageReached?.includes("Champion") ? "font-bold text-yellow-500" : ""}`}>
+                      {stageReached ?? "—"}
+                    </td>
+                  )}
                   <td className="px-3 py-1.5 text-right font-mono">{row.GoalsFor ?? "—"}</td>
                   <td className="px-3 py-1.5 text-right font-mono">{row.GoalsAgainst ?? "—"}</td>
                   <td className={`px-3 py-1.5 text-right font-mono ${gd > 0 ? "text-green-600" : gd < 0 ? "text-destructive" : ""}`}>{gd > 0 ? "+" : ""}{gd}</td>
@@ -611,7 +674,7 @@ export default function TeamPage() {
           <div className="space-y-6">
             {domesticRegister.length > 0 && <RegisterTable rows={domesticRegister} title="Domestic League Register" isDomestic />}
             {cupRegister.length > 0 && <RegisterTable rows={cupRegister} title="Cup Competition Register" />}
-            {championsLeagueRegister.length > 0 && <RegisterTable rows={championsLeagueRegister} title="Champions League Register" />}
+            {championsLeagueRegister.length > 0 && <RegisterTable rows={championsLeagueRegister} title="Champions League Register" isCL />}
             {seasonRegister.length === 0 && <p className="text-muted-foreground font-sans text-sm">No season data available.</p>}
           </div>
         )}
@@ -835,14 +898,14 @@ export default function TeamPage() {
                   <table className="w-full text-sm font-sans">
                     <thead>
                       <tr className="bg-secondary">
-                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Name</th>
-                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pos</th>
-                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Age</th>
+                        <th className={`${thClass} text-left`} onClick={() => requestSort("PlayerName")}>Name{sortIndicator("PlayerName")}</th>
+                        <th className={`${thClass} text-left`} onClick={() => requestSort("Position")}>Pos{sortIndicator("Position")}</th>
+                        <th className={`${thClass} text-right`} onClick={() => requestSort("_age")}>Age{sortIndicator("_age")}</th>
                         <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Nat</th>
-                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Ht</th>
-                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Wt</th>
-                        <th className="px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">Hand</th>
-                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Debut</th>
+                        <th className={`${thClass} text-right`} onClick={() => requestSort("_height")}>Ht{sortIndicator("_height")}</th>
+                        <th className={`${thClass} text-right`} onClick={() => requestSort("_weight")}>Wt{sortIndicator("_weight")}</th>
+                        <th className={`${thClass} text-center`} onClick={() => requestSort("_hand")}>Hand{sortIndicator("_hand")}</th>
+                        <th className={`${thClass} text-right`} onClick={() => requestSort("_debut")}>Debut{sortIndicator("_debut")}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -851,7 +914,7 @@ export default function TeamPage() {
                         const pid = pInfo?.PlayerID;
                         const posDisplay = (p as any).positions?.join("/") || p.Position;
                         const nationName = pInfo?.NationalityID ? nations.get(pInfo.NationalityID) || "" : "";
-                        const debut = p.PlayerName ? playerDebutMap.get(p.PlayerName) : null;
+                        const debut = p.PlayerName ? overallDebutMap.get(p.PlayerName) : null;
                         return (
                           <tr key={i} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
                             <td className="px-3 py-1.5 font-medium text-accent hover:underline">
