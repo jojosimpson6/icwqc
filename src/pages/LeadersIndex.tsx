@@ -149,28 +149,40 @@ export default function LeadersIndex() {
   const [rawMin, setRawMin] = useState<MinRow[]>([]);
   const [playerMap, setPlayerMap] = useState<Map<string, number>>(new Map());
   const [leagues, setLeagues] = useState<LeagueInfo[]>([]);
+  const [intlTeamNames, setIntlTeamNames] = useState<Set<string>>(new Set());
+  const [leagueIdByName, setLeagueIdByName] = useState<Map<string, number>>(new Map());
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const [statsData, minData, pl, lg] = await Promise.all([
+      const [statsData, minData, pl, lg, teamsData] = await Promise.all([
         fetchAllRows<RawStat>("stats"),
         fetchAllRows<MinRow>("player_season_minutes"),
         supabase.from("players").select("PlayerID, PlayerName"),
         supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier"),
+        fetchAllRows("teams", { select: "TeamID, FullName" }),
       ]);
       setRawStats(statsData);
       setRawMin(minData);
       const pm = new Map<string, number>();
       (pl.data || []).forEach((p: any) => { if (p.PlayerName) pm.set(p.PlayerName, p.PlayerID); });
       setPlayerMap(pm);
-      if (lg.data) setLeagues(lg.data as LeagueInfo[]);
+      if (lg.data) {
+        setLeagues(lg.data as LeagueInfo[]);
+        const lim = new Map<string, number>();
+        (lg.data as LeagueInfo[]).forEach(l => { if (l.LeagueName && l.LeagueID) lim.set(l.LeagueName, l.LeagueID); });
+        setLeagueIdByName(lim);
+      }
+      // Teams with ID > 1000 are national/international teams
+      const intlNames = new Set<string>();
+      (teamsData || []).forEach((t: any) => { if (t.TeamID > 1000 && t.FullName) intlNames.add(t.FullName); });
+      setIntlTeamNames(intlNames);
       setLoading(false);
     })();
   }, []);
 
-  /* intl league names set */
+  /* intl league names set — kept for reference but intl scope now uses team IDs */
   const intlLeagues = useMemo(() => new Set(leagues.filter(l => l.LeagueTier === 0).map(l => l.LeagueName)), [leagues]);
 
   /* season+league lines */
@@ -179,8 +191,8 @@ export default function LeadersIndex() {
     const minMap = new Map<string, number>();
     rawMin.forEach(m => {
       if (!m.PlayerName || m.SeasonID == null || !m.LeagueName) return;
-      // filter scope
-      const isIntl = intlLeagues.has(m.LeagueName);
+      // filter scope — intl = played for a national team (TeamID > 1000)
+      const isIntl = m.FullName ? intlTeamNames.has(m.FullName) : intlLeagues.has(m.LeagueName);
       if (scope === "club" && isIntl) return;
       if (scope === "intl" && !isIntl) return;
       const key = `${m.PlayerName}||${m.SeasonID}||${m.LeagueName}`;
@@ -191,13 +203,12 @@ export default function LeadersIndex() {
     const map = new Map<string, SLLine>();
     rawStats.forEach(s => {
       if (!s.PlayerName || s.SeasonID == null || !s.LeagueName) return;
-      const isIntl = intlLeagues.has(s.LeagueName);
+      const isIntl = s.FullName ? intlTeamNames.has(s.FullName) : intlLeagues.has(s.LeagueName);
       if (scope === "club" && isIntl) return;
       if (scope === "intl" && !isIntl) return;
       const key = `${s.PlayerName}||${s.SeasonID}||${s.LeagueName}`;
       let line = map.get(key);
       if (!line) {
-        const minKey = key;
         line = {
           PlayerName: s.PlayerName,
           SeasonID: s.SeasonID,
@@ -206,7 +217,7 @@ export default function LeadersIndex() {
           Positions: [],
           Nation: s.Nation || "",
           GP: 0, G: 0, GSC: 0, KS: 0, KSF: 0,
-          MIN: minMap.get(minKey) || 0,
+          MIN: minMap.get(key) || 0,
         };
         map.set(key, line);
       }
@@ -219,7 +230,7 @@ export default function LeadersIndex() {
       if (s.Position && !line.Positions.includes(s.Position)) line.Positions.push(s.Position);
     });
     return [...map.values()];
-  }, [rawStats, rawMin, scope, intlLeagues]);
+  }, [rawStats, rawMin, scope, intlLeagues, intlTeamNames]);
 
   /* season lines (per player per season, across leagues) */
   const seasonLines = useMemo(() => {
@@ -308,25 +319,34 @@ export default function LeadersIndex() {
       }));
     }
     if (register === "progressive") {
-      // chronological career accumulation, track record-breaking moments
-      const sorted = [...seasonLines].sort((a, b) => a.SeasonID - b.SeasonID);
-      const cum = new Map<string, { GP: number; G: number; GSC: number; KS: number; KSF: number; MIN: number; team: string }>();
-      let record = info.higher ? -Infinity : Infinity;
+      // Progressive: for each season, show the leader in that stat
+      // This is a year-by-year register of who was the leader each season
+      const info2 = STATS.find(s => s.key === stat)!;
+      const sortFn2 = (a: any, b: any) => {
+        const va = val(a, stat);
+        const vb = val(b, stat);
+        if (va === null && vb === null) return 0;
+        if (va === null) return 1;
+        if (vb === null) return -1;
+        return info2.higher ? vb - va : va - vb;
+      };
+      const seasons = [...new Set(seasonLines.map(s => s.SeasonID))].sort((a, b) => a - b);
       const entries: any[] = [];
-      sorted.forEach(s => {
-        let c = cum.get(s.PlayerName);
-        if (!c) c = { GP: 0, G: 0, GSC: 0, KS: 0, KSF: 0, MIN: 0, team: s.Teams[0] || "" };
-        c.GP += s.GP; c.G += s.G; c.GSC += s.GSC; c.KS += s.KS; c.KSF += s.KSF; c.MIN += s.MIN;
-        c.team = s.Teams[0] || c.team;
-        cum.set(s.PlayerName, c);
-        const v = val(c, stat);
-        if (v !== null && ((info.higher && v > record) || (!info.higher && v < record))) {
-          record = v;
-          entries.push({
-            PlayerName: s.PlayerName, ...c, Positions: s.Positions, Nation: s.Nation,
-            statVal: v, team: c.team, season: s.SeasonID,
-          });
-        }
+      seasons.forEach(sid => {
+        const seasonData = seasonLines.filter(s => s.SeasonID === sid && val(s, stat) !== null);
+        if (seasonData.length === 0) return;
+        const sorted2 = [...seasonData].sort(sortFn2);
+        const leader = sorted2[0];
+        entries.push({
+          PlayerName: leader.PlayerName,
+          GP: leader.GP, G: leader.G, GSC: leader.GSC, KS: leader.KS, KSF: leader.KSF, MIN: leader.MIN,
+          Positions: leader.Positions,
+          Nation: leader.Nation,
+          LeagueName: leader.LeagueName,
+          statVal: val(leader, stat),
+          team: leader.Teams.join(", "),
+          season: sid,
+        });
       });
       return entries;
     }
@@ -366,6 +386,7 @@ export default function LeadersIndex() {
             league,
             entries: sorted.map(s => ({
               PlayerName: s.PlayerName, ...s, statVal: val(s, stat), team: s.Teams.join(", "), season: Number(sid),
+              LeagueName: s.LeagueName,
             })),
           });
         }
@@ -402,6 +423,13 @@ export default function LeadersIndex() {
 
   const renderRow = (entry: any, i: number) => {
     const pid = playerMap.get(entry.PlayerName);
+    // For yearly/progressive entries, entry.LeagueName is available; build link to league history
+    const leagueName = entry.LeagueName || (entry.Teams?.length === 1 ? null : null);
+    const leagueId = leagueName ? leagueIdByName.get(leagueName) : null;
+    const seasonLink = entry.season && leagueId
+      ? `/league/${leagueId}/history`
+      : entry.season ? null : null;
+
     return (
       <tr key={`${entry.PlayerName}-${entry.season}-${i}`}
         className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20 transition-colors`}>
@@ -413,7 +441,14 @@ export default function LeadersIndex() {
         <td className="px-3 py-1.5 text-accent hover:underline text-xs">
           {entry.team ? <Link to={`/team/${encodeURIComponent(entry.team.split(", ")[0])}`}>{entry.team}</Link> : "—"}
         </td>
-        {entry.season && <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{seasonLabel(entry.season)}</td>}
+        {entry.season && (
+          <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">
+            {seasonLink
+              ? <Link to={seasonLink} className="text-accent hover:underline">{seasonLabel(entry.season)}</Link>
+              : seasonLabel(entry.season)
+            }
+          </td>
+        )}
         <td className="px-3 py-1.5 text-right font-mono font-bold">{fmt(entry.statVal, stat)}</td>
       </tr>
     );
@@ -443,7 +478,8 @@ export default function LeadersIndex() {
   );
 
   const isYearly = register === "yearly" || register === "yby";
-  const showSeason = register === "season" || register === "progressive";
+  const isProgressive = register === "progressive";
+  const showSeason = register === "season" || register === "progressive" || register === "yearly" || register === "yby";
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -494,19 +530,37 @@ export default function LeadersIndex() {
 
         {loading ? (
           <p className="text-muted-foreground font-sans py-8 text-center">Loading statistics...</p>
+        ) : isProgressive ? (
+          /* Progressive: register showing who led each year */
+          <div className="border border-border rounded overflow-hidden">
+            <div className="bg-table-header px-3 py-2">
+              <h3 className="font-display text-sm font-bold text-table-header-foreground">
+                Progressive — Yearly {statInfo.label} Leaders
+              </h3>
+            </div>
+            {renderTable(leaderboard, true)}
+          </div>
         ) : isYearly ? (
           <div className="space-y-6">
             {yearlyData.length === 0 && (
               <p className="text-muted-foreground font-sans py-8 text-center italic">No data available.</p>
             )}
-            {yearlyData.map(group => (
-              <div key={group.label} className="border border-border rounded overflow-hidden">
-                <div className="bg-table-header px-3 py-2">
-                  <h3 className="font-display text-sm font-bold text-table-header-foreground">{group.label}</h3>
+            {yearlyData.map(group => {
+              const lid = group.league ? leagueIdByName.get(group.league) : null;
+              return (
+                <div key={group.label} className="border border-border rounded overflow-hidden">
+                  <div className="bg-table-header px-3 py-2">
+                    <h3 className="font-display text-sm font-bold text-table-header-foreground">
+                      {lid
+                        ? <><Link to={`/league/${lid}/history`} className="hover:underline">{seasonLabel(group.seasonID)}</Link>{group.league ? ` — ${group.league}` : ""}</>
+                        : group.label
+                      }
+                    </h3>
+                  </div>
+                  {renderTable(group.entries, false)}
                 </div>
-                {renderTable(group.entries, false)}
-              </div>
-            ))}
+              );
+            })}
           </div>
         ) : (
           <div className="border border-border rounded overflow-hidden">
