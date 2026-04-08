@@ -51,7 +51,7 @@ export function GlobalSearch() {
           const seasons = range
             ? range.min === range.max
               ? `${range.min - 1}–${String(range.min).slice(-2)}`
-              : `${range.min - 1}–${String(range.max).slice(-2)}`
+              : `${range.min - 1}–${String(range.max)}`
             : "";
           const isActive = range ? range.max === globalMaxSeason : false;
           return { PlayerID: p.PlayerID, PlayerName: p.PlayerName || "", seasons, isActive };
