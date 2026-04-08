@@ -73,6 +73,7 @@ interface MatchLogEntry {
   oppScore: number;
   stat: string;
   date: string | null;
+  leagueName: string;
 }
 
 const leagueAbbr: Record<string, string> = {
@@ -140,6 +141,7 @@ export default function PlayerProfile() {
   const [matchLogSeason, setMatchLogSeason] = useState<number | "all">("all");
   const [matchLogSortKey, setMatchLogSortKey] = useState<string>("date");
   const [matchLogSortDir, setMatchLogSortDir] = useState<"asc" | "desc">("asc");
+  const [compFilter, setCompFilter] = useState<string>("all");
   const [detectedPositions, setDetectedPositions] = useState<string[]>([]);
   const [playerAwards, setPlayerAwards] = useState<{ awardname: string; placement: number; seasonid: number; leagueid: number; leagueName?: string }[]>([]);
   const [leagueNameMap, setLeagueNameMap] = useState<Map<number, string>>(new Map());
@@ -343,7 +345,7 @@ export default function PlayerProfile() {
                 const beaterNum = isHome ? (r.HomeBeater1ID === pid ? 1 : 2) : (r.AwayBeater1ID === pid ? 1 : 2);
                 const bh = (r[`${prefix}Beater${beaterNum}BludgersHit`] as number) || 0;
                 const tf = (r[`${prefix}Beater${beaterNum}TurnoversForced`] as number) || 0;
-                statStr = bh > 0 || tf > 0 ? `${bh} BH, ${tf} TF` : `${(isHome ? (r.HomeKeeperShotsFaced as number) : (r.AwayKeeperShotsFaced as number)) || 0} SA`;
+                statStr = `${bh} BH, ${tf} TF`;
               }
 
               logEntries.push({
@@ -356,6 +358,7 @@ export default function PlayerProfile() {
                 oppScore,
                 stat: statStr,
                 date: dateStr,
+                leagueName: lname,
               });
             });
 
@@ -496,6 +499,33 @@ export default function PlayerProfile() {
   const allTimeGP = Math.max(0, ...stats.map(s => s.GamesPlayed || 0));
   const allTimeMinutes = minutesMap.size > 0 ? Math.max(0, ...[...minutesMap.values()]) : 0;
 
+  // Competition ordering within the same season
+  const compOrder: Record<string, number> = {
+    "African Super League": 1, "National Quidditch Association": 1, "British and Irish Quidditch League": 1,
+    "Ligue Francaise": 1, "Nordiska Ligan": 1, "Eastern European League": 1,
+    "Australian Quidditch League": 1, "Nippon Professional Quidditch": 1, "Sudaconditch": 1,
+    "Liga Mexicana": 1, "Banerjee Cup": 1, "Chinese Association Quidditch League": 1,
+    "Balkan Championship": 1, "East African Regional League": 1,
+    // Cups second
+    "European Cup": 2, "All-Africa Cup": 2, "Americas Cup": 2, "Pacific Cup": 2,
+    // CL third
+    "Champions League": 3,
+    // International last
+    "Quidditch World Cup": 4,
+  };
+  const getCompOrder = (name: string | null) => compOrder[name || ""] || (name ? 5 : 99);
+
+  // Sort stats: by season desc, then by competition order
+  const sortedStats = [...stats].sort((a, b) => {
+    const sA = a.SeasonID || 0, sB = b.SeasonID || 0;
+    if (sB !== sA) return sB - sA;
+    return getCompOrder(a.LeagueName) - getCompOrder(b.LeagueName);
+  });
+
+  // All unique competitions for filter dropdown
+  const allComps = [...new Set(stats.map(s => s.LeagueName).filter(Boolean))] as string[];
+  const filteredStats = compFilter === "all" ? sortedStats : sortedStats.filter(s => s.LeagueName === compFilter);
+
   const byCompetition = new Map<string, { gp: number; goals: number; gsc: number; saves: number; shotsFaced: number; minutes: number; ext: ExtendedStats }>();
   stats.forEach((s) => {
     const key = s.LeagueName || "Unknown";
@@ -530,7 +560,7 @@ export default function PlayerProfile() {
 
   function allTimeClass(val: number, best: number): string {
     if (stats.length === 0 || best === 0) return "";
-    return val === best ? "font-bold text-[hsl(var(--highlight))]" : "";
+    return val === best ? "bg-yellow-100 dark:bg-yellow-900/30 font-bold" : "";
   }
 
   const thClass = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground";
@@ -570,7 +600,7 @@ export default function PlayerProfile() {
   const mlSortInd = (key: string) => matchLogSortKey === key ? (matchLogSortDir === "asc" ? " ↑" : " ↓") : "";
 
   // Determine stat column header for match log (multi-position: show generic)
-  const matchStatHeader = positionsPlayed.length > 1 ? "Stat" : isChaser ? "Goals" : isKeeper ? "Saves" : isSeeker ? "GSC" : "SA";
+  const matchStatHeader = positionsPlayed.length > 1 ? "Stat" : isChaser ? "Goals" : isKeeper ? "Saves" : isSeeker ? "GSC" : isBeater ? "BH/TF" : "Stat";
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -601,7 +631,7 @@ export default function PlayerProfile() {
               <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-sans">
                 <div>
                   <p className="text-xs text-muted-foreground uppercase tracking-wide">Born</p>
-                  <p className="font-medium">{formatDate(player.DOB)}{age !== null && ` (age ${age})`}</p>
+                  <p className="font-medium">{formatDate(player.DOB)}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground uppercase tracking-wide">Nationality</p>
@@ -621,6 +651,12 @@ export default function PlayerProfile() {
                   <p className="text-xs text-muted-foreground uppercase tracking-wide">Handedness</p>
                   <p className="font-medium">{player.Handedness === "R" ? "Right" : player.Handedness === "L" ? "Left" : player.Handedness || "—"}</p>
                 </div>
+                {player.Gender && (
+                  <div>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide">Gender</p>
+                    <p className="font-medium">{player.Gender}</p>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -629,8 +665,18 @@ export default function PlayerProfile() {
         <div className="space-y-6">
           {/* Season-by-season stats */}
           <div className="border border-border rounded overflow-hidden">
-            <div className="bg-table-header px-3 py-2">
+            <div className="bg-table-header px-3 py-2 flex items-center justify-between flex-wrap gap-2">
               <h3 className="font-display text-sm font-bold text-table-header-foreground">Season-by-Season Statistics</h3>
+              {allComps.length > 1 && (
+                <select
+                  value={compFilter}
+                  onChange={e => setCompFilter(e.target.value)}
+                  className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
+                >
+                  <option value="all">All Competitions</option>
+                  {allComps.map(c => <option key={c} value={c}>{c}</option>)}
+                </select>
+              )}
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm font-sans">
@@ -650,7 +696,6 @@ export default function PlayerProfile() {
                     {isSeeker && <th className={`${thClass} text-right`}>GSC</th>}
                     {isSeeker && <th className={`${thClass} text-right`}>Snitch%</th>}
                     {isSeeker && <th className={`${thClass} text-right`}>Spotted</th>}
-                    {isSeeker && <th className={`${thClass} text-right`}>CatchAtt</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>Saves</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>SF</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>Sv%</th>}
@@ -662,7 +707,7 @@ export default function PlayerProfile() {
                   </tr>
                 </thead>
                 <tbody>
-                  {stats.map((s, i) => {
+                  {filteredStats.map((s, i) => {
                     const rowIsChaser = s.Position === "Chaser";
                     const rowIsSeeker = s.Position === "Seeker";
                     const rowIsKeeper = s.Position === "Keeper";
@@ -676,9 +721,11 @@ export default function PlayerProfile() {
                     const gscAllTime = rowIsSeeker && (s.GoldenSnitchCatches || 0) === allTimeGSC && allTimeGSC > 0;
                     const savesAllTime = rowIsKeeper && (s.KeeperSaves || 0) === allTimeSaves && allTimeSaves > 0;
                     const rowClass = `border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`;
-                    const goalsClass = goalsAllTime ? "font-bold text-[hsl(var(--highlight))]" : isLeader ? "font-bold" : "";
-                    const gscClass = gscAllTime ? "font-bold text-[hsl(var(--highlight))]" : isLeader ? "font-bold" : "";
-                    const savesClass = savesAllTime ? "font-bold text-[hsl(var(--highlight))]" : isLeader ? "font-bold" : "";
+                    // Gold bg for career best, bold for league leader
+                    const goldBg = "bg-yellow-100 dark:bg-yellow-900/30 font-bold";
+                    const goalsClass = goalsAllTime ? goldBg : isLeader ? "font-bold" : "";
+                    const gscClass = gscAllTime ? goldBg : isLeader ? "font-bold" : "";
+                    const savesClass = savesAllTime ? goldBg : isLeader ? "font-bold" : "";
 
                     const mKey = `${s.SeasonID}|${s.LeagueName}`;
                     const mins = minutesMap.get(mKey) || 0;
@@ -723,17 +770,16 @@ export default function PlayerProfile() {
                           ) : "—"}
                         </td>
                         {positionsPlayed.length > 1 && <td className={`${tdClass} text-xs text-muted-foreground`}>{s.Position}</td>}
-                        <td className={`px-3 py-1.5 text-right font-mono ${allTimeClass(s.GamesPlayed || 0, allTimeGP)} text-foreground`}>{s.GamesPlayed}</td>
-                        <td className={`px-3 py-1.5 text-right font-mono ${minsClass} text-foreground`}>{fmtMin(mins)}</td>
-                        {isChaser && <td className={`px-3 py-1.5 text-right font-mono ${rowIsChaser ? goalsClass : ""} text-foreground`}>{rowIsChaser ? (s.Goals || 0) : "—"}</td>}
+                        <td className={`px-3 py-1.5 text-right font-mono ${allTimeClass(s.GamesPlayed || 0, allTimeGP)}`}>{s.GamesPlayed}</td>
+                        <td className={`px-3 py-1.5 text-right font-mono ${minsClass}`}>{fmtMin(mins)}</td>
+                        {isChaser && <td className={`px-3 py-1.5 text-right font-mono ${rowIsChaser ? goalsClass : "text-foreground"}`}>{rowIsChaser ? (s.Goals || 0) : "—"}</td>}
                         {isChaser && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsChaser ? shotPct : "—"}</td>}
                         {isChaser && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsChaser ? passPctChaser : "—"}</td>}
                         {isChaser && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsChaser ? (minPerGoal ?? "—") : "—"}</td>}
-                        {isSeeker && <td className={`px-3 py-1.5 text-right font-mono ${rowIsSeeker ? gscClass : ""} text-foreground`}>{rowIsSeeker ? (s.GoldenSnitchCatches || 0) : "—"}</td>}
+                        {isSeeker && <td className={`px-3 py-1.5 text-right font-mono ${rowIsSeeker ? gscClass : "text-foreground"}`}>{rowIsSeeker ? (s.GoldenSnitchCatches || 0) : "—"}</td>}
                         {isSeeker && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsSeeker ? snitchPct : "—"}</td>}
                         {isSeeker && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsSeeker && ext ? ext.snitchSpotted : "—"}</td>}
-                        {isSeeker && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsSeeker && ext ? ext.catchAttempts : "—"}</td>}
-                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? savesClass : ""} text-foreground`}>{rowIsKeeper ? (s.KeeperSaves || 0) : "—"}</td>}
+                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? savesClass : "text-foreground"}`}>{rowIsKeeper ? (s.KeeperSaves || 0) : "—"}</td>}
                         {isKeeper && <td className={`${tdClass} text-right font-mono`}>{rowIsKeeper ? (s.KeeperShotsFaced || 0) : "—"}</td>}
                         {isKeeper && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsKeeper ? svPct : "—"}</td>}
                         {isKeeper && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsKeeper ? passPctKeeper : "—"}</td>}
@@ -768,7 +814,6 @@ export default function PlayerProfile() {
                         {isSeeker && <td className={ct}>{careerTotals.gsc}</td>}
                         {isSeeker && <td className={ct}>{careerTotals.gp > 0 ? ((careerTotals.gsc / careerTotals.gp) * 100).toFixed(1) + "%" : "—"}</td>}
                         {isSeeker && <td className={ct}>{careerExt.snitchSpotted}</td>}
-                        {isSeeker && <td className={ct}>{careerExt.catchAttempts}</td>}
                         {isKeeper && <td className={ct}>{careerTotals.saves}</td>}
                         {isKeeper && <td className={ct}>{careerTotals.shotsFaced}</td>}
                         {isKeeper && <td className={ct}>{careerTotals.shotsFaced ? ((careerTotals.saves / careerTotals.shotsFaced) * 100).toFixed(1) + "%" : "—"}</td>}
@@ -784,11 +829,11 @@ export default function PlayerProfile() {
               </table>
             </div>
             <div className="px-3 py-1.5 bg-secondary/50 text-xs text-muted-foreground font-sans flex gap-4 flex-wrap">
-              <span><span className="font-bold text-foreground">Bold</span> = league leader</span>
-              <span><span className="font-bold text-[hsl(var(--highlight))]">Gold</span> = career best</span>
+              <span><span className="font-bold">Bold</span> = league leader</span>
+              <span><span className="bg-yellow-100 dark:bg-yellow-900/30 font-bold px-1 rounded">Shaded</span> = career best</span>
               {isChaser && <span>Sh% = Shooting%, Pass% = Passing%</span>}
               {isBeater && <span>BH = Bludgers Hit, TF = Turnovers Forced, TP = Teammates Protected</span>}
-              {isSeeker && <span>Spotted = Snitch Spottings, CatchAtt = Catch Attempts</span>}
+              {isSeeker && <span>Spotted = Snitch Spottings</span>}
             </div>
           </div>
 
@@ -811,7 +856,6 @@ export default function PlayerProfile() {
                     {isSeeker && <th className={`${thClass} text-right`}>GSC</th>}
                     {isSeeker && <th className={`${thClass} text-right`}>Snitch%</th>}
                     {isSeeker && <th className={`${thClass} text-right`}>Spotted</th>}
-                    {isSeeker && <th className={`${thClass} text-right`}>CatchAtt</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>Saves</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>SF</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>Sv%</th>}
@@ -835,7 +879,6 @@ export default function PlayerProfile() {
                       {isSeeker && <td className={`${tdClass} text-right font-mono`}>{totals.gsc}</td>}
                       {isSeeker && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.gp > 0 ? ((totals.gsc / totals.gp) * 100).toFixed(1) + "%" : "—"}</td>}
                       {isSeeker && <td className={`${tdClass} text-right font-mono`}>{totals.ext.snitchSpotted}</td>}
-                      {isSeeker && <td className={`${tdClass} text-right font-mono`}>{totals.ext.catchAttempts}</td>}
                       {isKeeper && <td className={`${tdClass} text-right font-mono`}>{totals.saves}</td>}
                       {isKeeper && <td className={`${tdClass} text-right font-mono`}>{totals.shotsFaced}</td>}
                       {isKeeper && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.shotsFaced ? ((totals.saves / totals.shotsFaced) * 100).toFixed(1) + "%" : "—"}</td>}
@@ -852,50 +895,101 @@ export default function PlayerProfile() {
           </div>
 
           {/* Awards & Honours */}
-          {(playerAwards.length > 0 || leagueLeaders.length > 0) && (
-            <div className="border border-border rounded overflow-hidden">
-              <div className="bg-table-header px-3 py-2">
-                <h3 className="font-display text-sm font-bold text-table-header-foreground">Awards &amp; Honours</h3>
-              </div>
-              <div className="bg-card divide-y divide-border">
-                {/* Formal awards from awards table */}
-                {playerAwards.map((award, i) => (
-                  <div key={`award-${i}`} className="px-3 py-2 flex items-center gap-3 text-sm font-sans">
-                    <span className="text-base">
-                      {award.placement === 1 ? "🏆" : award.placement === 2 ? "🥈" : award.placement === 3 ? "🥉" : `#${award.placement}`}
-                    </span>
-                    <div className="flex-1">
-                      <span className="font-medium text-foreground">
-                        {award.awardname}
-                        {award.placement > 1 && ` (${ordinal(award.placement)})`}
-                      </span>
-                      <span className="text-muted-foreground ml-1">
-                        — {abbrevLeague(award.leagueName || null)}, {seasonLabel(award.seasonid)}
-                      </span>
+          {(playerAwards.length > 0 || leagueLeaders.length > 0) && (() => {
+            // Group formal awards by name
+            const awardGroups = new Map<string, typeof playerAwards>();
+            playerAwards.forEach(a => {
+              if (!awardGroups.has(a.awardname)) awardGroups.set(a.awardname, []);
+              awardGroups.get(a.awardname)!.push(a);
+            });
+
+            // Group leaderboard by stat
+            const leaderGroups = new Map<string, typeof leagueLeaders>();
+            leagueLeaders.forEach(e => {
+              if (!leaderGroups.has(e.stat)) leaderGroups.set(e.stat, []);
+              leaderGroups.get(e.stat)!.push(e);
+            });
+
+            return (
+              <div className="border border-border rounded overflow-hidden">
+                <div className="bg-table-header px-3 py-2">
+                  <h3 className="font-display text-sm font-bold text-table-header-foreground">Awards, Leaderboards &amp; Honours</h3>
+                </div>
+                <div className="bg-card">
+                  {/* Formal Awards grouped by award name */}
+                  {awardGroups.size > 0 && (
+                    <div className="border-b border-border">
+                      <div className="px-3 py-2 bg-secondary/40">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Awards</p>
+                      </div>
+                      <table className="w-full text-sm font-sans">
+                        <tbody>
+                          {[...awardGroups.entries()].map(([awardName, entries]) => (
+                            entries.map((award, i) => (
+                              <tr key={`award-${awardName}-${i}`} className={`border-t border-border ${i % 2 === 0 ? "bg-card" : "bg-table-stripe"}`}>
+                                <td className="px-3 py-1.5 w-8 text-center">
+                                  <span className="text-base">
+                                    {award.placement === 1 ? "🏆" : award.placement === 2 ? "🥈" : award.placement === 3 ? "🥉" : "🎖️"}
+                                  </span>
+                                </td>
+                                <td className="px-3 py-1.5 font-medium text-foreground">
+                                  {award.placement === 1 ? award.awardname : `${ordinal(award.placement)} — ${award.awardname}`}
+                                </td>
+                                <td className="px-3 py-1.5 text-muted-foreground text-xs">
+                                  {abbrevLeague(award.leagueName || null)}
+                                </td>
+                                <td className="px-3 py-1.5 text-right font-mono text-xs text-muted-foreground">
+                                  {seasonLabel(award.seasonid)}
+                                </td>
+                              </tr>
+                            ))
+                          ))}
+                        </tbody>
+                      </table>
                     </div>
-                    <span className="text-xs text-muted-foreground border border-border rounded px-1.5 py-0.5">Award</span>
-                  </div>
-                ))}
-                {/* Leaderboard appearances */}
-                {leagueLeaders.map((entry, i) => (
-                  <div key={`leader-${i}`} className="px-3 py-2 flex items-center gap-3 text-sm font-sans">
-                    <span className="text-base">
-                      {entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : entry.rank === 3 ? "🥉" : `#${entry.rank}`}
-                    </span>
-                    <div className="flex-1">
-                      <span className="font-medium text-foreground">{ordinal(entry.rank)} in {entry.stat}</span>
-                      <span className="text-muted-foreground ml-1">
-                        ({entry.value} — {entry.scope === "combined" ? "All Leagues" : abbrevLeague(entry.LeagueName)}, {seasonLabel(entry.SeasonID)})
-                      </span>
+                  )}
+
+                  {/* Leaderboard appearances grouped by stat, then listed by season */}
+                  {leaderGroups.size > 0 && (
+                    <div>
+                      <div className="px-3 py-2 bg-secondary/40">
+                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Appearances on Leaderboards</p>
+                      </div>
+                      {[...leaderGroups.entries()].map(([statName, entries]) => (
+                        <div key={statName} className="border-t border-border">
+                          <div className="px-3 py-1.5 bg-secondary/20">
+                            <p className="text-xs font-semibold text-foreground">{statName}</p>
+                          </div>
+                          <table className="w-full text-sm font-sans">
+                            <tbody>
+                              {entries.sort((a, b) => b.SeasonID - a.SeasonID).map((entry, i) => (
+                                <tr key={`leader-${statName}-${i}`} className={`border-t border-border ${i % 2 === 0 ? "bg-card" : "bg-table-stripe"}`}>
+                                  <td className="px-3 py-1 w-8 text-center">
+                                    <span className="text-sm">
+                                      {entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : entry.rank === 3 ? "🥉" : <span className="text-xs font-mono text-muted-foreground">#{entry.rank}</span>}
+                                    </span>
+                                  </td>
+                                  <td className="px-3 py-1 text-foreground text-xs">
+                                    {ordinal(entry.rank)} ({entry.value})
+                                  </td>
+                                  <td className="px-3 py-1 text-muted-foreground text-xs">
+                                    {entry.scope === "combined" ? "All Leagues" : abbrevLeague(entry.LeagueName)}
+                                  </td>
+                                  <td className="px-3 py-1 text-right font-mono text-xs text-muted-foreground">
+                                    {seasonLabel(entry.SeasonID)}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      ))}
                     </div>
-                    {entry.scope === "combined" && (
-                      <span className="text-xs text-muted-foreground border border-border rounded px-1.5 py-0.5">Combined</span>
-                    )}
-                  </div>
-                ))}
+                  )}
+                </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
 
           {/* Match Log */}
           {matchLog.length > 0 && (
@@ -928,6 +1022,7 @@ export default function PlayerProfile() {
                         <tr className="bg-secondary">
                           <th className={`${thClass} text-left cursor-pointer hover:text-foreground select-none`} onClick={() => toggleMatchLogSort("date")}>Date{mlSortInd("date")}</th>
                           <th className={`${thClass} text-left cursor-pointer hover:text-foreground select-none`} onClick={() => toggleMatchLogSort("season")}>Season{mlSortInd("season")}</th>
+                          <th className={`${thClass} text-left`}>Comp</th>
                           <th className={`${thClass} text-left`}>Opponent</th>
                           <th className={`${thClass} text-center`}>H/A/N</th>
                           <th className={`${thClass} text-right cursor-pointer hover:text-foreground select-none`} onClick={() => toggleMatchLogSort("score")}>Score{mlSortInd("score")}</th>
@@ -946,6 +1041,7 @@ export default function PlayerProfile() {
                             <tr key={m.MatchID} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
                               <td className={`${tdClass} text-xs text-muted-foreground font-mono`}>{displayDate}</td>
                               <td className={`${tdClass} text-xs text-muted-foreground font-mono`}>{m.SeasonID ? seasonLabel(m.SeasonID) : "—"}</td>
+                              <td className={`${tdClass} text-xs text-muted-foreground`} title={m.leagueName}>{abbrevLeague(m.leagueName)}</td>
                               <td className={tdClass}>
                                 <Link to={`/team/${encodeURIComponent(m.opponentName)}`} className="text-accent hover:underline">{m.opponentName}</Link>
                               </td>
