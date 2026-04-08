@@ -66,11 +66,12 @@ export default function NationPage() {
   const [nation, setNation] = useState<Nation | null>(null);
   const [players, setPlayers] = useState<PlayerRow[]>([]);
   const [careerRecords, setCareerRecords] = useState<CareerRecord[]>([]);
-  const [activeTab, setActiveTab] = useState<"roster" | "records" | "results">("roster");
+  const [activeTab, setActiveTab] = useState<"roster" | "abroad" | "records" | "results">("roster");
   const [intlResults, setIntlResults] = useState<IntlResult[]>([]);
   const [teamMap, setTeamMap] = useState<Map<number, string>>(new Map());
   const [leagueMap, setLeagueMap] = useState<Map<number, string>>(new Map());
   const [nationalTeam, setNationalTeam] = useState<{ TeamID: number; FullName: string; PrimaryColor: string | null; logo_url: string | null } | null>(null);
+  const [matchRosterPlayers, setMatchRosterPlayers] = useState<{ PlayerID: number; PlayerName: string; Position: string }[]>([]);
 
   useEffect(() => {
     if (!id) return;
@@ -103,12 +104,33 @@ export default function NationPage() {
 
         // Fetch intl results for this national team specifically
         fetchAllRows("results", {
-          select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,SnitchCaughtTime",
+          select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,SnitchCaughtTime,HomeChaser1ID,HomeChaser2ID,HomeChaser3ID,HomeKeeperID,HomeSeekerID,HomeBeater1ID,HomeBeater2ID,AwayChaser1ID,AwayChaser2ID,AwayChaser3ID,AwayKeeperID,AwaySeekerID,AwayBeater1ID,AwayBeater2ID",
           filters: [{ method: "or", args: [`HomeTeamID.eq.${natTeam.TeamID},AwayTeamID.eq.${natTeam.TeamID}`] }],
           order: { column: "MatchID", ascending: false },
-        }).then((rData) => {
-            if (rData) setIntlResults(rData as IntlResult[]);
-          });
+        }).then(async (rData) => {
+          if (rData) {
+            setIntlResults(rData as IntlResult[]);
+            // Get most recent match and extract 7 players
+            const mostRecent = rData[0] as any;
+            if (mostRecent) {
+              const isHome = mostRecent.HomeTeamID === natTeam.TeamID;
+              const prefix = isHome ? "Home" : "Away";
+              const playerIds = [
+                mostRecent[`${prefix}Chaser1ID`],
+                mostRecent[`${prefix}Chaser2ID`],
+                mostRecent[`${prefix}Chaser3ID`],
+                mostRecent[`${prefix}KeeperID`],
+                mostRecent[`${prefix}SeekerID`],
+                mostRecent[`${prefix}Beater1ID`],
+                mostRecent[`${prefix}Beater2ID`],
+              ].filter(Boolean);
+              if (playerIds.length > 0) {
+                const { data: pData } = await supabase.from("players").select("PlayerID, PlayerName, Position").in("PlayerID", playerIds);
+                if (pData) setMatchRosterPlayers(pData as { PlayerID: number; PlayerName: string; Position: string }[]);
+              }
+            }
+          }
+        });
       } else if (intlLeagueIds.length > 0) {
         fetchAllRows("results", {
           select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,SnitchCaughtTime",
@@ -264,7 +286,7 @@ export default function NationPage() {
 
         {/* Tabs */}
         <div className="flex gap-2 mb-4 border-b border-border">
-          {(["roster", "records", "results"] as const).map(tab => (
+          {(["roster", "abroad", "records", "results"] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -272,16 +294,50 @@ export default function NationPage() {
                 activeTab === tab ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              {tab === "roster" ? "Current Roster" : tab === "records" ? "Players Abroad" : "All-Time Records"}
+              {tab === "roster" ? "Current Roster" : tab === "abroad" ? "Players Abroad" : tab === "records" ? "All-Time Records" : "Match History"}
             </button>
           ))}
         </div>
 
         {activeTab === "roster" && (
           <div className="space-y-4">
+            <p className="text-sm text-muted-foreground font-sans">
+              Players who featured in the most recent international match
+            </p>
+            {matchRosterPlayers.length > 0 ? (
+              <div className="border border-border rounded overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm font-sans">
+                    <thead>
+                      <tr className="bg-secondary">
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Player</th>
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pos</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {matchRosterPlayers.map((p, i) => (
+                        <tr key={p.PlayerID} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
+                          <td className="px-3 py-1.5 font-medium text-accent hover:underline">
+                            <Link to={`/player/${p.PlayerID}`}>{p.PlayerName}</Link>
+                          </td>
+                          <td className="px-3 py-1.5 text-muted-foreground">{p.Position}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <p className="text-muted-foreground font-sans text-sm italic">No match data available.</p>
+            )}
+          </div>
+        )}
+
+        {activeTab === "abroad" && (
+          <div className="space-y-4">
             {latestSeason > 0 && (
               <p className="text-sm text-muted-foreground font-sans">
-                Showing players active in {seasonLabel(latestSeason)}
+                Players active in {seasonLabel(latestSeason)} and their clubs
               </p>
             )}
             <div className="border border-border rounded overflow-hidden">
@@ -291,7 +347,7 @@ export default function NationPage() {
                     <tr className="bg-secondary">
                       <th className={`${thClass} text-left`} onClick={() => requestSort("PlayerName")}>Player{sortInd("PlayerName")}</th>
                       <th className={`${thClass} text-left`} onClick={() => requestSort("Position")}>Pos{sortInd("Position")}</th>
-                      <th className={`${thClass} text-left`} onClick={() => requestSort("mostRecentTeam")}>Team{sortInd("mostRecentTeam")}</th>
+                      <th className={`${thClass} text-left`} onClick={() => requestSort("mostRecentTeam")}>Club{sortInd("mostRecentTeam")}</th>
                       <th className={`${thClass} text-right`} onClick={() => requestSort("totalGP")}>Career GP{sortInd("totalGP")}</th>
                       <th className={`${thClass} text-right`} onClick={() => requestSort("totalGoals")}>Goals{sortInd("totalGoals")}</th>
                       <th className={`${thClass} text-right`} onClick={() => requestSort("totalGSC")}>GSC{sortInd("totalGSC")}</th>
@@ -326,7 +382,7 @@ export default function NationPage() {
 
         {activeTab === "records" && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <RecordTable title="Most Appearances (Robes)" data={topByGP} statKey="totalGP" statLabel="GP" />
+            <RecordTable title="Most Appearances" data={topByGP} statKey="totalGP" statLabel="GP" />
             {topByGoals.length > 0 && <RecordTable title="Most Goals" data={topByGoals} statKey="totalGoals" statLabel="Goals" />}
             {topByGSC.length > 0 && <RecordTable title="Most Golden Snitch Catches" data={topByGSC} statKey="totalGSC" statLabel="GSC" />}
             {topBySaves.length > 0 && <RecordTable title="Most Keeper Saves" data={topBySaves} statKey="totalSaves" statLabel="Saves" />}
@@ -338,7 +394,7 @@ export default function NationPage() {
             {intlResults.length > 0 ? (
               <div className="border border-border rounded overflow-hidden">
                 <div className="bg-table-header px-3 py-2">
-                  <h3 className="font-display text-sm font-bold text-table-header-foreground">International Match Results</h3>
+                  <h3 className="font-display text-sm font-bold text-table-header-foreground">International Match History</h3>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm font-sans">
@@ -357,11 +413,15 @@ export default function NationPage() {
                         const homeName = r.HomeTeamID ? teamMap.get(r.HomeTeamID) || `Team ${r.HomeTeamID}` : "Unknown";
                         const awayName = r.AwayTeamID ? teamMap.get(r.AwayTeamID) || `Team ${r.AwayTeamID}` : "Unknown";
                         const compName = r.LeagueID ? leagueMap.get(r.LeagueID) || "" : "";
+                        const isNatHome = r.HomeTeamID === nationalTeam?.TeamID;
+                        const natScore = isNatHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
+                        const oppScore = isNatHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
+                        const won = nationalTeam && natScore > oppScore;
                         return (
                           <tr key={r.MatchID} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
                             <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{r.SeasonID ? seasonLabel(r.SeasonID) : "—"}</td>
                             <td className="px-3 py-1.5 text-xs text-muted-foreground">{compName}</td>
-                            <td className="px-3 py-1.5 text-accent hover:underline">
+                            <td className={`px-3 py-1.5 text-accent hover:underline ${isNatHome && won ? "font-bold" : ""}`}>
                               <Link to={`/team/${encodeURIComponent(homeName)}`}>{homeName}</Link>
                             </td>
                             <td className="px-3 py-1.5 text-center font-mono font-bold">
@@ -369,7 +429,7 @@ export default function NationPage() {
                                 {r.HomeTeamScore ?? "—"}–{r.AwayTeamScore ?? "—"}
                               </Link>
                             </td>
-                            <td className="px-3 py-1.5 text-accent hover:underline">
+                            <td className={`px-3 py-1.5 text-accent hover:underline ${!isNatHome && won ? "font-bold" : ""}`}>
                               <Link to={`/team/${encodeURIComponent(awayName)}`}>{awayName}</Link>
                             </td>
                             <td className="px-3 py-1.5 text-right font-mono text-xs text-muted-foreground">{r.SnitchCaughtTime ?? "—"}</td>
