@@ -319,32 +319,49 @@ export default function LeadersIndex() {
       }));
     }
     if (register === "progressive") {
-      // Progressive: for each season, show the leader in that stat
-      // This is a year-by-year register of who was the leader each season
+      // Progressive: career cumulative leader at end of each season
+      // Row for season X shows who had the career-best stat value as of the end of that season
       const info2 = STATS.find(s => s.key === stat)!;
-      const sortFn2 = (a: any, b: any) => {
-        const va = val(a, stat);
-        const vb = val(b, stat);
-        if (va === null && vb === null) return 0;
-        if (va === null) return 1;
-        if (vb === null) return -1;
-        return info2.higher ? vb - va : va - vb;
-      };
-      const seasons = [...new Set(seasonLines.map(s => s.SeasonID))].sort((a, b) => a - b);
+      const allSeasons = [...new Set(seasonLines.map(s => s.SeasonID))].sort((a, b) => a - b);
+      const cum = new Map<string, { GP: number; G: number; GSC: number; KS: number; KSF: number; MIN: number; team: string; Positions: string[]; Nation: string }>();
       const entries: any[] = [];
-      seasons.forEach(sid => {
-        const seasonData = seasonLines.filter(s => s.SeasonID === sid && val(s, stat) !== null);
-        if (seasonData.length === 0) return;
-        const sorted2 = [...seasonData].sort(sortFn2);
-        const leader = sorted2[0];
+
+      allSeasons.forEach(sid => {
+        // Add this season's stats to each player's cumulative total
+        seasonLines.filter(s => s.SeasonID === sid).forEach(s => {
+          let c = cum.get(s.PlayerName);
+          if (!c) c = { GP: 0, G: 0, GSC: 0, KS: 0, KSF: 0, MIN: 0, team: s.Teams[0] || "", Positions: [], Nation: s.Nation };
+          c.GP += s.GP; c.G += s.G; c.GSC += s.GSC; c.KS += s.KS; c.KSF += s.KSF; c.MIN += s.MIN;
+          c.team = s.Teams[0] || c.team;
+          s.Positions.forEach(p => { if (!c!.Positions.includes(p)) c!.Positions.push(p); });
+          cum.set(s.PlayerName, c);
+        });
+
+        // Find career leader(s) as of end of this season
+        const snapshot = [...cum.entries()].map(([name, c]) => ({ PlayerName: name, ...c, statVal: val(c, stat) }));
+        const valid = snapshot.filter(e => e.statVal !== null);
+        if (valid.length === 0) return;
+
+        valid.sort((a, b) => {
+          if (a.statVal === null) return 1;
+          if (b.statVal === null) return -1;
+          return info2.higher ? (b.statVal as number) - (a.statVal as number) : (a.statVal as number) - (b.statVal as number);
+        });
+
+        const topVal = valid[0].statVal;
+        const leaders = valid.filter(e => e.statVal === topVal);
+        const isTie = leaders.length > 1;
+        const displayName = isTie ? leaders.map(l => l.PlayerName).join(" / ") : leaders[0].PlayerName;
+
         entries.push({
-          PlayerName: leader.PlayerName,
-          GP: leader.GP, G: leader.G, GSC: leader.GSC, KS: leader.KS, KSF: leader.KSF, MIN: leader.MIN,
-          Positions: leader.Positions,
-          Nation: leader.Nation,
-          LeagueName: leader.LeagueName,
-          statVal: val(leader, stat),
-          team: leader.Teams.join(", "),
+          PlayerName: displayName,
+          _isTie: isTie,
+          _leaders: leaders,
+          GP: leaders[0].GP, G: leaders[0].G, GSC: leaders[0].GSC, KS: leaders[0].KS, KSF: leaders[0].KSF, MIN: leaders[0].MIN,
+          Positions: leaders[0].Positions,
+          Nation: leaders[0].Nation,
+          statVal: topVal,
+          team: leaders[0].team,
           season: sid,
         });
       });
@@ -367,76 +384,109 @@ export default function LeadersIndex() {
     };
 
     if (register === "yearly") {
-      // group by season+league
+      // Compact: one row per season+league showing the leader (with ties)
+      const result: { label: string; seasonID: number; league: string; entries: any[] }[] = [];
       const groups = new Map<string, SLLine[]>();
       slLines.forEach(sl => {
-        if (sl.GP < 5) return;
         const key = `${sl.SeasonID}||${sl.LeagueName}`;
         if (!groups.has(key)) groups.set(key, []);
         groups.get(key)!.push(sl);
       });
-      const result: { label: string; seasonID: number; league: string; entries: any[] }[] = [];
       [...groups.entries()].forEach(([key, lines]) => {
         const [sid, league] = key.split("||");
-        const sorted = lines.filter(l => val(l, stat) !== null).sort(sortFn).slice(0, 10);
-        if (sorted.length > 0) {
-          result.push({
-            label: `${seasonLabel(Number(sid))} ${league}`,
-            seasonID: Number(sid),
-            league,
-            entries: sorted.map(s => ({
-              PlayerName: s.PlayerName, ...s, statVal: val(s, stat), team: s.Teams.join(", "), season: Number(sid),
-              LeagueName: s.LeagueName,
-            })),
-          });
-        }
+        const valid = lines.filter(l => val(l, stat) !== null);
+        if (valid.length === 0) return;
+        valid.sort((a, b) => {
+          const va = val(a, stat)!, vb = val(b, stat)!;
+          return info.higher ? vb - va : va - vb;
+        });
+        const topVal = val(valid[0], stat);
+        const leaders = valid.filter(l => val(l, stat) === topVal);
+        const isTie = leaders.length > 1;
+        const leader = leaders[0];
+        result.push({
+          label: `${seasonLabel(Number(sid))} — ${league}`,
+          seasonID: Number(sid),
+          league,
+          entries: [{
+            PlayerName: isTie ? leaders.map(l => l.PlayerName).join(" / ") : leader.PlayerName,
+            _isTie: isTie,
+            _leaders: leaders.map(l => ({ PlayerName: l.PlayerName, team: l.Teams[0] || "" })),
+            GP: leader.GP, G: leader.G, GSC: leader.GSC, KS: leader.KS, KSF: leader.KSF, MIN: leader.MIN,
+            Positions: leader.Positions, Nation: leader.Nation,
+            statVal: topVal, team: leader.Teams.join(", "), season: Number(sid),
+            LeagueName: league,
+          }],
+        });
       });
-      return result.sort((a, b) => b.seasonID - a.seasonID || a.league.localeCompare(b.league));
+      return result.sort((a, b) => a.seasonID - b.seasonID || a.league.localeCompare(b.league));
     }
 
-    // yby: group by season
-    const groups = new Map<number, SLLine[]>();
+    // yby: one row per season showing the leader
+    const groups2 = new Map<number, SLLine[]>();
     seasonLines.forEach(sl => {
-      if (sl.GP < 5) return;
-      if (!groups.has(sl.SeasonID)) groups.set(sl.SeasonID, []);
-      groups.get(sl.SeasonID)!.push(sl);
+      if (!groups2.has(sl.SeasonID)) groups2.set(sl.SeasonID, []);
+      groups2.get(sl.SeasonID)!.push(sl);
     });
-    const result: { label: string; seasonID: number; league: string; entries: any[] }[] = [];
-    [...groups.entries()].forEach(([sid, lines]) => {
-      const sorted = lines.filter(l => val(l, stat) !== null).sort(sortFn).slice(0, 10);
-      if (sorted.length > 0) {
-        result.push({
-          label: seasonLabel(sid),
-          seasonID: sid,
-          league: "",
-          entries: sorted.map(s => ({
-            PlayerName: s.PlayerName, ...s, statVal: val(s, stat), team: s.Teams.join(", "), season: sid,
-          })),
-        });
-      }
+    const result2: { label: string; seasonID: number; league: string; entries: any[] }[] = [];
+    [...groups2.entries()].forEach(([sid, lines]) => {
+      const valid = lines.filter(l => val(l, stat) !== null);
+      if (valid.length === 0) return;
+      valid.sort((a, b) => {
+        const va = val(a, stat)!, vb = val(b, stat)!;
+        return info.higher ? vb - va : va - vb;
+      });
+      const topVal = val(valid[0], stat);
+      const leaders = valid.filter(l => val(l, stat) === topVal);
+      const isTie = leaders.length > 1;
+      const leader = leaders[0];
+      result2.push({
+        label: seasonLabel(sid),
+        seasonID: sid,
+        league: "",
+        entries: [{
+          PlayerName: isTie ? leaders.map(l => l.PlayerName).join(" / ") : leader.PlayerName,
+          _isTie: isTie,
+          _leaders: leaders.map(l => ({ PlayerName: l.PlayerName, team: l.Teams[0] || "" })),
+          GP: leader.GP, G: leader.G, GSC: leader.GSC, KS: leader.KS, KSF: leader.KSF, MIN: leader.MIN,
+          Positions: leader.Positions, Nation: leader.Nation,
+          statVal: topVal, team: leader.Teams.join(", "), season: sid,
+        }],
+      });
     });
-    return result.sort((a, b) => b.seasonID - a.seasonID);
+    return result2.sort((a, b) => a.seasonID - b.seasonID);
   }, [slLines, seasonLines, stat, register]);
 
   const thClass = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground";
   const statInfo = STATS.find(s => s.key === stat)!;
 
   const renderRow = (entry: any, i: number) => {
-    const pid = playerMap.get(entry.PlayerName);
-    // For yearly/progressive entries, entry.LeagueName is available; build link to league history
-    const leagueName = entry.LeagueName || (entry.Teams?.length === 1 ? null : null);
+    const isTie = entry._isTie;
+    const pid = isTie ? null : playerMap.get(entry.PlayerName);
+    const leagueName = entry.LeagueName || null;
     const leagueId = leagueName ? leagueIdByName.get(leagueName) : null;
-    const seasonLink = entry.season && leagueId
-      ? `/league/${leagueId}/history`
-      : entry.season ? null : null;
+    const seasonLink = entry.season && leagueId ? `/league/${leagueId}/history` : null;
+
+    const playerCell = isTie ? (
+      <span className="text-foreground">
+        {(entry._leaders as any[]).map((l: any, li: number) => {
+          const lpid = playerMap.get(l.PlayerName);
+          return (
+            <span key={l.PlayerName}>
+              {li > 0 && " / "}
+              {lpid ? <Link to={`/player/${lpid}`} className="text-accent hover:underline">{l.PlayerName}</Link> : l.PlayerName}
+            </span>
+          );
+        })}
+        <span className="text-muted-foreground text-xs ml-1">(tie)</span>
+      </span>
+    ) : pid ? <Link to={`/player/${pid}`} className="text-accent hover:underline">{entry.PlayerName}</Link> : entry.PlayerName;
 
     return (
       <tr key={`${entry.PlayerName}-${entry.season}-${i}`}
         className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20 transition-colors`}>
         <td className="px-3 py-1.5 font-mono text-muted-foreground">{i + 1}</td>
-        <td className="px-3 py-1.5 font-medium text-accent hover:underline">
-          {pid ? <Link to={`/player/${pid}`}>{entry.PlayerName}</Link> : entry.PlayerName}
-        </td>
+        <td className="px-3 py-1.5 font-medium">{playerCell}</td>
         <td className="px-3 py-1.5 text-muted-foreground text-xs">{entry.Positions?.join(", ") || ""}</td>
         <td className="px-3 py-1.5 text-accent hover:underline text-xs">
           {entry.team ? <Link to={`/team/${encodeURIComponent(entry.team.split(", ")[0])}`}>{entry.team}</Link> : "—"}
@@ -541,26 +591,75 @@ export default function LeadersIndex() {
             {renderTable(leaderboard, true)}
           </div>
         ) : isYearly ? (
-          <div className="space-y-6">
-            {yearlyData.length === 0 && (
-              <p className="text-muted-foreground font-sans py-8 text-center italic">No data available.</p>
+          <div className="border border-border rounded overflow-hidden">
+            <div className="bg-table-header px-3 py-2">
+              <h3 className="font-display text-sm font-bold text-table-header-foreground">
+                {register === "yearly" ? "Yearly League" : "Year-by-Year"} — {statInfo.label} Leaders
+              </h3>
+            </div>
+            {yearlyData.length === 0 ? (
+              <p className="text-muted-foreground font-sans py-8 text-center italic px-3">No data available.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm font-sans">
+                  <thead>
+                    <tr className="bg-secondary">
+                      <th className={`${thClass} text-left`}>Season</th>
+                      {register === "yearly" && <th className={`${thClass} text-left`}>League</th>}
+                      <th className={`${thClass} text-left`}>Player</th>
+                      <th className={`${thClass} text-left`}>Pos</th>
+                      <th className={`${thClass} text-left`}>Team</th>
+                      <th className={`${thClass} text-right`}>{statInfo.abbr}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {yearlyData.map((group, i) => {
+                      const entry = group.entries[0];
+                      const lid = group.league ? leagueIdByName.get(group.league) : null;
+                      const isTie = entry._isTie;
+                      const pid = isTie ? null : playerMap.get(entry.PlayerName);
+                      const playerCell = isTie ? (
+                        <span>
+                          {(entry._leaders as any[]).map((l: any, li: number) => {
+                            const lpid = playerMap.get(l.PlayerName);
+                            return (
+                              <span key={l.PlayerName}>
+                                {li > 0 && " / "}
+                                {lpid ? <Link to={`/player/${lpid}`} className="text-accent hover:underline">{l.PlayerName}</Link> : l.PlayerName}
+                              </span>
+                            );
+                          })}
+                          <span className="text-muted-foreground text-xs ml-1">(tie)</span>
+                        </span>
+                      ) : pid ? <Link to={`/player/${pid}`} className="text-accent hover:underline">{entry.PlayerName}</Link> : entry.PlayerName;
+
+                      return (
+                        <tr key={`${group.seasonID}-${group.league}-${i}`}
+                          className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
+                          <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">
+                            {lid
+                              ? <Link to={`/league/${lid}/history`} className="text-accent hover:underline">{seasonLabel(group.seasonID)}</Link>
+                              : seasonLabel(group.seasonID)
+                            }
+                          </td>
+                          {register === "yearly" && (
+                            <td className="px-3 py-1.5 text-xs text-muted-foreground">
+                              {lid ? <Link to={`/league/${lid}`} className="hover:underline hover:text-accent">{group.league}</Link> : group.league}
+                            </td>
+                          )}
+                          <td className="px-3 py-1.5 font-medium">{playerCell}</td>
+                          <td className="px-3 py-1.5 text-muted-foreground text-xs">{entry.Positions?.join(", ") || ""}</td>
+                          <td className="px-3 py-1.5 text-xs">
+                            {entry.team ? <Link to={`/team/${encodeURIComponent(entry.team.split(", ")[0])}`} className="text-accent hover:underline">{entry.team}</Link> : "—"}
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono font-bold">{fmt(entry.statVal, stat)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             )}
-            {yearlyData.map(group => {
-              const lid = group.league ? leagueIdByName.get(group.league) : null;
-              return (
-                <div key={group.label} className="border border-border rounded overflow-hidden">
-                  <div className="bg-table-header px-3 py-2">
-                    <h3 className="font-display text-sm font-bold text-table-header-foreground">
-                      {lid
-                        ? <><Link to={`/league/${lid}/history`} className="hover:underline">{seasonLabel(group.seasonID)}</Link>{group.league ? ` — ${group.league}` : ""}</>
-                        : group.label
-                      }
-                    </h3>
-                  </div>
-                  {renderTable(group.entries, false)}
-                </div>
-              );
-            })}
           </div>
         ) : (
           <div className="border border-border rounded overflow-hidden">
