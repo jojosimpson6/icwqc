@@ -515,16 +515,54 @@ export default function PlayerProfile() {
   };
   const getCompOrder = (name: string | null) => compOrder[name || ""] || (name ? 5 : 99);
 
-  // Sort stats: by season desc, then by competition order
+  // Sort stats: by season ASC (oldest first), then by competition order within same season
   const sortedStats = [...stats].sort((a, b) => {
     const sA = a.SeasonID || 0, sB = b.SeasonID || 0;
-    if (sB !== sA) return sB - sA;
+    if (sA !== sB) return sA - sB;
     return getCompOrder(a.LeagueName) - getCompOrder(b.LeagueName);
   });
 
   // All unique competitions for filter dropdown
   const allComps = [...new Set(stats.map(s => s.LeagueName).filter(Boolean))] as string[];
-  const filteredStats = compFilter === "all" ? sortedStats : sortedStats.filter(s => s.LeagueName === compFilter);
+  // Domestic league names (LeagueID 1-14) from the leagueNameMap built during data fetch
+  const domesticLeagueNames = new Set(
+    [...leagueNameMap.entries()].filter(([id]) => id >= 1 && id <= 14).map(([, name]) => name)
+  );
+  const hasDomesticComps = allComps.some(c => domesticLeagueNames.has(c));
+
+  const filteredStats = compFilter === "all"
+    ? sortedStats
+    : compFilter === "domestic"
+    ? sortedStats.filter(s => s.LeagueName && domesticLeagueNames.has(s.LeagueName))
+    : sortedStats.filter(s => s.LeagueName === compFilter);
+
+  // Career bests per competition (for gold shading)
+  const bestByComp = new Map<string, { goals: number; gsc: number; saves: number; gp: number; mins: number }>();
+  const bestExtByComp = new Map<string, { shotPct: number | null; snitchPct: number | null; svPct: number | null; bludgersHit: number; turnovers: number; sfPerGP: number | null; minPerGoal: number | null }>();
+  stats.forEach(s => {
+    const key = s.LeagueName || "Unknown";
+    const mKey = `${s.SeasonID}|${s.LeagueName}`;
+    const mins = minutesMap.get(mKey) || 0;
+    const ext = extStatsMap.get(mKey);
+    const sfFromResults = shotsFacedMap.get(mKey) || 0;
+    const existing = bestByComp.get(key) || { goals: 0, gsc: 0, saves: 0, gp: 0, mins: 0 };
+    const existingExt = bestExtByComp.get(key) || { shotPct: null, snitchPct: null, svPct: null, bludgersHit: 0, turnovers: 0, sfPerGP: null, minPerGoal: null };
+    if ((s.Goals || 0) > existing.goals) existing.goals = s.Goals || 0;
+    if ((s.GoldenSnitchCatches || 0) > existing.gsc) existing.gsc = s.GoldenSnitchCatches || 0;
+    if ((s.KeeperSaves || 0) > existing.saves) existing.saves = s.KeeperSaves || 0;
+    if ((s.GamesPlayed || 0) > existing.gp) existing.gp = s.GamesPlayed || 0;
+    if (mins > existing.mins) existing.mins = mins;
+    // Rate stats
+    if (ext && ext.shotAtt > 0) { const v = (ext.shotScored / ext.shotAtt) * 100; if (existingExt.shotPct === null || v > existingExt.shotPct) existingExt.shotPct = v; }
+    if ((s.GamesPlayed || 0) > 0) { const v = ((s.GoldenSnitchCatches || 0) / (s.GamesPlayed || 1)) * 100; if (existingExt.snitchPct === null || v > existingExt.snitchPct) existingExt.snitchPct = v; }
+    if (s.KeeperShotsFaced) { const v = (s.KeeperSaves || 0) / s.KeeperShotsFaced * 100; if (existingExt.svPct === null || v > existingExt.svPct) existingExt.svPct = v; }
+    if (ext && ext.bludgersHit > existingExt.bludgersHit) existingExt.bludgersHit = ext.bludgersHit;
+    if (ext && ext.turnoversForced > existingExt.turnovers) existingExt.turnovers = ext.turnoversForced;
+    if ((s.GamesPlayed || 0) > 0 && sfFromResults > 0) { const v = sfFromResults / (s.GamesPlayed || 1); if (existingExt.sfPerGP === null || v > existingExt.sfPerGP) existingExt.sfPerGP = v; }
+    if ((s.Goals || 0) > 0 && mins > 0) { const v = mins / (s.Goals || 1); if (existingExt.minPerGoal === null || v < existingExt.minPerGoal) existingExt.minPerGoal = v; }
+    bestByComp.set(key, existing);
+    bestExtByComp.set(key, existingExt);
+  });
 
   const byCompetition = new Map<string, { gp: number; goals: number; gsc: number; saves: number; shotsFaced: number; minutes: number; ext: ExtendedStats }>();
   stats.forEach((s) => {
@@ -654,7 +692,11 @@ export default function PlayerProfile() {
                 {player.Gender && (
                   <div>
                     <p className="text-xs text-muted-foreground uppercase tracking-wide">Gender</p>
-                    <p className="font-medium">{player.Gender}</p>
+                    <p className={`font-medium ${player.Gender.toLowerCase() === 'male' ? 'text-blue-600 dark:text-blue-400' : player.Gender.toLowerCase() === 'female' ? 'text-pink-600 dark:text-pink-400' : ''}`}>
+                      {player.Gender.toLowerCase() === 'm' || player.Gender.toLowerCase() === 'male' ? 'Male' :
+                       player.Gender.toLowerCase() === 'f' || player.Gender.toLowerCase() === 'female' ? 'Female' :
+                       player.Gender}
+                    </p>
                   </div>
                 )}
               </div>
@@ -674,6 +716,7 @@ export default function PlayerProfile() {
                   className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
                 >
                   <option value="all">All Competitions</option>
+                  {hasDomesticComps && <option value="domestic">All League Matches</option>}
                   {allComps.map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               )}
@@ -717,47 +760,57 @@ export default function PlayerProfile() {
                       : rowIsSeeker ? isLeagueLeader(s, "GoldenSnitchCatches")
                       : rowIsKeeper ? isLeagueLeader(s, "KeeperSaves")
                       : false;
-                    const goalsAllTime = rowIsChaser && (s.Goals || 0) === allTimeGoals && allTimeGoals > 0;
-                    const gscAllTime = rowIsSeeker && (s.GoldenSnitchCatches || 0) === allTimeGSC && allTimeGSC > 0;
-                    const savesAllTime = rowIsKeeper && (s.KeeperSaves || 0) === allTimeSaves && allTimeSaves > 0;
-                    const rowClass = `border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`;
-                    // Gold bg for career best, bold for league leader
-                    const goldBg = "bg-yellow-100 dark:bg-yellow-900/30 font-bold";
-                    const goalsClass = goalsAllTime ? goldBg : isLeader ? "font-bold" : "";
-                    const gscClass = gscAllTime ? goldBg : isLeader ? "font-bold" : "";
-                    const savesClass = savesAllTime ? goldBg : isLeader ? "font-bold" : "";
-
+                    const compKey = s.LeagueName || "Unknown";
+                    const compBest = bestByComp.get(compKey);
                     const mKey = `${s.SeasonID}|${s.LeagueName}`;
                     const mins = minutesMap.get(mKey) || 0;
-                    const minsClass = allTimeClass(mins, allTimeMinutes);
                     const ext = extStatsMap.get(mKey);
-
-                    const minPerGoal = rowIsChaser && (s.Goals || 0) > 0 && mins > 0
-                      ? (mins / (s.Goals || 1)).toFixed(1)
-                      : null;
-
-                    const shotPct = rowIsChaser && ext && ext.shotAtt > 0
-                      ? ((ext.shotScored / ext.shotAtt) * 100).toFixed(1) + "%"
-                      : "—";
-                    const passPctChaser = rowIsChaser && ext && ext.passAtt > 0
-                      ? ((ext.passComp / ext.passAtt) * 100).toFixed(1) + "%"
-                      : "—";
-
-                    const snitchPct = rowIsSeeker && (s.GamesPlayed || 0) > 0
-                      ? (((s.GoldenSnitchCatches || 0) / (s.GamesPlayed || 1)) * 100).toFixed(1) + "%"
-                      : "—";
-
-                    const svPct = rowIsKeeper && s.KeeperShotsFaced
-                      ? ((s.KeeperSaves || 0) / s.KeeperShotsFaced * 100).toFixed(1) + "%"
-                      : "—";
-                    const passPctKeeper = rowIsKeeper && ext && ext.passAtt > 0
-                      ? ((ext.passComp / ext.passAtt) * 100).toFixed(1) + "%"
-                      : "—";
-
                     const sfFromResults = shotsFacedMap.get(mKey) || 0;
-                    const sfPerGP = rowIsBeater && (s.GamesPlayed || 0) > 0 && sfFromResults > 0
-                      ? (sfFromResults / (s.GamesPlayed || 1)).toFixed(2)
-                      : "—";
+
+                    // Compute all displayed values
+                    const minPerGoalVal = rowIsChaser && (s.Goals || 0) > 0 && mins > 0
+                      ? mins / (s.Goals || 1) : null;
+                    const shotPctVal = rowIsChaser && ext && ext.shotAtt > 0
+                      ? (ext.shotScored / ext.shotAtt) * 100 : null;
+                    const passPctChaserVal = rowIsChaser && ext && ext.passAtt > 0
+                      ? (ext.passComp / ext.passAtt) * 100 : null;
+                    const snitchPctVal = rowIsSeeker && (s.GamesPlayed || 0) > 0
+                      ? ((s.GoldenSnitchCatches || 0) / (s.GamesPlayed || 1)) * 100 : null;
+                    const svPctVal = rowIsKeeper && s.KeeperShotsFaced
+                      ? (s.KeeperSaves || 0) / s.KeeperShotsFaced * 100 : null;
+                    const passPctKeeperVal = rowIsKeeper && ext && ext.passAtt > 0
+                      ? (ext.passComp / ext.passAtt) * 100 : null;
+                    const sfPerGPVal = rowIsBeater && (s.GamesPlayed || 0) > 0 && sfFromResults > 0
+                      ? sfFromResults / (s.GamesPlayed || 1) : null;
+                    const bludgersHitVal = rowIsBeater && ext ? ext.bludgersHit : null;
+                    const turnoversVal = rowIsBeater && ext ? ext.turnoversForced : null;
+                    const teammatesVal = rowIsBeater && ext ? ext.teammatesProtected : null;
+                    const snitchSpottedVal = rowIsSeeker && ext ? ext.snitchSpotted : null;
+                    const sfVal = rowIsKeeper ? (s.KeeperShotsFaced || 0) : null;
+
+                    // Bold = career best for that competition; italic = league leader
+                    // Track bests for each computed value
+                    const goldBg = "bg-yellow-100 dark:bg-yellow-900/30 font-bold";
+                    const lead = "italic font-semibold";
+                    const cc = (isBest: boolean, isLead: boolean) => isBest ? goldBg : isLead ? lead : "";
+
+                    const goalsBest = rowIsChaser && compBest && (s.Goals || 0) > 0 && (s.Goals || 0) === compBest.goals;
+                    const gscBest = rowIsSeeker && compBest && (s.GoldenSnitchCatches || 0) > 0 && (s.GoldenSnitchCatches || 0) === compBest.gsc;
+                    const savesBest = rowIsKeeper && compBest && (s.KeeperSaves || 0) > 0 && (s.KeeperSaves || 0) === compBest.saves;
+                    const gpBest = compBest && (s.GamesPlayed || 0) > 0 && (s.GamesPlayed || 0) === compBest.gp;
+                    const minsBest = compBest && mins > 0 && mins === compBest.mins;
+                    // Rate stats: use per-comp best computed on the fly
+                    const extBest = compBest ? (bestExtByComp.get(compKey) || null) : null;
+                    const shotPctBest = rowIsChaser && shotPctVal !== null && extBest && shotPctVal >= (extBest.shotPct || 0) && shotPctVal > 0;
+                    const passPctBest = (rowIsChaser || rowIsKeeper) && extBest && (rowIsChaser ? passPctChaserVal : passPctKeeperVal) !== null;
+                    const minPerGoalBest = rowIsChaser && minPerGoalVal !== null && extBest && extBest.minPerGoal !== null && minPerGoalVal <= extBest.minPerGoal;
+                    const snitchPctBest = rowIsSeeker && snitchPctVal !== null && extBest && snitchPctVal >= (extBest.snitchPct || 0);
+                    const svPctBest = rowIsKeeper && svPctVal !== null && extBest && svPctVal >= (extBest.svPct || 0);
+                    const bludgersBest = rowIsBeater && bludgersHitVal !== null && extBest && bludgersHitVal >= (extBest.bludgersHit || 0) && bludgersHitVal > 0;
+                    const turnoversBest = rowIsBeater && turnoversVal !== null && extBest && turnoversVal >= (extBest.turnovers || 0) && turnoversVal > 0;
+                    const sfPerGPBest = rowIsBeater && sfPerGPVal !== null && extBest && extBest.sfPerGP !== null && sfPerGPVal >= extBest.sfPerGP;
+
+                    const rowClass = `border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`;
 
                     return (
                       <tr key={i} className={rowClass}>
@@ -770,23 +823,23 @@ export default function PlayerProfile() {
                           ) : "—"}
                         </td>
                         {positionsPlayed.length > 1 && <td className={`${tdClass} text-xs text-muted-foreground`}>{s.Position}</td>}
-                        <td className={`px-3 py-1.5 text-right font-mono ${allTimeClass(s.GamesPlayed || 0, allTimeGP)}`}>{s.GamesPlayed}</td>
-                        <td className={`px-3 py-1.5 text-right font-mono ${minsClass}`}>{fmtMin(mins)}</td>
-                        {isChaser && <td className={`px-3 py-1.5 text-right font-mono ${rowIsChaser ? goalsClass : "text-foreground"}`}>{rowIsChaser ? (s.Goals || 0) : "—"}</td>}
-                        {isChaser && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsChaser ? shotPct : "—"}</td>}
-                        {isChaser && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsChaser ? passPctChaser : "—"}</td>}
-                        {isChaser && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsChaser ? (minPerGoal ?? "—") : "—"}</td>}
-                        {isSeeker && <td className={`px-3 py-1.5 text-right font-mono ${rowIsSeeker ? gscClass : "text-foreground"}`}>{rowIsSeeker ? (s.GoldenSnitchCatches || 0) : "—"}</td>}
-                        {isSeeker && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsSeeker ? snitchPct : "—"}</td>}
-                        {isSeeker && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsSeeker && ext ? ext.snitchSpotted : "—"}</td>}
-                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? savesClass : "text-foreground"}`}>{rowIsKeeper ? (s.KeeperSaves || 0) : "—"}</td>}
-                        {isKeeper && <td className={`${tdClass} text-right font-mono`}>{rowIsKeeper ? (s.KeeperShotsFaced || 0) : "—"}</td>}
-                        {isKeeper && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsKeeper ? svPct : "—"}</td>}
-                        {isKeeper && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsKeeper ? passPctKeeper : "—"}</td>}
-                        {isBeater && <td className={`${tdClass} text-right font-mono`}>{rowIsBeater && ext ? ext.bludgersHit : "—"}</td>}
-                        {isBeater && <td className={`${tdClass} text-right font-mono`}>{rowIsBeater && ext ? ext.turnoversForced : "—"}</td>}
-                        {isBeater && <td className={`${tdClass} text-right font-mono`}>{rowIsBeater && ext ? ext.teammatesProtected : "—"}</td>}
-                        {isBeater && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{rowIsBeater ? sfPerGP : "—"}</td>}
+                        <td className={`px-3 py-1.5 text-right font-mono ${cc(gpBest, false)}`}>{s.GamesPlayed}</td>
+                        <td className={`px-3 py-1.5 text-right font-mono ${cc(minsBest, false)}`}>{fmtMin(mins)}</td>
+                        {isChaser && <td className={`px-3 py-1.5 text-right font-mono ${rowIsChaser ? cc(goalsBest, isLeader) : ""}`}>{rowIsChaser ? (s.Goals || 0) : "—"}</td>}
+                        {isChaser && <td className={`px-3 py-1.5 text-right font-mono ${rowIsChaser ? cc(shotPctBest, isLeader) : "text-muted-foreground"}`}>{rowIsChaser ? (shotPctVal !== null ? shotPctVal.toFixed(1) + "%" : "—") : "—"}</td>}
+                        {isChaser && <td className={`px-3 py-1.5 text-right font-mono ${rowIsChaser ? cc(!!passPctBest, isLeader) : "text-muted-foreground"}`}>{rowIsChaser ? (passPctChaserVal !== null ? passPctChaserVal.toFixed(1) + "%" : "—") : "—"}</td>}
+                        {isChaser && <td className={`px-3 py-1.5 text-right font-mono ${rowIsChaser ? cc(minPerGoalBest, isLeader) : "text-muted-foreground"}`}>{rowIsChaser ? (minPerGoalVal !== null ? minPerGoalVal.toFixed(1) : "—") : "—"}</td>}
+                        {isSeeker && <td className={`px-3 py-1.5 text-right font-mono ${rowIsSeeker ? cc(gscBest, isLeader) : ""}`}>{rowIsSeeker ? (s.GoldenSnitchCatches || 0) : "—"}</td>}
+                        {isSeeker && <td className={`px-3 py-1.5 text-right font-mono ${rowIsSeeker ? cc(snitchPctBest, isLeader) : "text-muted-foreground"}`}>{rowIsSeeker ? (snitchPctVal !== null ? snitchPctVal.toFixed(1) + "%" : "—") : "—"}</td>}
+                        {isSeeker && <td className={`px-3 py-1.5 text-right font-mono ${rowIsSeeker ? cc(false, isLeader) : "text-muted-foreground"}`}>{rowIsSeeker ? (snitchSpottedVal ?? "—") : "—"}</td>}
+                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? cc(savesBest, isLeader) : ""}`}>{rowIsKeeper ? (s.KeeperSaves || 0) : "—"}</td>}
+                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? cc(false, isLeader) : ""}`}>{rowIsKeeper ? (sfVal ?? "—") : "—"}</td>}
+                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? cc(svPctBest, isLeader) : "text-muted-foreground"}`}>{rowIsKeeper ? (svPctVal !== null ? svPctVal.toFixed(1) + "%" : "—") : "—"}</td>}
+                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? cc(!!passPctBest, isLeader) : "text-muted-foreground"}`}>{rowIsKeeper ? (passPctKeeperVal !== null ? passPctKeeperVal.toFixed(1) + "%" : "—") : "—"}</td>}
+                        {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(bludgersBest, isLeader) : ""}`}>{rowIsBeater ? (bludgersHitVal ?? "—") : "—"}</td>}
+                        {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(turnoversBest, isLeader) : ""}`}>{rowIsBeater ? (turnoversVal ?? "—") : "—"}</td>}
+                        {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(false, isLeader) : ""}`}>{rowIsBeater ? (teammatesVal ?? "—") : "—"}</td>}
+                        {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(sfPerGPBest, isLeader) : "text-muted-foreground"}`}>{rowIsBeater ? (sfPerGPVal !== null ? sfPerGPVal.toFixed(2) : "—") : "—"}</td>}
                       </tr>
                     );
                   })}
@@ -821,7 +874,7 @@ export default function PlayerProfile() {
                         {isBeater && <td className={ct}>{careerExt.bludgersHit}</td>}
                         {isBeater && <td className={ct}>{careerExt.turnoversForced}</td>}
                         {isBeater && <td className={ct}>{careerExt.teammatesProtected}</td>}
-                        {isBeater && <td className={ct}>{careerTotals.gp > 0 && careerTotals.shotsFaced > 0 ? (careerTotals.shotsFaced / careerTotals.gp).toFixed(2) : "—"}</td>}
+                        {isBeater && <td className={ct}>{careerTotals.gp > 0 && careerExt.bludgerShotsFaced > 0 ? (careerExt.bludgerShotsFaced / careerTotals.gp).toFixed(2) : "—"}</td>}
                       </tr>
                     );
                   })()}
@@ -886,7 +939,7 @@ export default function PlayerProfile() {
                       {isBeater && <td className={`${tdClass} text-right font-mono`}>{totals.ext.bludgersHit}</td>}
                       {isBeater && <td className={`${tdClass} text-right font-mono`}>{totals.ext.turnoversForced}</td>}
                       {isBeater && <td className={`${tdClass} text-right font-mono`}>{totals.ext.teammatesProtected}</td>}
-                      {isBeater && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.gp > 0 && totals.shotsFaced > 0 ? (totals.shotsFaced / totals.gp).toFixed(2) : "—"}</td>}
+                      {isBeater && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.gp > 0 && totals.ext.bludgerShotsFaced > 0 ? (totals.ext.bludgerShotsFaced / totals.gp).toFixed(2) : "—"}</td>}
                     </tr>
                   ))}
                 </tbody>
