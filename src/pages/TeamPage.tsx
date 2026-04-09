@@ -95,54 +95,77 @@ function ordinal(n: number): string {
 }
 
 // Determine what stage a team reached in a knockout tournament
+// CL knockout rounds are two-legged (pairs of weeks count as one round)
 function getCupStage(matches: { homeId: number; awayId: number; homeScore: number; awayScore: number; weekId: number }[], teamId: number, isCL: boolean): string {
   if (matches.length === 0) return "—";
 
-  // For CL: weeks 1-6 are group stage, 7+ are knockout
-  // For cups: all weeks are knockout
-  const knockoutMatches = isCL
-    ? matches.filter(m => m.weekId > 6)
-    : matches;
   const groupMatches = isCL ? matches.filter(m => m.weekId <= 6) : [];
+  const knockoutMatches = isCL ? matches.filter(m => m.weekId > 6) : matches;
 
+  // CL group stage only
   if (isCL && groupMatches.length > 0 && knockoutMatches.length === 0) {
     return "Group Stage";
   }
 
-  // Find the latest week the team played in
-  const teamMatches = knockoutMatches.filter(m => m.homeId === teamId || m.awayId === teamId);
-  if (teamMatches.length === 0) {
-    if (isCL && groupMatches.length > 0) return "Group Stage";
-    return "—";
+  // All weeks in knockout phase
+  const allKnockoutWeeks = [...new Set(knockoutMatches.map(m => m.weekId))].sort((a, b) => a - b);
+  if (allKnockoutWeeks.length === 0) return isCL ? "Group Stage" : "—";
+
+  // For CL: pair consecutive weeks into rounds (two-legged ties)
+  // Each round = 2 weeks; for cups each week = one round
+  let rounds: number[][] = [];
+  if (isCL) {
+    for (let i = 0; i < allKnockoutWeeks.length; i += 2) {
+      if (i + 1 < allKnockoutWeeks.length) {
+        rounds.push([allKnockoutWeeks[i], allKnockoutWeeks[i + 1]]);
+      } else {
+        rounds.push([allKnockoutWeeks[i]]); // Final is single-legged
+      }
+    }
+  } else {
+    rounds = allKnockoutWeeks.map(w => [w]);
   }
 
-  // Check if they won their last match (to determine stage reached vs eliminated)
-  const lastMatch = [...teamMatches].sort((a, b) => b.weekId - a.weekId)[0];
-  const isHome = lastMatch.homeId === teamId;
-  const teamScore = isHome ? lastMatch.homeScore : lastMatch.awayScore;
-  const oppScore = isHome ? lastMatch.awayScore : lastMatch.homeScore;
-  const wonLast = teamScore > oppScore;
+  const totalRounds = rounds.length;
 
-  // Count unique weeks to determine total rounds
-  const allWeeks = [...new Set(knockoutMatches.map(m => m.weekId))].sort((a, b) => a - b);
-  const lastWeekIdx = allWeeks.indexOf(lastMatch.weekId);
-  const totalRounds = allWeeks.length;
-  const roundsFromEnd = totalRounds - 1 - lastWeekIdx; // 0 = final, 1 = semi, 2 = quarter, etc.
+  // Find the last round this team participated in
+  const teamKnockoutMatches = knockoutMatches.filter(m => m.homeId === teamId || m.awayId === teamId);
+  if (teamKnockoutMatches.length === 0) {
+    return isCL && groupMatches.length > 0 ? "Group Stage" : "—";
+  }
 
-  // How many matches were in the final week (to gauge round size)
-  const finalWeekMatches = knockoutMatches.filter(m => m.weekId === allWeeks[allWeeks.length - 1]).length;
+  const lastWeekPlayed = Math.max(...teamKnockoutMatches.map(m => m.weekId));
+  const lastRoundIdx = rounds.findIndex(r => r.includes(lastWeekPlayed));
+  const roundsFromEnd = totalRounds - 1 - lastRoundIdx; // 0 = final round, 1 = penultimate, etc.
 
-  if (wonLast && roundsFromEnd === 0) return "🏆 Champion";
-  if (!wonLast && roundsFromEnd === 0) return isCL ? "CL Final" : "Final";
-  if (roundsFromEnd === 1) return isCL ? "CL Semi-finals" : "Semi-finals";
-  if (roundsFromEnd === 2) return "Quarter-finals";
-  if (roundsFromEnd === 3) return "Round of 16";
-  if (roundsFromEnd === 4) return "Round of 32";
+  // Did the team win the last match in their last round?
+  const lastRoundMatches = teamKnockoutMatches.filter(m => rounds[lastRoundIdx]?.includes(m.weekId));
+  
+  // For two-legged: aggregate scores
+  let teamAgg = 0, oppAgg = 0;
+  lastRoundMatches.forEach(m => {
+    const isHome = m.homeId === teamId;
+    teamAgg += isHome ? m.homeScore : m.awayScore;
+    oppAgg += isHome ? m.awayScore : m.homeScore;
+  });
+  const wonLastRound = teamAgg > oppAgg;
 
-  // For cup competitions (non-CL), use round number
-  const roundNum = lastWeekIdx + 1;
-  if (isCL) return `Round of ${Math.pow(2, roundsFromEnd + 1)}`;
-  return roundNum === 1 ? "First Round" : roundNum === 2 ? "Second Round" : `Round ${roundNum}`;
+  // Name the rounds based on how many are left from the end
+  const roundName = (fromEnd: number): string => {
+    if (fromEnd === 0) return isCL ? "CL Final" : "Final";
+    if (fromEnd === 1) return "Semi-finals";
+    if (fromEnd === 2) return "Quarter-finals";
+    if (fromEnd === 3) return "Round of 16";
+    if (fromEnd === 4) return "Round of 32";
+    // For cups with more rounds, name by round number from start
+    const roundNum = lastRoundIdx + 1;
+    return roundNum === 1 ? "First Round" : roundNum === 2 ? "Second Round" : `Round ${roundNum}`;
+  };
+
+  if (roundsFromEnd === 0 && wonLastRound) return "🏆 Champion";
+  if (roundsFromEnd === 0 && !wonLastRound) return isCL ? "Runner-Up" : "Runner-Up";
+  // Eliminated in this round
+  return roundName(roundsFromEnd);
 }
 
 export default function TeamPage() {
@@ -270,131 +293,108 @@ export default function TeamPage() {
   }, [name]);
 
   async function buildSeasonRegister(teamName: string, standings: StandingRow[], stats: StatLine[], teamId: number | null) {
-    // Build a map of all (SeasonID, LeagueName) combos from stats
     const seasonLeaguePairs = new Map<string, { seasonId: number; leagueName: string }>();
     (stats || []).forEach(s => {
       if (s.SeasonID && s.LeagueName) {
         const key = `${s.SeasonID}|${s.LeagueName}`;
-        if (!seasonLeaguePairs.has(key)) {
-          seasonLeaguePairs.set(key, { seasonId: s.SeasonID, leagueName: s.LeagueName });
-        }
+        if (!seasonLeaguePairs.has(key)) seasonLeaguePairs.set(key, { seasonId: s.SeasonID, leagueName: s.LeagueName });
       }
     });
 
-    const leagueData = await fetchAllRows("leagues", { select: "LeagueID, LeagueName, LeagueTier" });
+    // Batch all reference data in parallel — single round trip
+    const [leagueData, allTeamsForReg, allStandingsRaw] = await Promise.all([
+      fetchAllRows("leagues", { select: "LeagueID, LeagueName, LeagueTier" }),
+      fetchAllRows("teams", { select: "FullName, LeagueID" }),
+      fetchAllRows("standings", {
+        select: "FullName, SeasonID, totalpoints, totalgamesplayed, GoalsFor, GoalsAgainst, totalgsc",
+        order: { column: "totalpoints", ascending: false },
+      }),
+    ]);
+
     const leagueTierMap = new Map<string, number>();
     const leagueIdByName = new Map<string, number>();
     (leagueData || []).forEach((l: any) => {
-      if (l.LeagueName) {
-        leagueTierMap.set(l.LeagueName, l.LeagueTier || 1);
-        leagueIdByName.set(l.LeagueName, l.LeagueID);
-      }
+      if (l.LeagueName) { leagueTierMap.set(l.LeagueName, l.LeagueTier || 1); leagueIdByName.set(l.LeagueName, l.LeagueID); }
     });
 
-    // Get all teams grouped by league for filtering standings
-    const allTeamsForReg = await fetchAllRows("teams", { select: "FullName, LeagueID" });
     const teamsByLeagueId = new Map<number, string[]>();
     (allTeamsForReg || []).forEach((t: any) => {
-      const arr = teamsByLeagueId.get(t.LeagueID) || [];
-      arr.push(t.FullName);
-      teamsByLeagueId.set(t.LeagueID, arr);
+      const arr = teamsByLeagueId.get(t.LeagueID) || []; arr.push(t.FullName); teamsByLeagueId.set(t.LeagueID, arr);
     });
 
-    // Build a standings lookup by (SeasonID, LeagueID)
-    const standingsMap = new Map<string, StandingRow>();
-    standings.forEach(s => {
+    // Build season standings lookup: seasonId -> [{FullName, totalpoints}] already sorted desc
+    const standingsBySeason = new Map<number, { FullName: string; totalpoints: number }[]>();
+    (allStandingsRaw || []).forEach((s: any) => {
       if (s.SeasonID) {
-        // Standings only exist for domestic leagues (IDs 1-14)
-        // Map by SeasonID alone since a team has one standing per season per domestic league
-        standingsMap.set(String(s.SeasonID), s);
+        if (!standingsBySeason.has(s.SeasonID)) standingsBySeason.set(s.SeasonID, []);
+        standingsBySeason.get(s.SeasonID)!.push({ FullName: s.FullName || "", totalpoints: s.totalpoints || 0 });
       }
     });
 
+    const standingsMap = new Map<string, StandingRow>();
+    standings.forEach(s => { if (s.SeasonID) standingsMap.set(String(s.SeasonID), s); });
+
     const registerRows: SeasonRegisterRow[] = [];
-    
-    // Process each unique (season, league) pair
+
+    // Collect all cup/CL season+league pairs for a single batch results fetch
+    const cupPairs: { seasonId: number; leagueId: number; leagueN: string; tier: number }[] = [];
+    const domesticPairs: { seasonId: number; leagueN: string; tier: number; leagueId: number }[] = [];
+
     for (const { seasonId, leagueName: leagueN } of seasonLeaguePairs.values()) {
       const tier = leagueTierMap.get(leagueN) || 1;
       const leagueId = leagueIdByName.get(leagueN);
-      
-      // For domestic leagues (1-14), use standings data
-      if (leagueId && leagueId >= 1 && leagueId <= 14) {
-        const standing = standingsMap.get(String(seasonId));
-        if (!standing) continue;
-        
-        const leagueTeamNames = teamsByLeagueId.get(leagueId) || [];
+      if (!leagueId) continue;
+      if (leagueId >= 1 && leagueId <= 14) domesticPairs.push({ seasonId, leagueN, tier, leagueId });
+      else cupPairs.push({ seasonId, leagueId, leagueN, tier });
+    }
 
-        const allTeamStandings = await fetchAllRows("standings", {
-          select: "FullName, totalpoints",
-          filters: [{ method: "eq", args: ["SeasonID", seasonId] }],
-          order: { column: "totalpoints", ascending: false },
-        });
+    // Process domestic leagues using pre-fetched standings
+    for (const { seasonId, leagueN, tier, leagueId } of domesticPairs) {
+      const standing = standingsMap.get(String(seasonId));
+      if (!standing) continue;
+      const leagueTeamNames = teamsByLeagueId.get(leagueId) || [];
+      const seasonStandings = (standingsBySeason.get(seasonId) || [])
+        .filter(s => leagueTeamNames.length === 0 || leagueTeamNames.includes(s.FullName))
+        .sort((a, b) => b.totalpoints - a.totalpoints);
+      const idx = seasonStandings.findIndex(s => s.FullName === teamName);
+      const position = idx >= 0 ? idx + 1 : null;
+      const isChampion = idx === 0;
+      registerRows.push({
+        SeasonID: seasonId, LeagueName: leagueN, LeagueTier: tier, LeagueID: leagueId,
+        position, isChampion,
+        totalgamesplayed: standing.totalgamesplayed, totalpoints: standing.totalpoints,
+        GoalsFor: standing.GoalsFor, GoalsAgainst: standing.GoalsAgainst, totalgsc: standing.totalgsc,
+      });
+    }
 
-        let position: number | null = null;
-        let isChampion = false;
-        if (allTeamStandings && allTeamStandings.length > 0) {
-          const leagueStandings = leagueTeamNames.length > 0
-            ? allTeamStandings.filter(t => leagueTeamNames.includes(t.FullName || ""))
-            : allTeamStandings;
-          const idx = leagueStandings.findIndex(t => t.FullName === teamName);
-          if (idx >= 0) {
-            position = idx + 1;
-            isChampion = idx === 0;
-          }
-        }
-
-        registerRows.push({
-          SeasonID: seasonId,
-          LeagueName: leagueN,
-          LeagueTier: tier,
-          LeagueID: leagueId,
-          position,
-          isChampion,
-          totalgamesplayed: standing.totalgamesplayed,
-          totalpoints: standing.totalpoints,
-          GoalsFor: standing.GoalsFor,
-          GoalsAgainst: standing.GoalsAgainst,
-          totalgsc: standing.totalgsc,
-        });
-      } else {
-        // For cups/CL (no standings), compute from match results
-        const tid = teamId;
-        if (!tid || !leagueId) continue;
-        
-        const cupResults = await fetchAllRows("results", {
-          select: "HomeTeamID, AwayTeamID, HomeTeamScore, AwayTeamScore",
+    // Fetch all cup/CL results in parallel
+    if (cupPairs.length > 0 && teamId) {
+      const cupResultsFetches = cupPairs.map(({ seasonId, leagueId }) =>
+        fetchAllRows("results", {
+          select: "HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID,LeagueID,SeasonID",
           filters: [
             { method: "eq", args: ["LeagueID", leagueId] },
             { method: "eq", args: ["SeasonID", seasonId] },
-            { method: "or", args: [`HomeTeamID.eq.${tid},AwayTeamID.eq.${tid}`] },
+            { method: "or", args: [`HomeTeamID.eq.${teamId},AwayTeamID.eq.${teamId}`] },
           ],
-        });
-        
-        let gp = 0, gf = 0, ga = 0, wins = 0;
-        (cupResults || []).forEach(r => {
+        })
+      );
+      const allCupResults = await Promise.all(cupResultsFetches);
+      cupPairs.forEach(({ seasonId, leagueId, leagueN, tier }, pi) => {
+        const cupResults = allCupResults[pi] || [];
+        let gp = 0, gf = 0, ga = 0;
+        cupResults.forEach((r: any) => {
           gp++;
-          const isHome = r.HomeTeamID === tid;
-          const ts = isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
-          const os = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
-          gf += ts;
-          ga += os;
-          if (ts > os) wins++;
+          const isHome = r.HomeTeamID === teamId;
+          gf += isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
+          ga += isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
         });
-        
         registerRows.push({
-          SeasonID: seasonId,
-          LeagueName: leagueN,
-          LeagueTier: tier,
-          LeagueID: leagueId,
-          position: null,
-          isChampion: false,
-          totalgamesplayed: gp,
-          totalpoints: null,
-          GoalsFor: gf,
-          GoalsAgainst: ga,
-          totalgsc: null,
+          SeasonID: seasonId, LeagueName: leagueN, LeagueTier: tier, LeagueID: leagueId,
+          position: null, isChampion: false,
+          totalgamesplayed: gp, totalpoints: null, GoalsFor: gf, GoalsAgainst: ga, totalgsc: null,
         });
-      }
+      });
     }
 
     registerRows.sort((a, b) => b.SeasonID - a.SeasonID || a.LeagueID - b.LeagueID);
@@ -437,7 +437,30 @@ export default function TeamPage() {
   const displayRoster = [...deduped.values()];
 
   const posOrder: Record<string, number> = { Chaser: 1, Beater: 2, Keeper: 3, Seeker: 4 };
-  const defaultSorted = [...displayRoster].sort((a, b) => (posOrder[a.Position || ""] || 5) - (posOrder[b.Position || ""] || 5));
+  // Pre-compute sortable fields for roster info table
+  const displayRosterWithMeta = displayRoster.map(p => {
+    const pInfo = players.find(pl => pl.PlayerName === p.PlayerName);
+    const firstDate = rosterSeasonId ? firstMatchDateMap.get(rosterSeasonId) : null;
+    let age: number | null = null;
+    if (pInfo?.DOB && firstDate) {
+      const [fy, fm, fd] = firstDate.split("-").map(Number);
+      const birth = new Date(pInfo.DOB);
+      age = new Date(fy, fm - 1, fd).getFullYear() - birth.getFullYear();
+      const mo = new Date(fy, fm - 1, fd).getMonth() - birth.getMonth();
+      if (mo < 0 || (mo === 0 && new Date(fy, fm - 1, fd).getDate() < birth.getDate())) age--;
+    }
+    const debut = p.PlayerName ? overallDebutMap.get(p.PlayerName) ?? null : null;
+    return {
+      ...p,
+      _age: age,
+      _height: pInfo?.Height ?? null,
+      _weight: pInfo?.Weight ?? null,
+      _hand: pInfo?.Handedness ?? null,
+      _debut: debut,
+      _nat: pInfo?.NationalityID ? nations.get(pInfo.NationalityID) ?? "" : "",
+    };
+  });
+  const defaultSorted = [...displayRosterWithMeta].sort((a, b) => (posOrder[a.Position || ""] || 5) - (posOrder[b.Position || ""] || 5));
   const { sorted: sortedRoster, sortKey, sortDir, requestSort } = useSortableTable(defaultSorted, "Position", "asc");
 
   const topScorer = [...displayRoster].filter((r) => r.positions.includes("Chaser")).sort((a, b) => (b.Goals || 0) - (a.Goals || 0))[0];
@@ -913,26 +936,15 @@ export default function TeamPage() {
                         const pInfo = getPlayerInfo(p.PlayerName);
                         const pid = pInfo?.PlayerID;
                         const posDisplay = (p as any).positions?.join("/") || p.Position;
-                        const nationName = pInfo?.NationalityID ? nations.get(pInfo.NationalityID) || "" : "";
-                        const debut = p.PlayerName ? overallDebutMap.get(p.PlayerName) : null;
+                        const nationName = (p as any)._nat || (pInfo?.NationalityID ? nations.get(pInfo.NationalityID) || "" : "");
+                        const debut = (p as any)._debut;
                         return (
                           <tr key={i} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
                             <td className="px-3 py-1.5 font-medium text-accent hover:underline">
                               {pid ? <Link to={`/player/${pid}`}>{p.PlayerName}</Link> : p.PlayerName}
                             </td>
                             <td className="px-3 py-1.5 text-muted-foreground text-xs">{posDisplay}</td>
-                            <td className="px-3 py-1.5 text-right font-mono text-xs">{(() => {
-                              if (!pInfo?.DOB || !rosterSeasonId) return "—";
-                              const firstDate = firstMatchDateMap.get(rosterSeasonId);
-                              if (!firstDate) return "—";
-                              const [fy, fm, fd] = firstDate.split("-").map(Number);
-                              const refDate = new Date(fy, fm - 1, fd);
-                              const birth = new Date(pInfo.DOB);
-                              let age = refDate.getFullYear() - birth.getFullYear();
-                              const m = refDate.getMonth() - birth.getMonth();
-                              if (m < 0 || (m === 0 && refDate.getDate() < birth.getDate())) age--;
-                              return age;
-                            })()}</td>
+                            <td className="px-3 py-1.5 text-right font-mono text-xs">{(p as any)._age ?? "—"}</td>
                             <td className="px-3 py-1.5 text-xs">
                               {pInfo?.NationalityID ? (
                                 <Link to={`/nation/${pInfo.NationalityID}`} className="text-accent hover:underline">
@@ -942,9 +954,9 @@ export default function TeamPage() {
                                 <>{getNationFlag(nationName)} {nationName}</>
                               )}
                             </td>
-                            <td className="px-3 py-1.5 text-right font-mono text-xs">{pInfo ? formatHeight(pInfo.Height) : "—"}</td>
-                            <td className="px-3 py-1.5 text-right font-mono text-xs">{pInfo?.Weight ? `${pInfo.Weight}` : "—"}</td>
-                            <td className="px-3 py-1.5 text-center text-xs">{pInfo?.Handedness === "R" ? "R" : pInfo?.Handedness === "L" ? "L" : pInfo?.Handedness || "—"}</td>
+                            <td className="px-3 py-1.5 text-right font-mono text-xs">{formatHeight((p as any)._height)}</td>
+                            <td className="px-3 py-1.5 text-right font-mono text-xs">{(p as any)._weight ? `${(p as any)._weight}` : "—"}</td>
+                            <td className="px-3 py-1.5 text-center text-xs">{(p as any)._hand === "R" ? "R" : (p as any)._hand === "L" ? "L" : (p as any)._hand || "—"}</td>
                             <td className="px-3 py-1.5 text-right font-mono text-xs">{debut ? seasonLabel(debut) : "—"}</td>
                           </tr>
                         );
