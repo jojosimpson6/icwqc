@@ -1,81 +1,94 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchAllRows } from "@/lib/fetchAll";
 import { formatHeight, getNationFlag } from "@/lib/helpers";
 
-interface Player {
+interface SpotlightPlayer {
   PlayerID: number;
-  PlayerName: string | null;
-  Position: string | null;
+  PlayerName: string;
+  Position: string;
   Height: number | null;
   NationalityID: number | null;
-  DOB: string | null;
   headshot_url: string | null;
+  teamName: string;
+  nationName: string;
 }
 
 export function PlayerSpotlight() {
-  const [players, setPlayers] = useState<Player[]>([]);
-  const [nations, setNations] = useState<Record<number, string>>({});
-  const [playerTeams, setPlayerTeams] = useState<Record<string, string>>({});
-  const [playerPositions, setPlayerPositions] = useState<Record<string, string>>({});
+  const [players, setPlayers] = useState<SpotlightPlayer[]>([]);
 
   useEffect(() => {
-    // First get available seasons to find the latest
-    fetchAllRows("matchdays", { select: "SeasonID" }).then((mdData) => {
-      const seasons = [...new Set((mdData || []).map((m: any) => m.SeasonID).filter(Boolean))].sort((a, b) => b - a);
-      const latestSeason = seasons[0] || 1998;
-      
-      Promise.all([
-        fetchAllRows("players", { select: "*" }),
-        supabase.from("nations").select("NationID, Nation, ValidToDt").order("ValidToDt", { ascending: false }),
-        // Only fetch stats for the latest season to avoid timeout
-        fetchAllRows("stats", {
-          select: "PlayerName, FullName, SeasonID, Position, GamesPlayed",
-          filters: [{ method: "eq", args: ["SeasonID", latestSeason] }],
-        }),
-      ]).then(([playerData, { data: nationData }, statsData]) => {
-        if (playerData) {
-          const shuffled = [...playerData].sort(() => Math.random() - 0.5).slice(0, 6);
-          setPlayers(shuffled);
-        }
-        if (nationData) {
-          const map: Record<number, string> = {};
-          // Order by ValidToDt desc means most recent is first — use first occurrence per NationID
-          [...nationData].sort((a: any, b: any) => {
-            if (!a.ValidToDt) return -1;
-            if (!b.ValidToDt) return 1;
-            return b.ValidToDt.localeCompare(a.ValidToDt);
-          }).forEach((n: any) => { if (n.NationID && !map[n.NationID]) map[n.NationID] = n.Nation || ""; });
-          setNations(map);
-        }
-        if (statsData) {
-          const teamMap: Record<string, string> = {};
-          const posGpMap: Record<string, Record<string, number>> = {};
-          statsData.forEach((s: any) => {
-            if (s.PlayerName && s.FullName && !teamMap[s.PlayerName]) {
-              teamMap[s.PlayerName] = s.FullName;
-            }
-            if (s.PlayerName && s.Position) {
-              if (!posGpMap[s.PlayerName]) posGpMap[s.PlayerName] = {};
-              posGpMap[s.PlayerName][s.Position] = (posGpMap[s.PlayerName][s.Position] || 0) + (s.GamesPlayed || 0);
-            }
-          });
-          setPlayerTeams(teamMap);
+    (async () => {
+      // 1. Get latest season ID from matchdays (single fast query)
+      const { data: mdData } = await supabase
+        .from("matchdays")
+        .select("SeasonID")
+        .order("SeasonID", { ascending: false })
+        .limit(1);
+      const latestSeason = mdData?.[0]?.SeasonID || 1998;
 
-          const primaryPosMap: Record<string, string> = {};
-          Object.entries(posGpMap).forEach(([name, posMap]) => {
-            let bestPos = "";
-            let bestGP = 0;
-            Object.entries(posMap).forEach(([pos, gp]) => {
-              if (gp > bestGP) { bestGP = gp; bestPos = pos; }
-            });
-            primaryPosMap[name] = bestPos;
-          });
-          setPlayerPositions(primaryPosMap);
+      // 2. Fetch stats for latest season — get distinct players + team
+      const { data: statsData } = await supabase
+        .from("stats")
+        .select("PlayerName, FullName, Position, GamesPlayed")
+        .eq("SeasonID", latestSeason)
+        .limit(500);
+
+      if (!statsData || statsData.length === 0) return;
+
+      // Deduplicate by player, pick primary team and position
+      const playerMap = new Map<string, { team: string; pos: string; gp: number }>();
+      statsData.forEach((s: any) => {
+        if (!s.PlayerName) return;
+        const existing = playerMap.get(s.PlayerName);
+        const gp = s.GamesPlayed || 0;
+        if (!existing || gp > existing.gp) {
+          playerMap.set(s.PlayerName, { team: s.FullName || "", pos: s.Position || "", gp });
         }
       });
-    });
+
+      // Pick 6 random player names
+      const names = [...playerMap.keys()];
+      const shuffled = [...names].sort(() => Math.random() - 0.5).slice(0, 6);
+      if (shuffled.length === 0) return;
+
+      // 3. Fetch player details for only those 6
+      const { data: pData } = await supabase
+        .from("players")
+        .select("PlayerID, PlayerName, Height, NationalityID, headshot_url")
+        .in("PlayerName", shuffled);
+      if (!pData) return;
+
+      // 4. Fetch nations for just the nationality IDs needed
+      const natIds = [...new Set(pData.map((p: any) => p.NationalityID).filter(Boolean))];
+      let nationMap = new Map<number, string>();
+      if (natIds.length > 0) {
+        const { data: nData } = await supabase
+          .from("nations")
+          .select("NationID, Nation, ValidToDt")
+          .in("NationID", natIds)
+          .order("ValidToDt", { ascending: false });
+        (nData || []).forEach((n: any) => {
+          if (n.NationID && !nationMap.has(n.NationID)) nationMap.set(n.NationID, n.Nation || "");
+        });
+      }
+
+      const result: SpotlightPlayer[] = pData.map((p: any) => {
+        const meta = playerMap.get(p.PlayerName) || { team: "", pos: "", gp: 0 };
+        return {
+          PlayerID: p.PlayerID,
+          PlayerName: p.PlayerName,
+          Position: meta.pos,
+          Height: p.Height,
+          NationalityID: p.NationalityID,
+          headshot_url: p.headshot_url,
+          teamName: meta.team,
+          nationName: p.NationalityID ? (nationMap.get(p.NationalityID) || "") : "",
+        };
+      });
+
+      setPlayers(result);
+    })();
   }, []);
 
   return (
@@ -84,33 +97,32 @@ export function PlayerSpotlight() {
         <h3 className="font-display text-sm font-bold text-table-header-foreground">Player Spotlight</h3>
       </div>
       <div className="bg-card divide-y divide-border">
-        {players.map((p) => {
-          const teamName = p.PlayerName ? playerTeams[p.PlayerName] : null;
-          const displayPos = p.PlayerName ? (playerPositions[p.PlayerName] || p.Position) : p.Position;
-          return (
-            <Link
-              key={p.PlayerID}
-              to={`/player/${p.PlayerID}`}
-              className="flex items-center gap-3 px-3 py-2.5 hover:bg-highlight/20 transition-colors"
-            >
-              <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-muted-foreground text-xs font-mono shrink-0 overflow-hidden">
-                {p.headshot_url ? (
-                  <img src={p.headshot_url} alt={p.PlayerName || ""} className="w-full h-full object-cover" />
-                ) : (
-                  displayPos?.[0] || "?"
-                )}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="font-sans font-medium text-sm text-accent truncate">{p.PlayerName}</p>
-                <p className="text-xs text-muted-foreground font-sans truncate">
-                  {displayPos} · {formatHeight(p.Height)}
-                  {teamName && ` · ${teamName}`}
-                </p>
-              </div>
-              <span className="text-lg shrink-0">{getNationFlag(nations[p.NationalityID || 0])}</span>
-            </Link>
-          );
-        })}
+        {players.length === 0 && (
+          <p className="px-3 py-4 text-xs text-muted-foreground italic">Loading...</p>
+        )}
+        {players.map((p) => (
+          <Link
+            key={p.PlayerID}
+            to={`/player/${p.PlayerID}`}
+            className="flex items-center gap-3 px-3 py-2.5 hover:bg-highlight/20 transition-colors"
+          >
+            <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center text-muted-foreground text-xs font-mono shrink-0 overflow-hidden">
+              {p.headshot_url ? (
+                <img src={p.headshot_url} alt={p.PlayerName} className="w-full h-full object-cover" />
+              ) : (
+                p.Position?.[0] || "?"
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-sans font-medium text-sm text-accent truncate">{p.PlayerName}</p>
+              <p className="text-xs text-muted-foreground font-sans truncate">
+                {p.Position} · {formatHeight(p.Height)}
+                {p.teamName && ` · ${p.teamName}`}
+              </p>
+            </div>
+            <span className="text-lg shrink-0">{getNationFlag(p.nationName)}</span>
+          </Link>
+        ))}
       </div>
     </div>
   );
