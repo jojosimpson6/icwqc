@@ -95,40 +95,65 @@ function ordinal(n: number): string {
 }
 
 // Determine what stage a team reached in a knockout tournament
-// CL knockout rounds are two-legged (pairs of weeks count as one round)
-function getCupStage(matches: { homeId: number; awayId: number; homeScore: number; awayScore: number; weekId: number }[], teamId: number, isCL: boolean): string {
+// Round names come from the NUMBER OF TEAMS in the first knockout round,
+// not from working backwards from the final.
+function getCupStage(
+  matches: { homeId: number; awayId: number; homeScore: number; awayScore: number; weekId: number }[],
+  teamId: number,
+  isCL: boolean
+): string {
   if (matches.length === 0) return "—";
 
   const groupMatches = isCL ? matches.filter(m => m.weekId <= 6) : [];
   const knockoutMatches = isCL ? matches.filter(m => m.weekId > 6) : matches;
 
-  // CL group stage only
-  if (isCL && groupMatches.length > 0 && knockoutMatches.length === 0) {
-    return "Group Stage";
+  // CL: group stage only (no knockout matches for this team)
+  if (isCL && knockoutMatches.length === 0) {
+    return groupMatches.length > 0 ? "Group Stage" : "—";
   }
+  if (knockoutMatches.length === 0) return "—";
 
-  // All weeks in knockout phase
+  // Get all unique knockout weeks (sorted ascending)
   const allKnockoutWeeks = [...new Set(knockoutMatches.map(m => m.weekId))].sort((a, b) => a - b);
-  if (allKnockoutWeeks.length === 0) return isCL ? "Group Stage" : "—";
 
-  // For CL: pair consecutive weeks into rounds (two-legged ties)
-  // Each round = 2 weeks; for cups each week = one round
-  let rounds: number[][] = [];
-  if (isCL) {
-    for (let i = 0; i < allKnockoutWeeks.length; i += 2) {
-      if (i + 1 < allKnockoutWeeks.length) {
-        rounds.push([allKnockoutWeeks[i], allKnockoutWeeks[i + 1]]);
-      } else {
-        rounds.push([allKnockoutWeeks[i]]); // Final is single-legged
-      }
-    }
-  } else {
-    rounds = allKnockoutWeeks.map(w => [w]);
-  }
+  // For CL: consecutive pairs of weeks = one round (two legs)
+  // For cups: each week = one round
+  const rounds: number[][] = isCL
+    ? (() => {
+        const r: number[][] = [];
+        for (let i = 0; i < allKnockoutWeeks.length; i += 2) {
+          if (i + 1 < allKnockoutWeeks.length) r.push([allKnockoutWeeks[i], allKnockoutWeeks[i + 1]]);
+          else r.push([allKnockoutWeeks[i]]);
+        }
+        return r;
+      })()
+    : allKnockoutWeeks.map(w => [w]);
 
   const totalRounds = rounds.length;
 
-  // Find the last round this team participated in
+  // Count teams in first knockout round to determine tournament size
+  const firstRoundWeeks = rounds[0];
+  const firstRoundMatches = knockoutMatches.filter(m => firstRoundWeeks.includes(m.weekId));
+  // Each match has 2 teams; count distinct teams
+  const teamsInFirstRound = new Set<number>();
+  firstRoundMatches.forEach(m => { teamsInFirstRound.add(m.homeId); teamsInFirstRound.add(m.awayId); });
+  const startingTeams = teamsInFirstRound.size; // e.g. 32, 16, 8, 4, 2
+
+  // Round name based on how many teams started THAT round
+  // roundIdx 0 = first round, 1 = second round, etc.
+  const roundName = (roundIdx: number): string => {
+    // Teams at this round = startingTeams / 2^roundIdx
+    const teamsAtRound = Math.round(startingTeams / Math.pow(2, roundIdx));
+    if (teamsAtRound <= 2) return isCL ? "CL Final" : "Final";
+    if (teamsAtRound <= 4) return "Semi-finals";
+    if (teamsAtRound <= 8) return "Quarter-finals";
+    if (teamsAtRound <= 16) return "Round of 16";
+    if (teamsAtRound <= 32) return "Round of 32";
+    if (teamsAtRound <= 64) return "Round of 64";
+    return `Round of ${teamsAtRound}`;
+  };
+
+  // Find the last round this team played in
   const teamKnockoutMatches = knockoutMatches.filter(m => m.homeId === teamId || m.awayId === teamId);
   if (teamKnockoutMatches.length === 0) {
     return isCL && groupMatches.length > 0 ? "Group Stage" : "—";
@@ -136,36 +161,27 @@ function getCupStage(matches: { homeId: number; awayId: number; homeScore: numbe
 
   const lastWeekPlayed = Math.max(...teamKnockoutMatches.map(m => m.weekId));
   const lastRoundIdx = rounds.findIndex(r => r.includes(lastWeekPlayed));
-  const roundsFromEnd = totalRounds - 1 - lastRoundIdx; // 0 = final round, 1 = penultimate, etc.
+  if (lastRoundIdx < 0) return "—";
 
-  // Did the team win the last match in their last round?
-  const lastRoundMatches = teamKnockoutMatches.filter(m => rounds[lastRoundIdx]?.includes(m.weekId));
-  
-  // For two-legged: aggregate scores
+  // Did they WIN their last round? (aggregate over both legs for CL)
+  const lastRoundWeeks = rounds[lastRoundIdx];
+  const lastRoundTeamMatches = teamKnockoutMatches.filter(m => lastRoundWeeks.includes(m.weekId));
   let teamAgg = 0, oppAgg = 0;
-  lastRoundMatches.forEach(m => {
+  lastRoundTeamMatches.forEach(m => {
     const isHome = m.homeId === teamId;
     teamAgg += isHome ? m.homeScore : m.awayScore;
     oppAgg += isHome ? m.awayScore : m.homeScore;
   });
   const wonLastRound = teamAgg > oppAgg;
 
-  // Name the rounds based on how many are left from the end
-  const roundName = (fromEnd: number): string => {
-    if (fromEnd === 0) return isCL ? "CL Final" : "Final";
-    if (fromEnd === 1) return "Semi-finals";
-    if (fromEnd === 2) return "Quarter-finals";
-    if (fromEnd === 3) return "Round of 16";
-    if (fromEnd === 4) return "Round of 32";
-    // For cups with more rounds, name by round number from start
-    const roundNum = lastRoundIdx + 1;
-    return roundNum === 1 ? "First Round" : roundNum === 2 ? "Second Round" : `Round ${roundNum}`;
-  };
+  // If they won the final round, they're champion
+  if (lastRoundIdx === totalRounds - 1 && wonLastRound) return "🏆 Champion";
+  // If they lost the final round, runner-up
+  if (lastRoundIdx === totalRounds - 1 && !wonLastRound) return "Runner-Up";
 
-  if (roundsFromEnd === 0 && wonLastRound) return "🏆 Champion";
-  if (roundsFromEnd === 0 && !wonLastRound) return isCL ? "Runner-Up" : "Runner-Up";
-  // Eliminated in this round
-  return roundName(roundsFromEnd);
+  // Otherwise: they were eliminated in lastRoundIdx, so they reached that round
+  // but didn't advance. Show which round they exited at.
+  return roundName(lastRoundIdx);
 }
 
 export default function TeamPage() {
@@ -397,7 +413,7 @@ export default function TeamPage() {
       });
     }
 
-    registerRows.sort((a, b) => b.SeasonID - a.SeasonID || a.LeagueID - b.LeagueID);
+    registerRows.sort((a, b) => a.SeasonID - b.SeasonID || a.LeagueID - b.LeagueID);
     setSeasonRegister(registerRows);
   }
 
