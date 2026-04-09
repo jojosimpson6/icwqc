@@ -159,14 +159,14 @@ export default function LeadersIndex() {
       const [statsData, minData, pl, lg, teamsData] = await Promise.all([
         fetchAllRows<RawStat>("stats"),
         fetchAllRows<MinRow>("player_season_minutes"),
-        supabase.from("players").select("PlayerID, PlayerName"),
+        fetchAllRows("players", { select: "PlayerID, PlayerName" }),
         supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier"),
         fetchAllRows("teams", { select: "TeamID, FullName" }),
       ]);
       setRawStats(statsData);
       setRawMin(minData);
       const pm = new Map<string, number>();
-      (pl.data || []).forEach((p: any) => { if (p.PlayerName) pm.set(p.PlayerName, p.PlayerID); });
+      (pl || []).forEach((p: any) => { if (p.PlayerName) pm.set(p.PlayerName, p.PlayerID); });
       setPlayerMap(pm);
       if (lg.data) {
         setLeagues(lg.data as LeagueInfo[]);
@@ -461,8 +461,8 @@ export default function LeadersIndex() {
   const statInfo = STATS.find(s => s.key === stat)!;
 
   const renderRow = (entry: any, i: number) => {
-    const isTie = entry._isTie;
-    const pid = isTie ? null : playerMap.get(entry.PlayerName);
+    const isTie = !!entry._isTie;
+    const pid = !isTie ? playerMap.get(entry.PlayerName) : undefined;
     const leagueName = entry.LeagueName || null;
     const leagueId = leagueName ? leagueIdByName.get(leagueName) : null;
     const seasonLink = entry.season && leagueId ? `/league/${leagueId}/history` : null;
@@ -480,7 +480,9 @@ export default function LeadersIndex() {
         })}
         <span className="text-muted-foreground text-xs ml-1">(tie)</span>
       </span>
-    ) : pid ? <Link to={`/player/${pid}`} className="text-accent hover:underline">{entry.PlayerName}</Link> : entry.PlayerName;
+    ) : pid
+      ? <Link to={`/player/${pid}`} className="text-accent hover:underline">{entry.PlayerName}</Link>
+      : <span className="text-foreground">{entry.PlayerName}</span>;
 
     return (
       <tr key={`${entry.PlayerName}-${entry.season}-${i}`}
@@ -616,8 +618,8 @@ export default function LeadersIndex() {
                     {yearlyData.map((group, i) => {
                       const entry = group.entries[0];
                       const lid = group.league ? leagueIdByName.get(group.league) : null;
-                      const isTie = entry._isTie;
-                      const pid = isTie ? null : playerMap.get(entry.PlayerName);
+                      const isTie = !!entry._isTie;
+                      const pid = !isTie ? playerMap.get(entry.PlayerName) : undefined;
                       const playerCell = isTie ? (
                         <span>
                           {(entry._leaders as any[]).map((l: any, li: number) => {
@@ -631,7 +633,9 @@ export default function LeadersIndex() {
                           })}
                           <span className="text-muted-foreground text-xs ml-1">(tie)</span>
                         </span>
-                      ) : pid ? <Link to={`/player/${pid}`} className="text-accent hover:underline">{entry.PlayerName}</Link> : entry.PlayerName;
+                      ) : pid
+                        ? <Link to={`/player/${pid}`} className="text-accent hover:underline">{entry.PlayerName}</Link>
+                        : <span>{entry.PlayerName}</span>;
 
                       return (
                         <tr key={`${group.seasonID}-${group.league}-${i}`}
