@@ -4,13 +4,14 @@ import { supabase } from "@/integrations/supabase/client";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { useSortableTable } from "@/hooks/useSortableTable";
 
-type StatCategory = "Goals" | "GoldenSnitchCatches" | "KeeperSaves" | "GamesPlayed";
+type StatCategory = "Goals" | "GoldenSnitchCatches" | "KeeperSaves" | "KeeperShotsFaced" | "GamesPlayed";
 
-const statLabels: Record<StatCategory, string> = {
-  Goals: "Goals",
-  GoldenSnitchCatches: "Golden Snitch Catches",
-  KeeperSaves: "Keeper Saves",
-  GamesPlayed: "Games Played",
+const statLabels: Record<StatCategory, { label: string; position: string | null }> = {
+  Goals:                 { label: "Goals",              position: "Chaser" },
+  GoldenSnitchCatches:   { label: "Snitch Catches",     position: "Seeker" },
+  KeeperSaves:           { label: "Keeper Saves",       position: "Keeper" },
+  KeeperShotsFaced:      { label: "Shots Faced",        position: "Keeper" },
+  GamesPlayed:           { label: "Games Played",       position: null },
 };
 
 interface StatRow {
@@ -76,7 +77,10 @@ export function LeagueLeaders() {
     ? allStats
     : allStats.filter(s => s.LeagueName === selectedLeague);
 
+  const posFilter = statLabels[category].position;
   const filtered = leagueFilteredStats
+    .filter(s => !posFilter || s.Position === posFilter)
+    .filter(s => ((s[category] as number) || 0) > 0)
     .sort((a, b) => ((b[category] as number) || 0) - ((a[category] as number) || 0))
     .slice(0, 10);
 
@@ -90,9 +94,20 @@ export function LeagueLeaders() {
     <div className="border border-border rounded overflow-hidden">
       <div className="bg-table-header px-3 py-2 flex items-center justify-between flex-wrap gap-2">
         <h3 className="font-display text-sm font-bold text-table-header-foreground">
-          League Leaders — {statLabels[category]} {selectedSeason ? `(${seasonLabel(selectedSeason)})` : ""}
+          League Leaders — {statLabels[category].label} {selectedSeason ? `(${seasonLabel(selectedSeason)})` : ""}
         </h3>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex gap-1">
+            {(Object.keys(statLabels) as StatCategory[]).map(cat => (
+              <button
+                key={cat}
+                onClick={() => setCategory(cat)}
+                className={`text-xs px-2 py-0.5 rounded font-sans ${category === cat ? "bg-accent text-accent-foreground" : "text-table-header-foreground/70 hover:text-table-header-foreground"}`}
+              >
+                {statLabels[cat].label}
+              </button>
+            ))}
+          </div>
           <select
             value={selectedLeague}
             onChange={(e) => setSelectedLeague(e.target.value)}
@@ -124,7 +139,7 @@ export function LeagueLeaders() {
               <th className={`${thClass} text-left`} onClick={() => requestSort("PlayerName")}>Player{sortIndicator("PlayerName")}</th>
               <th className={`${thClass} text-left`} onClick={() => requestSort("FullName")}>Team{sortIndicator("FullName")}</th>
               <th className={`${thClass} text-left`} onClick={() => requestSort("Position")}>Pos{sortIndicator("Position")}</th>
-              <th className={`${thClass} text-right`} onClick={() => requestSort(category)}>{statLabels[category]}{sortIndicator(category)}</th>
+              <th className={`${thClass} text-right`} onClick={() => requestSort(category)}>{statLabels[category].label}{sortIndicator(category)}</th>
             </tr>
           </thead>
           <tbody>
