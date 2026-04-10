@@ -207,6 +207,8 @@ export default function TeamPage() {
   const [resultsOpen, setResultsOpen] = useState(true);
   const [h2hOpen, setH2hOpen] = useState(true);
   const [overallDebutMap, setOverallDebutMap] = useState<Map<string, number>>(new Map());
+  // Maps "leagueId|seasonId" -> all matches in that tournament (for stage calculation)
+  const [allTournamentMatches, setAllTournamentMatches] = useState<Map<string, { homeId: number; awayId: number; homeScore: number; awayScore: number; weekId: number }[]>>(new Map());
   // Result sort
   const [resultSortKey, setResultSortKey] = useState<string>("date");
   const [resultSortDir, setResultSortDir] = useState<"asc" | "desc">("asc");
@@ -383,11 +385,13 @@ export default function TeamPage() {
       });
     }
 
-    // Fetch all cup/CL results in parallel
+    // Fetch all cup/CL results in parallel — two sets:
+    // 1) Team-only results (for GP/GF/GA stats)
+    // 2) ALL matches in the tournament (for stage calculation)
     if (cupPairs.length > 0 && teamId) {
       const cupResultsFetches = cupPairs.map(({ seasonId, leagueId }) =>
         fetchAllRows("results", {
-          select: "HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID,LeagueID,SeasonID",
+          select: "HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID",
           filters: [
             { method: "eq", args: ["LeagueID", leagueId] },
             { method: "eq", args: ["SeasonID", seasonId] },
@@ -395,9 +399,26 @@ export default function TeamPage() {
           ],
         })
       );
-      const allCupResults = await Promise.all(cupResultsFetches);
+      // Fetch ALL matches for each cup tournament (needed for stage calculation)
+      const allMatchesFetches = cupPairs.map(({ seasonId, leagueId }) =>
+        fetchAllRows("results", {
+          select: "HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID",
+          filters: [
+            { method: "eq", args: ["LeagueID", leagueId] },
+            { method: "eq", args: ["SeasonID", seasonId] },
+          ],
+        })
+      );
+      const [allCupResults, allTournamentResultsArr] = await Promise.all([
+        Promise.all(cupResultsFetches),
+        Promise.all(allMatchesFetches),
+      ]);
+
+      const tournamentMap = new Map<string, { homeId: number; awayId: number; homeScore: number; awayScore: number; weekId: number }[]>();
+
       cupPairs.forEach(({ seasonId, leagueId, leagueN, tier }, pi) => {
         const cupResults = allCupResults[pi] || [];
+        const allMatches = allTournamentResultsArr[pi] || [];
         let gp = 0, gf = 0, ga = 0;
         cupResults.forEach((r: any) => {
           gp++;
@@ -405,12 +426,19 @@ export default function TeamPage() {
           gf += isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
           ga += isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
         });
+        // Store all tournament matches for stage display
+        tournamentMap.set(`${leagueId}|${seasonId}`, allMatches.map((r: any) => ({
+          homeId: r.HomeTeamID || 0, awayId: r.AwayTeamID || 0,
+          homeScore: r.HomeTeamScore || 0, awayScore: r.AwayTeamScore || 0,
+          weekId: r.WeekID || 0,
+        })));
         registerRows.push({
           SeasonID: seasonId, LeagueName: leagueN, LeagueTier: tier, LeagueID: leagueId,
           position: null, isChampion: false,
           totalgamesplayed: gp, totalpoints: null, GoalsFor: gf, GoalsAgainst: ga, totalgsc: null,
         });
       });
+      setAllTournamentMatches(tournamentMap);
     }
 
     registerRows.sort((a, b) => a.SeasonID - b.SeasonID || a.LeagueID - b.LeagueID);
@@ -593,17 +621,20 @@ export default function TeamPage() {
             {rows.map((row, i) => {
               const gd = (row.GoalsFor || 0) - (row.GoalsAgainst || 0);
               const posClass = row.isChampion ? "font-bold text-yellow-500" : "";
-              // Compute stage reached for non-domestic
+              // Compute stage reached using ALL tournament matches for accurate round sizing
               const stageReached = !isDomestic ? (() => {
                 const tid = team?.TeamID;
                 if (!tid) return "—";
-                const matches = matchResults.filter(r => r.LeagueID === row.LeagueID && r.SeasonID === row.SeasonID);
-                const matchData = matches.map(r => ({
-                  homeId: r.HomeTeamID || 0,
-                  awayId: r.AwayTeamID || 0,
-                  homeScore: r.HomeTeamScore || 0,
-                  awayScore: r.AwayTeamScore || 0,
-                  weekId: r.WeekID || 0,
+                const tournamentKey = `${row.LeagueID}|${row.SeasonID}`;
+                const allMatches = allTournamentMatches.get(tournamentKey);
+                if (allMatches && allMatches.length > 0) {
+                  return getCupStage(allMatches, tid, !!isCL);
+                }
+                // Fallback: use team-only matches from matchResults
+                const teamMatches = matchResults.filter(r => r.LeagueID === row.LeagueID && r.SeasonID === row.SeasonID);
+                const matchData = teamMatches.map(r => ({
+                  homeId: r.HomeTeamID || 0, awayId: r.AwayTeamID || 0,
+                  homeScore: r.HomeTeamScore || 0, awayScore: r.AwayTeamScore || 0, weekId: r.WeekID || 0,
                 }));
                 return getCupStage(matchData, tid, !!isCL);
               })() : null;

@@ -97,8 +97,18 @@ export default function NationPage() {
       // Get international league IDs (tier 0)
       const intlLeagueIds = (leaguesData || []).filter((l: any) => l.LeagueTier === 0).map((l: any) => l.LeagueID);
 
-      // Find the national team (team with matching nationid in an international league)
-      const natTeam = (teamsData || []).find((t: any) => t.nationid === nid && intlLeagueIds.includes(t.LeagueID));
+      // Find the national team: first try nationid column match, then fall back to TeamID = NationID + 1000
+      let natTeam = (teamsData || []).find((t: any) => t.nationid === nid && intlLeagueIds.includes(t.LeagueID));
+      if (!natTeam) {
+        // Fallback: national team ID = nation ID + 1000 (convention)
+        const inferredTeamId = nid + 1000;
+        natTeam = (teamsData || []).find((t: any) => t.TeamID === inferredTeamId);
+      }
+      if (!natTeam) {
+        // Last resort: any team whose ID > 1000 that matches the nation by name
+        const nationName = (teamsData || []).find((t: any) => t.TeamID === nid + 1000);
+        if (nationName) natTeam = nationName;
+      }
       if (natTeam) {
         setNationalTeam({ TeamID: natTeam.TeamID, FullName: natTeam.FullName, PrimaryColor: natTeam.PrimaryColor, logo_url: natTeam.logo_url });
 
@@ -131,14 +141,10 @@ export default function NationPage() {
             }
           }
         });
-      } else if (intlLeagueIds.length > 0) {
-        fetchAllRows("results", {
-          select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,SnitchCaughtTime",
-          filters: [{ method: "in", args: ["LeagueID", intlLeagueIds] }],
-          order: { column: "MatchID", ascending: false },
-        }).then((rData) => {
-            if (rData) setIntlResults(rData as IntlResult[]);
-          });
+      } else {
+        // No national team found - nothing to show for match history
+        setIntlResults([]);
+        setMatchRosterPlayers([]);
       }
 
       if (playerData && playerData.length > 0) {
