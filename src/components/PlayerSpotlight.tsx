@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAll";
 import { formatHeight, getNationFlag } from "@/lib/helpers";
 
 interface SpotlightPlayer {
@@ -19,7 +20,7 @@ export function PlayerSpotlight() {
 
   useEffect(() => {
     (async () => {
-      // 1. Get latest season ID from matchdays (single fast query)
+      // 1. Get latest season ID
       const { data: mdData } = await supabase
         .from("matchdays")
         .select("SeasonID")
@@ -27,41 +28,44 @@ export function PlayerSpotlight() {
         .limit(1);
       const latestSeason = mdData?.[0]?.SeasonID || 1998;
 
-      // 2. Fetch stats for latest season — get distinct players + team
-      const { data: statsData } = await supabase
-        .from("stats")
-        .select("PlayerName, FullName, Position, GamesPlayed")
-        .eq("SeasonID", latestSeason)
-        .limit(500);
+      // 2. Fetch ALL players active in latest season (paginated)
+      const statsData = await fetchAllRows("stats", {
+        select: "PlayerName, FullName, Position, GamesPlayed",
+        filters: [{ method: "eq", args: ["SeasonID", latestSeason] }],
+      });
 
       if (!statsData || statsData.length === 0) return;
 
-      // Deduplicate by player, pick primary team and position
-      const playerMap = new Map<string, { team: string; pos: string; gp: number }>();
+      // Deduplicate — keep best GP per player
+      const metaMap = new Map<string, { team: string; pos: string; gp: number }>();
       statsData.forEach((s: any) => {
         if (!s.PlayerName) return;
-        const existing = playerMap.get(s.PlayerName);
+        const existing = metaMap.get(s.PlayerName);
         const gp = s.GamesPlayed || 0;
         if (!existing || gp > existing.gp) {
-          playerMap.set(s.PlayerName, { team: s.FullName || "", pos: s.Position || "", gp });
+          metaMap.set(s.PlayerName, { team: s.FullName || "", pos: s.Position || "", gp });
         }
       });
 
-      // Pick 6 random player names
-      const names = [...playerMap.keys()];
-      const shuffled = [...names].sort(() => Math.random() - 0.5).slice(0, 6);
-      if (shuffled.length === 0) return;
+      // True random: use Fisher-Yates on indices
+      const names = [...metaMap.keys()];
+      for (let i = names.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [names[i], names[j]] = [names[j], names[i]];
+      }
+      const chosen = names.slice(0, 6);
+      if (chosen.length === 0) return;
 
-      // 3. Fetch player details for only those 6
+      // 3. Fetch player details for the 6 chosen
       const { data: pData } = await supabase
         .from("players")
         .select("PlayerID, PlayerName, Height, NationalityID, headshot_url")
-        .in("PlayerName", shuffled);
+        .in("PlayerName", chosen);
       if (!pData) return;
 
-      // 4. Fetch nations for just the nationality IDs needed
+      // 4. Fetch nation names
       const natIds = [...new Set(pData.map((p: any) => p.NationalityID).filter(Boolean))];
-      let nationMap = new Map<number, string>();
+      const nationMap = new Map<number, string>();
       if (natIds.length > 0) {
         const { data: nData } = await supabase
           .from("nations")
@@ -74,7 +78,7 @@ export function PlayerSpotlight() {
       }
 
       const result: SpotlightPlayer[] = pData.map((p: any) => {
-        const meta = playerMap.get(p.PlayerName) || { team: "", pos: "", gp: 0 };
+        const meta = metaMap.get(p.PlayerName) || { team: "", pos: "", gp: 0 };
         return {
           PlayerID: p.PlayerID,
           PlayerName: p.PlayerName,
