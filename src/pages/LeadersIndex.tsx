@@ -48,6 +48,14 @@ interface SLLine {
   KS: number;
   KSF: number;
   MIN: number;
+  // Extended stats from player_season_minutes or similar
+  BH: number;
+  TF: number;
+  TP: number;
+  ShotAtt: number;
+  ShotScored: number;
+  PassAtt: number;
+  PassComp: number;
 }
 
 /* career grain */
@@ -63,6 +71,13 @@ interface CareerLine {
   KS: number;
   KSF: number;
   MIN: number;
+  BH: number;
+  TF: number;
+  TP: number;
+  ShotAtt: number;
+  ShotScored: number;
+  PassAtt: number;
+  PassComp: number;
 }
 
 /* progressive entry */
@@ -74,23 +89,41 @@ interface ProgEntry {
 }
 
 /* ── constants ── */
-type StatCat = "GP" | "MIN" | "G" | "MIN_G" | "GSC" | "GSC_PCT" | "MIN_GSC" | "KSF" | "KSF_GP" | "MIN_KSF" | "KS" | "SV_PCT" | "KS_GP";
+type StatCat =
+  | "GP" | "MIN"
+  | "G" | "G_GP" | "SH_PCT" | "PASS_PCT_C" | "MIN_G"
+  | "GSC" | "GSC_PCT" | "MIN_GSC"
+  | "KSF" | "KSF_GP" | "KS" | "SV_PCT" | "KS_GP"
+  | "BH" | "BH_GP" | "TF" | "TF_GP" | "TP" | "TP_GP";
 type RegType = "career" | "active" | "season" | "progressive" | "yearly" | "yby";
 
-const STATS: { key: StatCat; label: string; abbr: string; higher: boolean }[] = [
-  { key: "GP", label: "Games Played", abbr: "GP", higher: true },
-  { key: "MIN", label: "Minutes Played", abbr: "MIN", higher: true },
-  { key: "G", label: "Goals", abbr: "G", higher: true },
-  { key: "MIN_G", label: "Minutes per Goal", abbr: "MIN/G", higher: false },
-  { key: "GSC", label: "Golden Snitch Catches", abbr: "GSC", higher: true },
-  { key: "GSC_PCT", label: "Snitch Percentage", abbr: "GSC%", higher: true },
-  { key: "MIN_GSC", label: "Minutes per Snitch", abbr: "MIN/GSC", higher: false },
-  { key: "KSF", label: "Shots Faced", abbr: "SF", higher: true },
-  { key: "KSF_GP", label: "Shots Faced per Game", abbr: "SF/G", higher: true },
-  { key: "MIN_KSF", label: "Minutes per Shot Faced", abbr: "MIN/SF", higher: false },
-  { key: "KS", label: "Saves", abbr: "SV", higher: true },
-  { key: "SV_PCT", label: "Save Percentage", abbr: "SV%", higher: true },
-  { key: "KS_GP", label: "Saves per Game", abbr: "SV/G", higher: true },
+const STATS: { key: StatCat; label: string; abbr: string; higher: boolean; minGP?: number; requirePos?: string }[] = [
+  // General
+  { key: "GP",        label: "Games Played",           abbr: "GP",      higher: true },
+  { key: "MIN",       label: "Minutes Played",          abbr: "MIN",     higher: true },
+  // Chaser counting
+  { key: "G",         label: "Goals",                   abbr: "G",       higher: true, requirePos: "Chaser" },
+  { key: "G_GP",      label: "Goals per Game",          abbr: "G/GP",    higher: true,  minGP: 10, requirePos: "Chaser" },
+  { key: "SH_PCT",    label: "Shooting Percentage",     abbr: "SH%",     higher: true,  minGP: 10, requirePos: "Chaser" },
+  { key: "PASS_PCT_C",label: "Pass Percentage (Chaser)",abbr: "PASS%",   higher: true,  minGP: 10, requirePos: "Chaser" },
+  { key: "MIN_G",     label: "Minutes per Goal",        abbr: "MIN/G",   higher: false, minGP: 10, requirePos: "Chaser" },
+  // Seeker
+  { key: "GSC",       label: "Snitch Catches",          abbr: "GSC",     higher: true, requirePos: "Seeker" },
+  { key: "GSC_PCT",   label: "Snitch Percentage",       abbr: "GSC%",    higher: true,  minGP: 10, requirePos: "Seeker" },
+  { key: "MIN_GSC",   label: "Minutes per Snitch",      abbr: "MIN/GSC", higher: false, minGP: 10, requirePos: "Seeker" },
+  // Keeper counting
+  { key: "KSF",       label: "Shots Faced",             abbr: "SF",      higher: true, requirePos: "Keeper" },
+  { key: "KSF_GP",    label: "Shots Faced per Game",    abbr: "SF/GP",   higher: true,  minGP: 10, requirePos: "Keeper" },
+  { key: "KS",        label: "Saves",                   abbr: "SV",      higher: true, requirePos: "Keeper" },
+  { key: "SV_PCT",    label: "Save Percentage",         abbr: "SV%",     higher: true,  minGP: 10, requirePos: "Keeper" },
+  { key: "KS_GP",     label: "Saves per Game",          abbr: "SV/GP",   higher: true,  minGP: 10, requirePos: "Keeper" },
+  // Beater counting
+  { key: "BH",        label: "Bludgers Hit",            abbr: "BH",      higher: true, requirePos: "Beater" },
+  { key: "BH_GP",     label: "Bludgers Hit per Game",   abbr: "BH/GP",   higher: true,  minGP: 10, requirePos: "Beater" },
+  { key: "TF",        label: "Turnovers Forced",        abbr: "TF",      higher: true, requirePos: "Beater" },
+  { key: "TF_GP",     label: "Turnovers Forced per Game", abbr: "TF/GP", higher: true,  minGP: 10, requirePos: "Beater" },
+  { key: "TP",        label: "Teammates Protected",     abbr: "TP",      higher: true, requirePos: "Beater" },
+  { key: "TP_GP",     label: "Teammates Protected per Game", abbr: "TP/GP", higher: true, minGP: 10, requirePos: "Beater" },
 ];
 
 const REGS: { key: RegType; label: string }[] = [
@@ -102,29 +135,41 @@ const REGS: { key: RegType; label: string }[] = [
   { key: "yby", label: "Year-by-Year" },
 ];
 
-function val(line: { GP: number; G: number; GSC: number; KS: number; KSF: number; MIN: number }, cat: StatCat): number | null {
-  const { GP, G, GSC, KS, KSF, MIN } = line;
+function val(line: SLLine, cat: StatCat): number | null {
+  const { GP, G, GSC, KS, KSF, MIN, BH, TF, TP, ShotAtt, ShotScored, PassAtt, PassComp } = line;
+  const statDef = STATS.find(s => s.key === cat);
+  const minGP = statDef?.minGP ?? 0;
+  if (GP < minGP) return null;
   switch (cat) {
     case "GP": return GP;
-    case "MIN": return MIN;
-    case "G": return G;
-    case "MIN_G": return G > 0 ? MIN / G : null;
-    case "GSC": return GSC;
-    case "GSC_PCT": return GP > 0 ? GSC / GP : null;
-    case "MIN_GSC": return GSC > 0 ? MIN / GSC : null;
-    case "KSF": return KSF;
-    case "KSF_GP": return GP > 0 ? KSF / GP : null;
-    case "MIN_KSF": return KSF > 0 ? MIN / KSF : null;
-    case "KS": return KS;
+    case "MIN": return MIN > 0 ? MIN : null;
+    case "G": return G > 0 ? G : null;
+    case "G_GP": return GP > 0 && G > 0 ? G / GP : null;
+    case "SH_PCT": return ShotAtt > 0 && G > 0 ? ShotScored / ShotAtt : null;
+    case "PASS_PCT_C": return PassAtt > 0 ? PassComp / PassAtt : null;
+    case "MIN_G": return G > 0 && MIN > 0 ? MIN / G : null;
+    case "GSC": return GSC > 0 ? GSC : null;
+    case "GSC_PCT": return GP > 0 && GSC > 0 ? GSC / GP : null;
+    case "MIN_GSC": return GSC > 0 && MIN > 0 ? MIN / GSC : null;
+    case "KSF": return KSF > 0 ? KSF : null;
+    case "KSF_GP": return GP > 0 && KSF > 0 ? KSF / GP : null;
+    case "KS": return KS > 0 ? KS : null;
     case "SV_PCT": return KSF > 0 ? KS / KSF : null;
-    case "KS_GP": return GP > 0 ? KS / GP : null;
+    case "KS_GP": return GP > 0 && KS > 0 ? KS / GP : null;
+    case "BH": return BH > 0 ? BH : null;
+    case "BH_GP": return GP > 0 && BH > 0 ? BH / GP : null;
+    case "TF": return TF > 0 ? TF : null;
+    case "TF_GP": return GP > 0 && TF > 0 ? TF / GP : null;
+    case "TP": return TP > 0 ? TP : null;
+    case "TP_GP": return GP > 0 && TP > 0 ? TP / GP : null;
   }
 }
 
 function fmt(v: number | null, cat: StatCat): string {
   if (v === null) return "—";
   if (cat === "GSC_PCT" || cat === "SV_PCT") return (v * 100).toFixed(1) + "%";
-  if (["MIN_G", "MIN_GSC", "MIN_KSF", "KSF_GP", "KS_GP"].includes(cat)) return v.toFixed(2);
+  if (cat === "SH_PCT" || cat === "PASS_PCT_C") return (v * 100).toFixed(1) + "%";
+  if (["MIN_G", "MIN_GSC", "KSF_GP", "KS_GP", "G_GP", "BH_GP", "TF_GP", "TP_GP"].includes(cat)) return v.toFixed(2);
   return String(Math.round(v));
 }
 
@@ -218,6 +263,7 @@ export default function LeadersIndex() {
           Nation: s.Nation || "",
           GP: 0, G: 0, GSC: 0, KS: 0, KSF: 0,
           MIN: minMap.get(key) || 0,
+          BH: 0, TF: 0, TP: 0, ShotAtt: 0, ShotScored: 0, PassAtt: 0, PassComp: 0,
         };
         map.set(key, line);
       }
@@ -248,6 +294,9 @@ export default function LeadersIndex() {
         line.KS += sl.KS;
         line.KSF += sl.KSF;
         line.MIN += sl.MIN;
+        line.BH += sl.BH; line.TF += sl.TF; line.TP += sl.TP;
+        line.ShotAtt += sl.ShotAtt; line.ShotScored += sl.ShotScored;
+        line.PassAtt += sl.PassAtt; line.PassComp += sl.PassComp;
         sl.Teams.forEach(t => { if (!line!.Teams.includes(t)) line!.Teams.push(t); });
         sl.Positions.forEach(p => { if (!line!.Positions.includes(p)) line!.Positions.push(p); });
       }
@@ -268,6 +317,7 @@ export default function LeadersIndex() {
           Nation: sl.Nation,
           LatestSeason: sl.SeasonID,
           GP: 0, G: 0, GSC: 0, KS: 0, KSF: 0, MIN: 0,
+          BH: 0, TF: 0, TP: 0, ShotAtt: 0, ShotScored: 0, PassAtt: 0, PassComp: 0,
         };
         map.set(sl.PlayerName, c);
       }
@@ -277,6 +327,9 @@ export default function LeadersIndex() {
       c.KS += sl.KS;
       c.KSF += sl.KSF;
       c.MIN += sl.MIN;
+      c.BH += sl.BH; c.TF += sl.TF; c.TP += sl.TP;
+      c.ShotAtt += sl.ShotAtt; c.ShotScored += sl.ShotScored;
+      c.PassAtt += sl.PassAtt; c.PassComp += sl.PassComp;
       sl.Positions.forEach(p => { if (!c!.Positions.includes(p)) c!.Positions.push(p); });
       if (sl.SeasonID > c.LatestSeason) {
         c.LatestSeason = sl.SeasonID;
@@ -323,22 +376,29 @@ export default function LeadersIndex() {
       // Row for season X shows who had the career-best stat value as of the end of that season
       const info2 = STATS.find(s => s.key === stat)!;
       const allSeasons = [...new Set(seasonLines.map(s => s.SeasonID))].sort((a, b) => a - b);
-      const cum = new Map<string, { GP: number; G: number; GSC: number; KS: number; KSF: number; MIN: number; team: string; Positions: string[]; Nation: string }>();
+      const cum = new Map<string, { GP: number; G: number; GSC: number; KS: number; KSF: number; MIN: number; BH: number; TF: number; TP: number; ShotAtt: number; ShotScored: number; PassAtt: number; PassComp: number; team: string; Positions: string[]; Nation: string }>();
       const entries: any[] = [];
 
       allSeasons.forEach(sid => {
         // Add this season's stats to each player's cumulative total
         seasonLines.filter(s => s.SeasonID === sid).forEach(s => {
           let c = cum.get(s.PlayerName);
-          if (!c) c = { GP: 0, G: 0, GSC: 0, KS: 0, KSF: 0, MIN: 0, team: s.Teams[0] || "", Positions: [], Nation: s.Nation };
+          if (!c) c = { GP: 0, G: 0, GSC: 0, KS: 0, KSF: 0, MIN: 0, BH: 0, TF: 0, TP: 0, ShotAtt: 0, ShotScored: 0, PassAtt: 0, PassComp: 0, team: s.Teams[0] || "", Positions: [], Nation: s.Nation };
           c.GP += s.GP; c.G += s.G; c.GSC += s.GSC; c.KS += s.KS; c.KSF += s.KSF; c.MIN += s.MIN;
+          c.BH += s.BH; c.TF += s.TF; c.TP += s.TP;
+          c.ShotAtt += s.ShotAtt; c.ShotScored += s.ShotScored;
+          c.PassAtt += s.PassAtt; c.PassComp += s.PassComp;
           c.team = s.Teams[0] || c.team;
           s.Positions.forEach(p => { if (!c!.Positions.includes(p)) c!.Positions.push(p); });
           cum.set(s.PlayerName, c);
         });
 
         // Find career leader(s) as of end of this season
-        const snapshot = [...cum.entries()].map(([name, c]) => ({ PlayerName: name, ...c, statVal: val(c, stat) }));
+        const snapshot = [...cum.entries()].map(([name, c]) => ({
+          PlayerName: name, ...c,
+          Teams: [c.team], LeagueName: "", SeasonID: sid,
+          statVal: val(c as any as SLLine, stat),
+        }));
         const valid = snapshot.filter(e => e.statVal !== null);
         if (valid.length === 0) return;
 
