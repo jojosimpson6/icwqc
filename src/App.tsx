@@ -18,6 +18,7 @@ import NationsIndex from "./pages/NationsIndex";
 import NewsArticle from "./pages/NewsArticle";
 import LeagueHistory from "./pages/LeagueHistory";
 import LeadersIndex from "./pages/LeadersIndex";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 
 const queryClient = new QueryClient();
 
@@ -29,7 +30,7 @@ const App = () => (
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Index />} />
-          <Route path="/player/:id" element={<PlayerProfile />} />
+          <Route path="/player/:id" element={<ErrorBoundary><PlayerProfile /></ErrorBoundary>} />
           <Route path="/players" element={<PlayersIndex />} />
           <Route path="/league/:id" element={<LeaguePage />} />
           <Route path="/league/:id/history" element={<LeagueHistory />} />
