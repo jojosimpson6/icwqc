@@ -23,15 +23,38 @@ interface Player {
 }
 
 interface StatLine {
+  PlayerID: number | null;
+  PlayerName: string | null;
   SeasonID: number | null;
   LeagueName: string | null;
   FullName: string | null;
+  Position: string | null;
+  Nation: string | null;
   GamesPlayed: number | null;
+  MinPlayed: number | null;
   Goals: number | null;
-  GoldenSnitchCatches: number | null;
+  ShotAtt: number | null;
+  ShotScored: number | null;
+  PassAtt: number | null;
+  PassComp: number | null;
+  PassCompPct: number | null;
+  ShotAccPct: number | null;
   KeeperSaves: number | null;
   KeeperShotsFaced: number | null;
-  Position: string | null;
+  KeeperShotsParried: number | null;
+  KeeperShotsConceded: number | null;
+  SavePct: number | null;
+  KeeperPassAtt: number | null;
+  KeeperPassComp: number | null;
+  KeeperPassCompPct: number | null;
+  GoldenSnitchCatches: number | null;
+  SnitchSpotted: number | null;
+  CatchAttempts: number | null;
+  CatchRatePct: number | null;
+  BludgersHit: number | null;
+  TurnoversForced: number | null;
+  TeammatesProtected: number | null;
+  BludgerShotsFaced: number | null;
 }
 
 interface LeagueLeaderEntry {
@@ -109,14 +132,15 @@ function seasonLabel(id: number | null): string {
   return `${id - 1}–${String(id).slice(-2)}`;
 }
 
-function ageAtSeasonFromDate(dob: string | null, firstMatchDate: string | null): string {
-  if (!dob || !firstMatchDate) return "—";
+function ageAtSeason(dob: string | null, seasonId: number | null): string {
+  if (!dob || !seasonId) return "—";
+  // Age as of Sep 1 of the season's START year (seasonId is end year, so start = seasonId - 1)
+  const startYear = seasonId - 1;
+  const ref = new Date(startYear, 8, 1); // September 1
   const birth = new Date(dob);
-  const [fy, fm, fd] = firstMatchDate.split("-").map(Number);
-  const refDate = new Date(fy, fm - 1, fd);
-  let age = refDate.getFullYear() - birth.getFullYear();
-  const m = refDate.getMonth() - birth.getMonth();
-  if (m < 0 || (m === 0 && refDate.getDate() < birth.getDate())) age--;
+  let age = ref.getFullYear() - birth.getFullYear();
+  const m = ref.getMonth() - birth.getMonth();
+  if (m < 0 || (m === 0 && ref.getDate() < birth.getDate())) age--;
   return String(age);
 }
 
@@ -125,7 +149,7 @@ function fmtMin(minutes: number | null): string {
   return minutes.toString();
 }
 
-type CompBest = { goals: number; gsc: number; saves: number; gp: number; mins: number };
+type CompBest = { goals: number; gsc: number; saves: number; sf: number; gp: number; mins: number };
 type ExtBest = { shotPct: number | null; passPct: number | null; snitchPct: number | null; svPct: number | null; keeperPassPct: number | null; bludgersHit: number; turnovers: number; teammates: number; sfPerGP: number | null; minPerGoal: number | null };
 
 export default function PlayerProfile() {
@@ -136,9 +160,6 @@ export default function PlayerProfile() {
   const [mostRecentTeam, setMostRecentTeam] = useState<string>("");
   const [leagueLeaders, setLeagueLeaders] = useState<LeagueLeaderEntry[]>([]);
   const [leagueMaxes, setLeagueMaxes] = useState<Map<string, Map<string, number>>>(new Map());
-  const [minutesMap, setMinutesMap] = useState<MinutesMap>(new Map());
-  const [shotsFacedMap, setShotsFacedMap] = useState<MinutesMap>(new Map());
-  const [extStatsMap, setExtStatsMap] = useState<ExtendedStatsMap>(new Map());
   const [matchLog, setMatchLog] = useState<MatchLogEntry[]>([]);
   const [matchLogOpen, setMatchLogOpen] = useState(true);
   const [matchLogSeason, setMatchLogSeason] = useState<number | "all">("all");
@@ -148,23 +169,23 @@ export default function PlayerProfile() {
   const [detectedPositions, setDetectedPositions] = useState<string[]>([]);
   const [playerAwards, setPlayerAwards] = useState<{ awardname: string; placement: number; seasonid: number; leagueid: number; leagueName?: string }[]>([]);
   const [leagueNameMap, setLeagueNameMap] = useState<Map<number, string>>(new Map());
-  const [firstMatchDateMap, setFirstMatchDateMap] = useState<Map<number, string>>(new Map());
   useEffect(() => {
     if (!id) return;
     const pid = parseInt(id);
 
+    // Fetch player bio
     supabase.from("players").select("*").eq("PlayerID", pid).single().then(({ data }) => {
       if (data) {
         setPlayer(data);
         if (data.NationalityID) {
-          supabase.from("nations").select("Nation").eq("NationID", data.NationalityID).order("ValidToDt", { ascending: false }).limit(1).then(({ data: nd }) => {
-            if (nd?.[0]) setNation(nd[0].Nation || "");
-          });
+          supabase.from("nations").select("Nation").eq("NationID", data.NationalityID)
+            .order("ValidToDt", { ascending: false }).limit(1)
+            .then(({ data: nd }) => { if (nd?.[0]) setNation(nd[0].Nation || ""); });
         }
       }
     });
 
-    // Fetch player awards
+    // Fetch player awards + league name map
     Promise.all([
       supabase.from("awards").select("*").eq("playerid", pid).order("seasonid", { ascending: false }).order("awardname").order("placement"),
       supabase.from("leagues").select("LeagueID, LeagueName"),
@@ -180,283 +201,166 @@ export default function PlayerProfile() {
       }
     });
 
-    supabase.from("players").select("PlayerName").eq("PlayerID", pid).single().then(({ data: pData }) => {
-      if (!pData?.PlayerName) return;
-      const playerName = pData.PlayerName;
+    // Fetch all stats from the new player_season_stats view — has everything in one query
+    fetchAllRows("player_season_stats", {
+      select: "*",
+      filters: [{ method: "eq", args: ["PlayerID", pid] }],
+      order: { column: "SeasonID", ascending: true },
+    }).then(async (sData) => {
+      if (!sData || sData.length === 0) return;
+      setStats(sData as StatLine[]);
+      setMostRecentTeam((sData[sData.length - 1] as any).FullName || "");
 
-      fetchAllRows("stats", { select: "*", filters: [{ method: "eq", args: ["PlayerName", playerName] }], order: { column: "SeasonID", ascending: true } }).then(async (sData) => {
-        if (!sData || sData.length === 0) return;
-        setStats(sData as StatLine[]);
-        if (sData.length > 0) {
-          setMostRecentTeam((sData[sData.length - 1] as any).FullName || "");
+      const positions = [...new Set(sData.map((s: any) => s.Position).filter(Boolean))] as string[];
+      setDetectedPositions(positions);
+
+      // Build match log from results (for W/L and opponent info) — still needed for the log
+      const pid2 = pid;
+      const allOrFilters: string[] = [];
+      if (positions.includes("Chaser")) allOrFilters.push(`HomeChaser1ID.eq.${pid2}`,`HomeChaser2ID.eq.${pid2}`,`HomeChaser3ID.eq.${pid2}`,`AwayChaser1ID.eq.${pid2}`,`AwayChaser2ID.eq.${pid2}`,`AwayChaser3ID.eq.${pid2}`);
+      if (positions.includes("Seeker")) allOrFilters.push(`HomeSeekerID.eq.${pid2}`,`AwaySeekerID.eq.${pid2}`);
+      if (positions.includes("Keeper")) allOrFilters.push(`HomeKeeperID.eq.${pid2}`,`AwayKeeperID.eq.${pid2}`);
+      if (positions.includes("Beater")) allOrFilters.push(`HomeBeater1ID.eq.${pid2}`,`HomeBeater2ID.eq.${pid2}`,`AwayBeater1ID.eq.${pid2}`,`AwayBeater2ID.eq.${pid2}`);
+      if (allOrFilters.length === 0) return;
+
+      const [matchData, { data: leaguesData }, teamsData, mdData] = await Promise.all([
+        fetchAllRows("results", {
+          select: "MatchID,SeasonID,LeagueID,WeekID,SnitchCaughtTime,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,HomeKeeperID,AwayKeeperID,HomeSeekerID,AwaySeekerID,HomeChaser1ID,HomeChaser1Goals,HomeChaser2ID,HomeChaser2Goals,HomeChaser3ID,HomeChaser3Goals,AwayChaser1ID,AwayChaser1Goals,AwayChaser2ID,AwayChaser2Goals,AwayChaser3ID,AwayChaser3Goals,IsNeutralSite,HomeBeater1ID,HomeBeater2ID,AwayBeater1ID,AwayBeater2ID,HomeKeeperSaves,AwayKeeperSaves,HomeChaser1ShotAtt,HomeChaser1ShotScored,HomeChaser2ShotAtt,HomeChaser2ShotScored,HomeChaser3ShotAtt,HomeChaser3ShotScored,AwayChaser1ShotAtt,AwayChaser1ShotScored,AwayChaser2ShotAtt,AwayChaser2ShotScored,AwayChaser3ShotAtt,AwayChaser3ShotScored,HomeBeater1BludgersHit,HomeBeater2BludgersHit,AwayBeater1BludgersHit,AwayBeater2BludgersHit",
+          filters: [{ method: "or", args: [allOrFilters.join(",")] }],
+          order: { column: "MatchID", ascending: false },
+        }),
+        supabase.from("leagues").select("LeagueID,LeagueName"),
+        fetchAllRows("teams", { select: "TeamID, FullName" }),
+        fetchAllRows("matchdays", { select: "MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek" }),
+      ]);
+
+      if (!matchData || matchData.length === 0) return;
+      const leagueNameMap2 = new Map<number, string>();
+      (leaguesData || []).forEach((l: any) => { if (l.LeagueID && l.LeagueName) leagueNameMap2.set(l.LeagueID, l.LeagueName); });
+      const teamMap = new Map<number, string>();
+      (teamsData || []).forEach((t: any) => { if (t.TeamID && t.FullName) teamMap.set(t.TeamID, t.FullName); });
+      const mdMap = new Map<string, string>();
+      (mdData || []).forEach((md: any) => { if (md.SeasonID && md.LeagueID && md.MatchdayWeek != null && md.Matchday) mdMap.set(`${md.SeasonID}|${md.LeagueID}|${md.MatchdayWeek}`, md.Matchday); });
+
+      const logEntries: MatchLogEntry[] = [];
+      const seenMatchIds = new Set<number>();
+
+      matchData.forEach((r: Record<string, unknown>) => {
+        const matchId = r.MatchID as number;
+        if (seenMatchIds.has(matchId)) return;
+        seenMatchIds.add(matchId);
+        const sid = r.SeasonID as number;
+        const lid = r.LeagueID as number;
+        const lname = leagueNameMap2.get(lid) || String(lid);
+        const homePlayerIds = [r.HomeChaser1ID, r.HomeChaser2ID, r.HomeChaser3ID, r.HomeKeeperID, r.HomeSeekerID, r.HomeBeater1ID, r.HomeBeater2ID];
+        const isHome = homePlayerIds.includes(pid2);
+        const teamId = isHome ? (r.HomeTeamID as number) : (r.AwayTeamID as number);
+        const oppId = isHome ? (r.AwayTeamID as number) : (r.HomeTeamID as number);
+        const teamScore = (isHome ? r.HomeTeamScore : r.AwayTeamScore) as number || 0;
+        const oppScore = (isHome ? r.AwayTeamScore : r.HomeTeamScore) as number || 0;
+        const isNeutral = !!(r.IsNeutralSite);
+        let matchPos: string | null = null;
+        if ([r.HomeChaser1ID, r.HomeChaser2ID, r.HomeChaser3ID, r.AwayChaser1ID, r.AwayChaser2ID, r.AwayChaser3ID].includes(pid2)) matchPos = "Chaser";
+        else if ([r.HomeSeekerID, r.AwaySeekerID].includes(pid2)) matchPos = "Seeker";
+        else if ([r.HomeKeeperID, r.AwayKeeperID].includes(pid2)) matchPos = "Keeper";
+        else if ([r.HomeBeater1ID, r.HomeBeater2ID, r.AwayBeater1ID, r.AwayBeater2ID].includes(pid2)) matchPos = "Beater";
+
+        let stat = "";
+        if (matchPos === "Chaser") {
+          const chasers = [[r.HomeChaser1ID, r.HomeChaser1Goals], [r.HomeChaser2ID, r.HomeChaser2Goals], [r.HomeChaser3ID, r.HomeChaser3Goals], [r.AwayChaser1ID, r.AwayChaser1Goals], [r.AwayChaser2ID, r.AwayChaser2Goals], [r.AwayChaser3ID, r.AwayChaser3Goals]];
+          const g = chasers.find(([cid]) => cid === pid2)?.[1] as number || 0;
+          stat = String(g);
+        } else if (matchPos === "Seeker") {
+          const caught = r.SnitchCaughtBy === pid2 || (isHome ? r.HomeSeekerID === pid2 && r.HomeTeamScore > (r.AwayTeamScore as number || 0) + 140 : r.AwaySeekerID === pid2 && r.AwayTeamScore > (r.HomeTeamScore as number || 0) + 140);
+          stat = caught ? "1" : "0";
+        } else if (matchPos === "Keeper") {
+          const saves = (isHome ? r.HomeKeeperSaves : r.AwayKeeperSaves) as number || 0;
+          stat = String(saves);
+        } else if (matchPos === "Beater") {
+          const bhField = isHome ? (r.HomeBeater1ID === pid2 ? r.HomeBeater1BludgersHit : r.HomeBeater2BludgersHit) : (r.AwayBeater1ID === pid2 ? r.AwayBeater1BludgersHit : r.AwayBeater2BludgersHit);
+          stat = String(bhField as number || 0);
         }
 
-        // Detect all positions played
-        const positions = [...new Set(sData.map(s => s.Position).filter(Boolean))] as string[];
-        setDetectedPositions(positions);
-
-        // Fetch match data for minutes/shots using ALL position filters
-        const allOrFilters: string[] = [];
-        if (positions.includes("Chaser")) {
-          allOrFilters.push(`HomeChaser1ID.eq.${pid}`, `HomeChaser2ID.eq.${pid}`, `HomeChaser3ID.eq.${pid}`, `AwayChaser1ID.eq.${pid}`, `AwayChaser2ID.eq.${pid}`, `AwayChaser3ID.eq.${pid}`);
-        }
-        if (positions.includes("Seeker")) {
-          allOrFilters.push(`HomeSeekerID.eq.${pid}`, `AwaySeekerID.eq.${pid}`);
-        }
-        if (positions.includes("Keeper")) {
-          allOrFilters.push(`HomeKeeperID.eq.${pid}`, `AwayKeeperID.eq.${pid}`);
-        }
-        if (positions.includes("Beater")) {
-          allOrFilters.push(`HomeBeater1ID.eq.${pid}`, `HomeBeater2ID.eq.${pid}`, `AwayBeater1ID.eq.${pid}`, `AwayBeater2ID.eq.${pid}`);
-        }
-
-        if (allOrFilters.length > 0) {
-          Promise.all([
-            fetchAllRows("results", {
-              select: "MatchID,SeasonID,LeagueID,WeekID,SnitchCaughtTime,SnitchCaughtBy,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,HomeKeeperShotsFaced,AwayKeeperShotsFaced,HomeKeeperID,AwayKeeperID,HomeKeeperSaves,AwayKeeperSaves,HomeBeater1ID,HomeBeater2ID,AwayBeater1ID,AwayBeater2ID,HomeSeekerID,AwaySeekerID,HomeChaser1ID,HomeChaser1Goals,HomeChaser2ID,HomeChaser2Goals,HomeChaser3ID,HomeChaser3Goals,AwayChaser1ID,AwayChaser1Goals,AwayChaser2ID,AwayChaser2Goals,AwayChaser3ID,AwayChaser3Goals,IsNeutralSite,HomeChaser1PassAtt,HomeChaser1PassComp,HomeChaser1ShotAtt,HomeChaser1ShotScored,HomeChaser2PassAtt,HomeChaser2PassComp,HomeChaser2ShotAtt,HomeChaser2ShotScored,HomeChaser3PassAtt,HomeChaser3PassComp,HomeChaser3ShotAtt,HomeChaser3ShotScored,AwayChaser1PassAtt,AwayChaser1PassComp,AwayChaser1ShotAtt,AwayChaser1ShotScored,AwayChaser2PassAtt,AwayChaser2PassComp,AwayChaser2ShotAtt,AwayChaser2ShotScored,AwayChaser3PassAtt,AwayChaser3PassComp,AwayChaser3ShotAtt,AwayChaser3ShotScored,HomeKeeperPassAtt,HomeKeeperPassComp,HomeKeeperShotsSaved,HomeKeeperShotsParried,HomeKeeperShotsConceded,AwayKeeperPassAtt,AwayKeeperPassComp,AwayKeeperShotsSaved,AwayKeeperShotsParried,AwayKeeperShotsConceded,HomeBeater1BludgersHit,HomeBeater1TurnoversForced,HomeBeater1TeammatesProtected,HomeBeater1BludgerShotsFaced,HomeBeater2BludgersHit,HomeBeater2TurnoversForced,HomeBeater2TeammatesProtected,HomeBeater2BludgerShotsFaced,AwayBeater1BludgersHit,AwayBeater1TurnoversForced,AwayBeater1TeammatesProtected,AwayBeater1BludgerShotsFaced,AwayBeater2BludgersHit,AwayBeater2TurnoversForced,AwayBeater2TeammatesProtected,AwayBeater2BludgerShotsFaced,HomeSeekerSnitchSpotted,HomeSeekerCatchAttempts,AwaySeekerSnitchSpotted,AwaySeekerCatchAttempts",
-              filters: [{ method: "or", args: [allOrFilters.join(",")] }],
-              order: { column: "MatchID", ascending: false },
-            }),
-            supabase.from("leagues").select("LeagueID,LeagueName"),
-            fetchAllRows("teams", { select: "TeamID, FullName" }),
-            fetchAllRows("matchdays", { select: "MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek" }),
-          ]).then(([matchData, { data: leaguesData }, teamsData, mdData]) => {
-            if (!matchData || matchData.length === 0) return;
-
-            const leagueNameMap = new Map<number, string>();
-            (leaguesData || []).forEach((l: { LeagueID: number; LeagueName: string | null }) => {
-              if (l.LeagueID && l.LeagueName) leagueNameMap.set(l.LeagueID, l.LeagueName);
-            });
-
-            const teamNameMap = new Map<number, string>();
-            (teamsData || []).forEach((t: any) => {
-              if (t.TeamID) teamNameMap.set(t.TeamID, t.FullName);
-            });
-
-            const mdMap = new Map<string, string>();
-            const fmdMap = new Map<number, string>();
-            (mdData || []).forEach((md: any) => {
-              if (md.SeasonID && md.LeagueID && md.MatchdayWeek != null && md.Matchday) {
-                mdMap.set(`${md.SeasonID}|${md.LeagueID}|${md.MatchdayWeek}`, md.Matchday);
-              }
-              if (md.SeasonID && md.Matchday) {
-                const existing = fmdMap.get(md.SeasonID);
-                if (!existing || md.Matchday < existing) fmdMap.set(md.SeasonID, md.Matchday);
-              }
-            });
-
-            const minsMap = new Map<string, number>();
-            const sfMap = new Map<string, number>();
-            const extMap: ExtendedStatsMap = new Map();
-            const logEntries: MatchLogEntry[] = [];
-            const seenMatchIds = new Set<number>();
-
-            const getExt = (key: string): ExtendedStats => {
-              if (!extMap.has(key)) extMap.set(key, { passAtt: 0, passComp: 0, shotAtt: 0, shotScored: 0, bludgersHit: 0, turnoversForced: 0, teammatesProtected: 0, bludgerShotsFaced: 0, snitchSpotted: 0, catchAttempts: 0, keeperShotsSaved: 0, keeperShotsParried: 0, keeperShotsConceded: 0 });
-              return extMap.get(key)!;
-            };
-
-            matchData.forEach((r: Record<string, unknown>) => {
-              const matchId = r.MatchID as number;
-              if (seenMatchIds.has(matchId)) return;
-              seenMatchIds.add(matchId);
-
-              const sid = r.SeasonID as number;
-              const lid = r.LeagueID as number;
-              const lname = leagueNameMap.get(lid) || String(lid);
-              const key = `${sid}|${lname}`;
-              const matchMins = (r.SnitchCaughtTime as number) || 0;
-              minsMap.set(key, (minsMap.get(key) || 0) + matchMins);
-
-              const homePlayerIds = [r.HomeChaser1ID, r.HomeChaser2ID, r.HomeChaser3ID, r.HomeKeeperID, r.HomeSeekerID, r.HomeBeater1ID, r.HomeBeater2ID];
-              const isHome = homePlayerIds.includes(pid);
-
-              let matchPos: string | null = null;
-              if ([r.HomeChaser1ID, r.HomeChaser2ID, r.HomeChaser3ID, r.AwayChaser1ID, r.AwayChaser2ID, r.AwayChaser3ID].includes(pid)) matchPos = "Chaser";
-              else if ([r.HomeSeekerID, r.AwaySeekerID].includes(pid)) matchPos = "Seeker";
-              else if ([r.HomeKeeperID, r.AwayKeeperID].includes(pid)) matchPos = "Keeper";
-              else if ([r.HomeBeater1ID, r.HomeBeater2ID, r.AwayBeater1ID, r.AwayBeater2ID].includes(pid)) matchPos = "Beater";
-
-              if (matchPos === "Beater" || matchPos === "Keeper") {
-                const sf = isHome ? (r.HomeKeeperShotsFaced as number) || 0 : (r.AwayKeeperShotsFaced as number) || 0;
-                sfMap.set(key, (sfMap.get(key) || 0) + sf);
-              }
-
-              // Aggregate extended stats
-              const ext = getExt(key);
-              if (matchPos === "Chaser") {
-                const prefix = isHome ? "Home" : "Away";
-                const chaserNum = isHome
-                  ? (r.HomeChaser1ID === pid ? 1 : r.HomeChaser2ID === pid ? 2 : 3)
-                  : (r.AwayChaser1ID === pid ? 1 : r.AwayChaser2ID === pid ? 2 : 3);
-                ext.passAtt += (r[`${prefix}Chaser${chaserNum}PassAtt`] as number) || 0;
-                ext.passComp += (r[`${prefix}Chaser${chaserNum}PassComp`] as number) || 0;
-                ext.shotAtt += (r[`${prefix}Chaser${chaserNum}ShotAtt`] as number) || 0;
-                ext.shotScored += (r[`${prefix}Chaser${chaserNum}ShotScored`] as number) || 0;
-              } else if (matchPos === "Keeper") {
-                const prefix = isHome ? "Home" : "Away";
-                ext.passAtt += (r[`${prefix}KeeperPassAtt`] as number) || 0;
-                ext.passComp += (r[`${prefix}KeeperPassComp`] as number) || 0;
-                ext.keeperShotsSaved += (r[`${prefix}KeeperShotsSaved`] as number) || 0;
-                ext.keeperShotsParried += (r[`${prefix}KeeperShotsParried`] as number) || 0;
-                ext.keeperShotsConceded += (r[`${prefix}KeeperShotsConceded`] as number) || 0;
-              } else if (matchPos === "Beater") {
-                const prefix = isHome ? "Home" : "Away";
-                const beaterNum = isHome
-                  ? (r.HomeBeater1ID === pid ? 1 : 2)
-                  : (r.AwayBeater1ID === pid ? 1 : 2);
-                ext.bludgersHit += (r[`${prefix}Beater${beaterNum}BludgersHit`] as number) || 0;
-                ext.turnoversForced += (r[`${prefix}Beater${beaterNum}TurnoversForced`] as number) || 0;
-                ext.teammatesProtected += (r[`${prefix}Beater${beaterNum}TeammatesProtected`] as number) || 0;
-                ext.bludgerShotsFaced += (r[`${prefix}Beater${beaterNum}BludgerShotsFaced`] as number) || 0;
-              } else if (matchPos === "Seeker") {
-                const prefix = isHome ? "Home" : "Away";
-                ext.snitchSpotted += (r[`${prefix}SeekerSnitchSpotted`] as number) || 0;
-                ext.catchAttempts += (r[`${prefix}SeekerCatchAttempts`] as number) || 0;
-              }
-
-              const oppId = isHome ? (r.AwayTeamID as number) : (r.HomeTeamID as number);
-              const teamScore = isHome ? (r.HomeTeamScore as number) ?? 0 : (r.AwayTeamScore as number) ?? 0;
-              const oppScore = isHome ? (r.AwayTeamScore as number) ?? 0 : (r.HomeTeamScore as number) ?? 0;
-              const weekId = r.WeekID as number;
-              const dateStr = weekId && sid && lid ? mdMap.get(`${sid}|${lid}|${weekId}`) || null : null;
-              const isNeutral = (r.IsNeutralSite as number) === 1;
-
-              let statStr = "";
-              if (matchPos === "Chaser") {
-                let goals = 0;
-                if (isHome) {
-                  if (r.HomeChaser1ID === pid) goals = (r.HomeChaser1Goals as number) || 0;
-                  else if (r.HomeChaser2ID === pid) goals = (r.HomeChaser2Goals as number) || 0;
-                  else if (r.HomeChaser3ID === pid) goals = (r.HomeChaser3Goals as number) || 0;
-                } else {
-                  if (r.AwayChaser1ID === pid) goals = (r.AwayChaser1Goals as number) || 0;
-                  else if (r.AwayChaser2ID === pid) goals = (r.AwayChaser2Goals as number) || 0;
-                  else if (r.AwayChaser3ID === pid) goals = (r.AwayChaser3Goals as number) || 0;
-                }
-                statStr = `${goals} goals`;
-              } else if (matchPos === "Keeper") {
-                const saves = isHome ? (r.HomeKeeperSaves as number) || 0 : (r.AwayKeeperSaves as number) || 0;
-                const sf = isHome ? (r.HomeKeeperShotsFaced as number) || 0 : (r.AwayKeeperShotsFaced as number) || 0;
-                statStr = `${saves}/${sf} saves`;
-              } else if (matchPos === "Seeker") {
-                const snitchTeam = r.SnitchCaughtBy as number;
-                const myTeam = isHome ? (r.HomeTeamID as number) : (r.AwayTeamID as number);
-                statStr = snitchTeam === myTeam ? "✓ Caught" : "—";
-              } else if (matchPos === "Beater") {
-                const prefix = isHome ? "Home" : "Away";
-                const beaterNum = isHome ? (r.HomeBeater1ID === pid ? 1 : 2) : (r.AwayBeater1ID === pid ? 1 : 2);
-                const bh = (r[`${prefix}Beater${beaterNum}BludgersHit`] as number) || 0;
-                const tf = (r[`${prefix}Beater${beaterNum}TurnoversForced`] as number) || 0;
-                statStr = `${bh} BH, ${tf} TF`;
-              }
-
-              logEntries.push({
-                MatchID: matchId,
-                SeasonID: sid,
-                opponentName: teamNameMap.get(oppId) || `Team ${oppId}`,
-                isHome,
-                isNeutral,
-                teamScore,
-                oppScore,
-                stat: statStr,
-                date: dateStr,
-                leagueName: lname,
-              });
-            });
-
-            setMinutesMap(minsMap);
-            setShotsFacedMap(sfMap);
-            setExtStatsMap(extMap);
-            setMatchLog(logEntries);
-            setFirstMatchDateMap(fmdMap);
-          });
-        }
-
-        // League leaders logic - fetch one season at a time to avoid timeout
-        const seasonIds = [...new Set(sData.map(s => s.SeasonID).filter(Boolean))] as number[];
-        if (seasonIds.length === 0) return;
-
-        const maxMap = new Map<string, Map<string, number>>();
-        const awardEntries: LeagueLeaderEntry[] = [];
-
-        for (const sid of seasonIds) {
-          const seasonStats = await fetchAllRows("stats", {
-            select: "PlayerName,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,GamesPlayed,Position,SeasonID,LeagueName",
-            filters: [{ method: "eq", args: ["SeasonID", sid] }],
-          });
-          if (!seasonStats || seasonStats.length === 0) continue;
-
-          const grouped = new Map<string, typeof seasonStats>();
-          seasonStats.forEach((r: Record<string, unknown>) => {
-            const key = `${r.SeasonID}|${r.LeagueName}`;
-            if (!grouped.has(key)) grouped.set(key, []);
-            grouped.get(key)!.push(r as typeof seasonStats[0]);
-          });
-
-          grouped.forEach((rows, pairKey) => {
-            const [, ln] = pairKey.split("|");
-            const statMaxes = new Map<string, number>();
-
-            const chasers = rows.filter((r: Record<string, unknown>) => r.Position === "Chaser");
-            if (chasers.length) {
-              const sorted = [...chasers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.Goals as number) || 0) - ((a.Goals as number) || 0));
-              statMaxes.set("Goals", (sorted[0]?.Goals as number) || 0);
-              const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
-              if (rank > 0 && rank <= 5) awardEntries.push({ SeasonID: sid, LeagueName: ln, stat: "Goals", value: (sorted[rank - 1]?.Goals as number) || 0, rank, scope: "league" });
-            }
-            const seekers = rows.filter((r: Record<string, unknown>) => r.Position === "Seeker");
-            if (seekers.length) {
-              const sorted = [...seekers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.GoldenSnitchCatches as number) || 0) - ((a.GoldenSnitchCatches as number) || 0));
-              statMaxes.set("GoldenSnitchCatches", (sorted[0]?.GoldenSnitchCatches as number) || 0);
-              const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
-              if (rank > 0 && rank <= 5) awardEntries.push({ SeasonID: sid, LeagueName: ln, stat: "Golden Snitch Catches", value: (sorted[rank - 1]?.GoldenSnitchCatches as number) || 0, rank, scope: "league" });
-            }
-            const keepers = rows.filter((r: Record<string, unknown>) => r.Position === "Keeper");
-            if (keepers.length) {
-              const sorted = [...keepers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.KeeperSaves as number) || 0) - ((a.KeeperSaves as number) || 0));
-              statMaxes.set("KeeperSaves", (sorted[0]?.KeeperSaves as number) || 0);
-              const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
-              if (rank > 0 && rank <= 5) awardEntries.push({ SeasonID: sid, LeagueName: ln, stat: "Keeper Saves", value: (sorted[rank - 1]?.KeeperSaves as number) || 0, rank, scope: "league" });
-            }
-
-            maxMap.set(pairKey, statMaxes);
-          });
-
-          // Combined all-league rankings for this season
-          const allChasers = seasonStats.filter((r: Record<string, unknown>) => r.Position === "Chaser");
-          if (allChasers.length) {
-            const sorted = [...allChasers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.Goals as number) || 0) - ((a.Goals as number) || 0));
-            const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
-            if (rank > 0 && rank <= 10 && !awardEntries.some(e => e.SeasonID === sid && e.stat === "Goals" && e.scope === "league")) {
-              awardEntries.push({ SeasonID: sid, LeagueName: "All Leagues", stat: "Goals", value: (sorted[rank - 1]?.Goals as number) || 0, rank, scope: "combined" });
-            }
-          }
-          const allSeekers = seasonStats.filter((r: Record<string, unknown>) => r.Position === "Seeker");
-          if (allSeekers.length) {
-            const sorted = [...allSeekers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.GoldenSnitchCatches as number) || 0) - ((a.GoldenSnitchCatches as number) || 0));
-            const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
-            if (rank > 0 && rank <= 10 && !awardEntries.some(e => e.SeasonID === sid && e.stat === "Golden Snitch Catches" && e.scope === "league")) {
-              awardEntries.push({ SeasonID: sid, LeagueName: "All Leagues", stat: "Golden Snitch Catches", value: (sorted[rank - 1]?.GoldenSnitchCatches as number) || 0, rank, scope: "combined" });
-            }
-          }
-          const allKeepers = seasonStats.filter((r: Record<string, unknown>) => r.Position === "Keeper");
-          if (allKeepers.length) {
-            const sorted = [...allKeepers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.KeeperSaves as number) || 0) - ((a.KeeperSaves as number) || 0));
-            const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
-            if (rank > 0 && rank <= 10 && !awardEntries.some(e => e.SeasonID === sid && e.stat === "Keeper Saves" && e.scope === "league")) {
-              awardEntries.push({ SeasonID: sid, LeagueName: "All Leagues", stat: "Keeper Saves", value: (sorted[rank - 1]?.KeeperSaves as number) || 0, rank, scope: "combined" });
-            }
-          }
-        }
-
-        setLeagueMaxes(maxMap);
-        awardEntries.sort((a, b) => {
-          if (a.scope !== b.scope) return a.scope === "league" ? -1 : 1;
-          return b.SeasonID - a.SeasonID;
+        const weekId = r.WeekID as number;
+        const dateStr = mdMap.get(`${sid}|${lid}|${weekId}`) || null;
+        logEntries.push({
+          MatchID: matchId, SeasonID: sid,
+          opponentName: teamMap.get(oppId) || String(oppId),
+          isHome, isNeutral, teamScore, oppScore, stat,
+          date: dateStr,
+          leagueName: lname,
         });
-        setLeagueLeaders(awardEntries);
       });
+
+      logEntries.sort((a, b) => (a.SeasonID || 0) - (b.SeasonID || 0) || (a.date || "").localeCompare(b.date || ""));
+      setMatchLog(logEntries);
+
+      // Build league maxes for leader highlighting — use player_season_stats for all players
+      const playerName = (sData[0] as any).PlayerName;
+      const seasonIds = [...new Set(sData.map((s: any) => s.SeasonID).filter(Boolean))] as number[];
+      const maxMap = new Map<string, Map<string, number>>();
+      const awardEntries: LeagueLeaderEntry[] = [];
+
+      for (const sid of seasonIds) {
+        const seasonStats = await fetchAllRows("player_season_stats", {
+          select: "PlayerName,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,GamesPlayed,Position,SeasonID,LeagueName",
+          filters: [{ method: "eq", args: ["SeasonID", sid] }],
+        });
+        if (!seasonStats || seasonStats.length === 0) continue;
+        const grouped = new Map<string, typeof seasonStats>();
+        seasonStats.forEach((r: Record<string, unknown>) => {
+          const key = `${r.SeasonID}|${r.LeagueName}`;
+          if (!grouped.has(key)) grouped.set(key, []);
+          grouped.get(key)!.push(r as typeof seasonStats[0]);
+        });
+        grouped.forEach((rows, pairKey) => {
+          const [, ln] = pairKey.split("|");
+          const statMaxes = new Map<string, number>();
+          const chasers = rows.filter((r: Record<string, unknown>) => r.Position === "Chaser");
+          if (chasers.length) {
+            const sorted = [...chasers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.Goals as number) || 0) - ((a.Goals as number) || 0));
+            statMaxes.set("Goals", (sorted[0]?.Goals as number) || 0);
+            const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
+            if (rank > 0 && rank <= 5) awardEntries.push({ SeasonID: sid, LeagueName: ln, stat: "Goals", value: (sorted[rank - 1]?.Goals as number) || 0, rank, scope: "league" });
+          }
+          const seekers = rows.filter((r: Record<string, unknown>) => r.Position === "Seeker");
+          if (seekers.length) {
+            const sorted = [...seekers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.GoldenSnitchCatches as number) || 0) - ((a.GoldenSnitchCatches as number) || 0));
+            statMaxes.set("GoldenSnitchCatches", (sorted[0]?.GoldenSnitchCatches as number) || 0);
+            const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
+            if (rank > 0 && rank <= 5) awardEntries.push({ SeasonID: sid, LeagueName: ln, stat: "Golden Snitch Catches", value: (sorted[rank - 1]?.GoldenSnitchCatches as number) || 0, rank, scope: "league" });
+          }
+          const keepers = rows.filter((r: Record<string, unknown>) => r.Position === "Keeper");
+          if (keepers.length) {
+            const sorted = [...keepers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.KeeperSaves as number) || 0) - ((a.KeeperSaves as number) || 0));
+            statMaxes.set("KeeperSaves", (sorted[0]?.KeeperSaves as number) || 0);
+            const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
+            if (rank > 0 && rank <= 5) awardEntries.push({ SeasonID: sid, LeagueName: ln, stat: "Keeper Saves", value: (sorted[rank - 1]?.KeeperSaves as number) || 0, rank, scope: "league" });
+          }
+          maxMap.set(pairKey, statMaxes);
+        });
+        const allChasers = seasonStats.filter((r: Record<string, unknown>) => r.Position === "Chaser");
+        if (allChasers.length) {
+          const sorted = [...allChasers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.Goals as number) || 0) - ((a.Goals as number) || 0));
+          const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
+          if (rank > 0 && rank <= 10 && !awardEntries.some(e => e.SeasonID === sid && e.stat === "Goals" && e.scope === "league")) awardEntries.push({ SeasonID: sid, LeagueName: "All Leagues", stat: "Goals", value: (sorted[rank - 1]?.Goals as number) || 0, rank, scope: "combined" });
+        }
+        const allSeekers = seasonStats.filter((r: Record<string, unknown>) => r.Position === "Seeker");
+        if (allSeekers.length) {
+          const sorted = [...allSeekers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.GoldenSnitchCatches as number) || 0) - ((a.GoldenSnitchCatches as number) || 0));
+          const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
+          if (rank > 0 && rank <= 10 && !awardEntries.some(e => e.SeasonID === sid && e.stat === "Golden Snitch Catches" && e.scope === "league")) awardEntries.push({ SeasonID: sid, LeagueName: "All Leagues", stat: "Golden Snitch Catches", value: (sorted[rank - 1]?.GoldenSnitchCatches as number) || 0, rank, scope: "combined" });
+        }
+        const allKeepers = seasonStats.filter((r: Record<string, unknown>) => r.Position === "Keeper");
+        if (allKeepers.length) {
+          const sorted = [...allKeepers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.KeeperSaves as number) || 0) - ((a.KeeperSaves as number) || 0));
+          const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
+          if (rank > 0 && rank <= 10 && !awardEntries.some(e => e.SeasonID === sid && e.stat === "Keeper Saves" && e.scope === "league")) awardEntries.push({ SeasonID: sid, LeagueName: "All Leagues", stat: "Keeper Saves", value: (sorted[rank - 1]?.KeeperSaves as number) || 0, rank, scope: "combined" });
+        }
+      }
+      setLeagueMaxes(maxMap);
+      awardEntries.sort((a, b) => { if (a.scope !== b.scope) return a.scope === "league" ? -1 : 1; return b.SeasonID - a.SeasonID; });
+      setLeagueLeaders(awardEntries);
     });
   }, [id]);
 
@@ -493,14 +397,25 @@ export default function PlayerProfile() {
     gsc: stats.reduce((s, r) => s + (r.GoldenSnitchCatches || 0), 0),
     saves: stats.reduce((s, r) => s + (r.KeeperSaves || 0), 0),
     shotsFaced: stats.reduce((s, r) => s + (r.KeeperShotsFaced || 0), 0),
-    minutes: [...minutesMap.values()].reduce((a, b) => a + b, 0),
+    minutes: stats.reduce((s, r) => s + (r.MinPlayed || 0), 0),
+    shotAtt: stats.reduce((s, r) => s + (r.ShotAtt || 0), 0),
+    shotScored: stats.reduce((s, r) => s + (r.ShotScored || 0), 0),
+    passAtt: stats.reduce((s, r) => s + (r.PassAtt || 0), 0),
+    passComp: stats.reduce((s, r) => s + (r.PassComp || 0), 0),
+    keeperPassAtt: stats.reduce((s, r) => s + (r.KeeperPassAtt || 0), 0),
+    keeperPassComp: stats.reduce((s, r) => s + (r.KeeperPassComp || 0), 0),
+    bludgersHit: stats.reduce((s, r) => s + (r.BludgersHit || 0), 0),
+    turnoversForced: stats.reduce((s, r) => s + (r.TurnoversForced || 0), 0),
+    teammatesProtected: stats.reduce((s, r) => s + (r.TeammatesProtected || 0), 0),
+    bludgerShotsFaced: stats.reduce((s, r) => s + (r.BludgerShotsFaced || 0), 0),
+    snitchSpotted: stats.reduce((s, r) => s + (r.SnitchSpotted || 0), 0),
   };
 
   const allTimeGoals = Math.max(0, ...stats.filter(s => s.Position === "Chaser").map(s => s.Goals || 0));
   const allTimeGSC = Math.max(0, ...stats.filter(s => s.Position === "Seeker").map(s => s.GoldenSnitchCatches || 0));
   const allTimeSaves = Math.max(0, ...stats.filter(s => s.Position === "Keeper").map(s => s.KeeperSaves || 0));
   const allTimeGP = Math.max(0, ...stats.map(s => s.GamesPlayed || 0));
-  const allTimeMinutes = minutesMap.size > 0 ? Math.max(0, ...[...minutesMap.values()]) : 0;
+  const allTimeMinutes = Math.max(0, ...stats.map(s => s.MinPlayed || 0));
 
   // Competition ordering within the same season
   const compOrder: Record<string, number> = {
@@ -544,59 +459,54 @@ export default function PlayerProfile() {
   const bestByComp = new Map<string, CompBest>();
   const bestExtByComp = new Map<string, ExtBest>();
 
-  const updateBests = (key: string, s: typeof stats[0], mKey: string) => {
-    const mins = minutesMap.get(mKey) || 0;
-    const ext = extStatsMap.get(mKey);
-    const sfFromResults = shotsFacedMap.get(mKey) || 0;
-    const existing = bestByComp.get(key) || { goals: 0, gsc: 0, saves: 0, gp: 0, mins: 0 };
+  const updateBests = (key: string, s: typeof stats[0]) => {
+    const mins = s.MinPlayed || 0;
+    const existing = bestByComp.get(key) || { goals: 0, gsc: 0, saves: 0, sf: 0, gp: 0, mins: 0 };
     const existingExt = bestExtByComp.get(key) || { shotPct: null, passPct: null, snitchPct: null, svPct: null, keeperPassPct: null, bludgersHit: 0, turnovers: 0, teammates: 0, sfPerGP: null, minPerGoal: null };
     if ((s.Goals || 0) > existing.goals) existing.goals = s.Goals || 0;
     if ((s.GoldenSnitchCatches || 0) > existing.gsc) existing.gsc = s.GoldenSnitchCatches || 0;
     if ((s.KeeperSaves || 0) > existing.saves) existing.saves = s.KeeperSaves || 0;
+    if ((s.KeeperShotsFaced || 0) > existing.sf) existing.sf = s.KeeperShotsFaced || 0;
     if ((s.GamesPlayed || 0) > existing.gp) existing.gp = s.GamesPlayed || 0;
     if (mins > existing.mins) existing.mins = mins;
-    if (ext && ext.shotAtt > 0) { const v = (ext.shotScored / ext.shotAtt) * 100; if (existingExt.shotPct === null || v > existingExt.shotPct) existingExt.shotPct = v; }
-    if (ext && ext.passAtt > 0 && s.Position === "Chaser") { const v = (ext.passComp / ext.passAtt) * 100; if (existingExt.passPct === null || v > existingExt.passPct) existingExt.passPct = v; }
-    if (ext && ext.passAtt > 0 && s.Position === "Keeper") { const v = (ext.passComp / ext.passAtt) * 100; if (existingExt.keeperPassPct === null || v > existingExt.keeperPassPct) existingExt.keeperPassPct = v; }
+    const shotAtt = s.ShotAtt || 0; const shotScored = s.ShotScored || 0;
+    const passAtt = s.PassAtt || 0; const passComp = s.PassComp || 0;
+    const kPassAtt = s.KeeperPassAtt || 0; const kPassComp = s.KeeperPassComp || 0;
+    const bh = s.BludgersHit || 0; const tf = s.TurnoversForced || 0; const tp = s.TeammatesProtected || 0;
+    const bsf = s.BludgerShotsFaced || 0;
+    if (shotAtt > 0) { const v = (shotScored / shotAtt) * 100; if (existingExt.shotPct === null || v > existingExt.shotPct) existingExt.shotPct = v; }
+    if (passAtt > 0 && s.Position === "Chaser") { const v = (passComp / passAtt) * 100; if (existingExt.passPct === null || v > existingExt.passPct) existingExt.passPct = v; }
+    if (kPassAtt > 0 && s.Position === "Keeper") { const v = (kPassComp / kPassAtt) * 100; if (existingExt.keeperPassPct === null || v > existingExt.keeperPassPct) existingExt.keeperPassPct = v; }
     if ((s.GamesPlayed || 0) > 0 && (s.GoldenSnitchCatches || 0) > 0) { const v = ((s.GoldenSnitchCatches || 0) / (s.GamesPlayed || 1)) * 100; if (existingExt.snitchPct === null || v > existingExt.snitchPct) existingExt.snitchPct = v; }
-    if (s.KeeperShotsFaced && s.KeeperShotsFaced > 0) { const v = (s.KeeperSaves || 0) / s.KeeperShotsFaced * 100; if (existingExt.svPct === null || v > existingExt.svPct) existingExt.svPct = v; }
-    if (ext && ext.bludgersHit > existingExt.bludgersHit) existingExt.bludgersHit = ext.bludgersHit;
-    if (ext && ext.turnoversForced > existingExt.turnovers) existingExt.turnovers = ext.turnoversForced;
-    if (ext && ext.teammatesProtected > existingExt.teammates) existingExt.teammates = ext.teammatesProtected;
-    if ((s.GamesPlayed || 0) > 0 && sfFromResults > 0) { const v = sfFromResults / (s.GamesPlayed || 1); if (existingExt.sfPerGP === null || v > existingExt.sfPerGP) existingExt.sfPerGP = v; }
+    if ((s.KeeperShotsFaced || 0) > 0) { const v = (s.KeeperSaves || 0) / (s.KeeperShotsFaced || 1) * 100; if (existingExt.svPct === null || v > existingExt.svPct) existingExt.svPct = v; }
+    if (bh > existingExt.bludgersHit) existingExt.bludgersHit = bh;
+    if (tf > existingExt.turnovers) existingExt.turnovers = tf;
+    if (tp > existingExt.teammates) existingExt.teammates = tp;
+    if ((s.GamesPlayed || 0) > 0 && bsf > 0) { const v = bsf / (s.GamesPlayed || 1); if (existingExt.sfPerGP === null || v > existingExt.sfPerGP) existingExt.sfPerGP = v; }
     if ((s.Goals || 0) > 0 && mins > 0) { const v = mins / (s.Goals || 1); if (existingExt.minPerGoal === null || v < existingExt.minPerGoal) existingExt.minPerGoal = v; }
     bestByComp.set(key, existing);
     bestExtByComp.set(key, existingExt);
   };
 
   stats.forEach(s => {
-    const mKey = `${s.SeasonID}|${s.LeagueName}`;
     const key = s.LeagueName || "Unknown";
-    updateBests(key, s, mKey);
-    // Also accumulate into "domestic" key for domestic leagues
-    if (s.LeagueName && domesticLeagueNames.has(s.LeagueName)) updateBests("domestic", s, mKey);
+    updateBests(key, s);
+    if (s.LeagueName && domesticLeagueNames.has(s.LeagueName)) updateBests("domestic", s);
   });
 
-  const byCompetition = new Map<string, { gp: number; goals: number; gsc: number; saves: number; shotsFaced: number; minutes: number; ext: ExtendedStats }>();
+  // By Competition aggregates — now directly from view fields
+  const byCompetition = new Map<string, { gp: number; goals: number; gsc: number; saves: number; shotsFaced: number; minutes: number; shotAtt: number; shotScored: number; passAtt: number; passComp: number; kPassAtt: number; kPassComp: number; bh: number; tf: number; tp: number; bsf: number; snitchSpotted: number }>();
   stats.forEach((s) => {
     const key = s.LeagueName || "Unknown";
-    const existing = byCompetition.get(key) || { gp: 0, goals: 0, gsc: 0, saves: 0, shotsFaced: 0, minutes: 0, ext: { passAtt: 0, passComp: 0, shotAtt: 0, shotScored: 0, bludgersHit: 0, turnoversForced: 0, teammatesProtected: 0, bludgerShotsFaced: 0, snitchSpotted: 0, catchAttempts: 0, keeperShotsSaved: 0, keeperShotsParried: 0, keeperShotsConceded: 0 } };
-    existing.gp += s.GamesPlayed || 0;
-    existing.goals += s.Goals || 0;
-    existing.gsc += s.GoldenSnitchCatches || 0;
-    existing.saves += s.KeeperSaves || 0;
-    existing.shotsFaced += s.KeeperShotsFaced || 0;
-    const mKey = `${s.SeasonID}|${s.LeagueName}`;
-    existing.minutes += minutesMap.get(mKey) || 0;
-    const ext = extStatsMap.get(mKey);
-    if (ext) {
-      existing.ext.passAtt += ext.passAtt; existing.ext.passComp += ext.passComp;
-      existing.ext.shotAtt += ext.shotAtt; existing.ext.shotScored += ext.shotScored;
-      existing.ext.bludgersHit += ext.bludgersHit; existing.ext.turnoversForced += ext.turnoversForced;
-      existing.ext.teammatesProtected += ext.teammatesProtected; existing.ext.bludgerShotsFaced += ext.bludgerShotsFaced;
-      existing.ext.snitchSpotted += ext.snitchSpotted; existing.ext.catchAttempts += ext.catchAttempts;
-    }
-    byCompetition.set(key, existing);
+    const ex = byCompetition.get(key) || { gp: 0, goals: 0, gsc: 0, saves: 0, shotsFaced: 0, minutes: 0, shotAtt: 0, shotScored: 0, passAtt: 0, passComp: 0, kPassAtt: 0, kPassComp: 0, bh: 0, tf: 0, tp: 0, bsf: 0, snitchSpotted: 0 };
+    ex.gp += s.GamesPlayed || 0; ex.goals += s.Goals || 0; ex.gsc += s.GoldenSnitchCatches || 0;
+    ex.saves += s.KeeperSaves || 0; ex.shotsFaced += s.KeeperShotsFaced || 0; ex.minutes += s.MinPlayed || 0;
+    ex.shotAtt += s.ShotAtt || 0; ex.shotScored += s.ShotScored || 0;
+    ex.passAtt += s.PassAtt || 0; ex.passComp += s.PassComp || 0;
+    ex.kPassAtt += s.KeeperPassAtt || 0; ex.kPassComp += s.KeeperPassComp || 0;
+    ex.bh += s.BludgersHit || 0; ex.tf += s.TurnoversForced || 0; ex.tp += s.TeammatesProtected || 0;
+    ex.bsf += s.BludgerShotsFaced || 0; ex.snitchSpotted += s.SnitchSpotted || 0;
+    byCompetition.set(key, ex);
   });
 
   function isLeagueLeader(s: StatLine, statKey: string): boolean {
@@ -773,46 +683,49 @@ export default function PlayerProfile() {
                       : rowIsSeeker ? isLeagueLeader(s, "GoldenSnitchCatches")
                       : rowIsKeeper ? isLeagueLeader(s, "KeeperSaves")
                       : false;
-                    const mKey = `${s.SeasonID}|${s.LeagueName}`;
                     const compKey = compFilter === "domestic" && s.LeagueName && domesticLeagueNames.has(s.LeagueName)
                       ? "domestic"
                       : (s.LeagueName || "Unknown");
                     const compBest = bestByComp.get(compKey);
                     const extBest = bestExtByComp.get(compKey) || null;
-                    const mins = minutesMap.get(mKey) || 0;
-                    const ext = extStatsMap.get(mKey);
-                    const sfFromResults = shotsFacedMap.get(mKey) || 0;
+
+                    // All values come directly from player_season_stats view
+                    const mins = s.MinPlayed || 0;
+                    const shotAtt = s.ShotAtt || 0; const shotScored = s.ShotScored || 0;
+                    const passAtt = s.PassAtt || 0; const passComp = s.PassComp || 0;
+                    const kPassAtt = s.KeeperPassAtt || 0; const kPassComp = s.KeeperPassComp || 0;
+                    const bsf = s.BludgerShotsFaced || 0;
 
                     // Compute all displayed values
                     const minPerGoalVal = rowIsChaser && (s.Goals || 0) > 0 && mins > 0
                       ? mins / (s.Goals || 1) : null;
-                    const shotPctVal = rowIsChaser && ext && ext.shotAtt > 0
-                      ? (ext.shotScored / ext.shotAtt) * 100 : null;
-                    const passPctChaserVal = rowIsChaser && ext && ext.passAtt > 0
-                      ? (ext.passComp / ext.passAtt) * 100 : null;
+                    const shotPctVal = rowIsChaser && shotAtt > 0
+                      ? (shotScored / shotAtt) * 100 : null;
+                    const passPctChaserVal = rowIsChaser && passAtt > 0
+                      ? (passComp / passAtt) * 100 : null;
                     const snitchPctVal = rowIsSeeker && (s.GamesPlayed || 0) > 0
                       ? ((s.GoldenSnitchCatches || 0) / (s.GamesPlayed || 1)) * 100 : null;
-                    const svPctVal = rowIsKeeper && s.KeeperShotsFaced
-                      ? (s.KeeperSaves || 0) / s.KeeperShotsFaced * 100 : null;
-                    const passPctKeeperVal = rowIsKeeper && ext && ext.passAtt > 0
-                      ? (ext.passComp / ext.passAtt) * 100 : null;
-                    const sfPerGPVal = rowIsBeater && (s.GamesPlayed || 0) > 0 && sfFromResults > 0
-                      ? sfFromResults / (s.GamesPlayed || 1) : null;
-                    const bludgersHitVal = rowIsBeater && ext ? ext.bludgersHit : null;
-                    const turnoversVal = rowIsBeater && ext ? ext.turnoversForced : null;
-                    const teammatesVal = rowIsBeater && ext ? ext.teammatesProtected : null;
-                    const snitchSpottedVal = rowIsSeeker && ext ? ext.snitchSpotted : null;
+                    const svPctVal = rowIsKeeper && (s.KeeperShotsFaced || 0) > 0
+                      ? (s.KeeperSaves || 0) / (s.KeeperShotsFaced || 1) * 100 : null;
+                    const passPctKeeperVal = rowIsKeeper && kPassAtt > 0
+                      ? (kPassComp / kPassAtt) * 100 : null;
+                    const sfPerGPVal = rowIsBeater && (s.GamesPlayed || 0) > 0 && bsf > 0
+                      ? bsf / (s.GamesPlayed || 1) : null;
+                    const bludgersHitVal = rowIsBeater ? (s.BludgersHit || 0) : null;
+                    const turnoversVal = rowIsBeater ? (s.TurnoversForced || 0) : null;
+                    const teammatesVal = rowIsBeater ? (s.TeammatesProtected || 0) : null;
+                    const snitchSpottedVal = rowIsSeeker ? (s.SnitchSpotted || 0) : null;
                     const sfVal = rowIsKeeper ? (s.KeeperShotsFaced || 0) : null;
 
-                    // Bold = career best for that competition; italic = league leader
-                    // Track bests for each computed value
-                    const goldBg = "bg-yellow-100 dark:bg-yellow-900/30 font-bold";
-                    const lead = "italic font-semibold";
-                    const cc = (isBest: boolean, isLead: boolean) => isBest ? goldBg : isLead ? lead : "";
+                    // SWAPPED: Gold shading = league leader that season; Bold italic = career best for competition
+                    const goldBg = "bg-yellow-100 dark:bg-yellow-900/30";
+                    const careerBestStyle = "font-bold italic";
+                    const cc = (isBest: boolean, isLead: boolean) => isLead ? goldBg : isBest ? careerBestStyle : "";
 
                     const goalsBest = rowIsChaser && compBest && (s.Goals || 0) > 0 && (s.Goals || 0) === compBest.goals;
                     const gscBest = rowIsSeeker && compBest && (s.GoldenSnitchCatches || 0) > 0 && (s.GoldenSnitchCatches || 0) === compBest.gsc;
                     const savesBest = rowIsKeeper && compBest && (s.KeeperSaves || 0) > 0 && (s.KeeperSaves || 0) === compBest.saves;
+                    const sfBest = rowIsKeeper && compBest && (s.KeeperShotsFaced || 0) > 0 && (s.KeeperShotsFaced || 0) === compBest.sf;
                     const gpBest = compBest && (s.GamesPlayed || 0) > 0 && (s.GamesPlayed || 0) === compBest.gp;
                     const minsBest = compBest && mins > 0 && mins === compBest.mins;
 
@@ -833,7 +746,7 @@ export default function PlayerProfile() {
                     return (
                       <tr key={i} className={rowClass}>
                         <td className={`${tdClass} font-mono`}>{seasonLabel(s.SeasonID)}</td>
-                        <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{ageAtSeasonFromDate(player.DOB, s.SeasonID ? firstMatchDateMap.get(s.SeasonID) || null : null)}</td>
+                        <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{ageAtSeason(player.DOB, s.SeasonID)}</td>
                         <td className={`${tdClass} font-mono text-xs`} title={s.LeagueName || ""}>{abbrevLeague(s.LeagueName)}</td>
                         <td className={`${tdClass}`}>
                           {s.FullName ? (
@@ -851,7 +764,7 @@ export default function PlayerProfile() {
                         {isSeeker && <td className={`px-3 py-1.5 text-right font-mono ${rowIsSeeker ? cc(snitchPctBest, isLeader) : "text-muted-foreground"}`}>{rowIsSeeker ? (snitchPctVal !== null ? snitchPctVal.toFixed(1) + "%" : "—") : "—"}</td>}
                         {isSeeker && <td className={`px-3 py-1.5 text-right font-mono ${rowIsSeeker ? cc(false, isLeader) : "text-muted-foreground"}`}>{rowIsSeeker ? (snitchSpottedVal ?? "—") : "—"}</td>}
                         {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? cc(savesBest, isLeader) : ""}`}>{rowIsKeeper ? (s.KeeperSaves || 0) : "—"}</td>}
-                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? cc(false, isLeader) : ""}`}>{rowIsKeeper ? (sfVal ?? "—") : "—"}</td>}
+                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? cc(sfBest, isLeader) : ""}`}>{rowIsKeeper ? (sfVal ?? "—") : "—"}</td>}
                         {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? cc(svPctBest, isLeader) : "text-muted-foreground"}`}>{rowIsKeeper ? (svPctVal !== null ? svPctVal.toFixed(1) + "%" : "—") : "—"}</td>}
                         {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? cc(keeperPassPctBest, isLeader) : "text-muted-foreground"}`}>{rowIsKeeper ? (passPctKeeperVal !== null ? passPctKeeperVal.toFixed(1) + "%" : "—") : "—"}</td>}
                         {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(bludgersBest, isLeader) : ""}`}>{rowIsBeater ? (bludgersHitVal ?? "—") : "—"}</td>}
@@ -862,16 +775,6 @@ export default function PlayerProfile() {
                     );
                   })}
                   {(() => {
-                    const careerExt: ExtendedStats = { passAtt: 0, passComp: 0, shotAtt: 0, shotScored: 0, bludgersHit: 0, turnoversForced: 0, teammatesProtected: 0, bludgerShotsFaced: 0, snitchSpotted: 0, catchAttempts: 0, keeperShotsSaved: 0, keeperShotsParried: 0, keeperShotsConceded: 0 };
-                    extStatsMap.forEach(v => {
-                      careerExt.passAtt += v.passAtt; careerExt.passComp += v.passComp;
-                      careerExt.shotAtt += v.shotAtt; careerExt.shotScored += v.shotScored;
-                      careerExt.bludgersHit += v.bludgersHit; careerExt.turnoversForced += v.turnoversForced;
-                      careerExt.teammatesProtected += v.teammatesProtected; careerExt.bludgerShotsFaced += v.bludgerShotsFaced;
-                      careerExt.snitchSpotted += v.snitchSpotted; careerExt.catchAttempts += v.catchAttempts;
-                      careerExt.keeperShotsSaved += v.keeperShotsSaved; careerExt.keeperShotsParried += v.keeperShotsParried;
-                      careerExt.keeperShotsConceded += v.keeperShotsConceded;
-                    });
                     const ct = "px-3 py-1.5 text-right font-mono text-primary";
                     return (
                       <tr className="border-t-2 border-primary bg-primary/5 font-bold">
@@ -879,20 +782,20 @@ export default function PlayerProfile() {
                         <td className={ct}>{careerTotals.gp}</td>
                         <td className={ct}>{careerTotals.minutes > 0 ? careerTotals.minutes : "—"}</td>
                         {isChaser && <td className={ct}>{careerTotals.goals}</td>}
-                        {isChaser && <td className={ct}>{careerExt.shotAtt > 0 ? ((careerExt.shotScored / careerExt.shotAtt) * 100).toFixed(1) + "%" : "—"}</td>}
-                        {isChaser && <td className={ct}>{careerExt.passAtt > 0 ? ((careerExt.passComp / careerExt.passAtt) * 100).toFixed(1) + "%" : "—"}</td>}
+                        {isChaser && <td className={ct}>{careerTotals.shotAtt > 0 ? ((careerTotals.shotScored / careerTotals.shotAtt) * 100).toFixed(1) + "%" : "—"}</td>}
+                        {isChaser && <td className={ct}>{careerTotals.passAtt > 0 ? ((careerTotals.passComp / careerTotals.passAtt) * 100).toFixed(1) + "%" : "—"}</td>}
                         {isChaser && <td className={ct}>{careerTotals.minutes > 0 && careerTotals.goals > 0 ? (careerTotals.minutes / careerTotals.goals).toFixed(1) : "—"}</td>}
                         {isSeeker && <td className={ct}>{careerTotals.gsc}</td>}
                         {isSeeker && <td className={ct}>{careerTotals.gp > 0 ? ((careerTotals.gsc / careerTotals.gp) * 100).toFixed(1) + "%" : "—"}</td>}
-                        {isSeeker && <td className={ct}>{careerExt.snitchSpotted}</td>}
+                        {isSeeker && <td className={ct}>{careerTotals.snitchSpotted}</td>}
                         {isKeeper && <td className={ct}>{careerTotals.saves}</td>}
                         {isKeeper && <td className={ct}>{careerTotals.shotsFaced}</td>}
-                        {isKeeper && <td className={ct}>{careerTotals.shotsFaced ? ((careerTotals.saves / careerTotals.shotsFaced) * 100).toFixed(1) + "%" : "—"}</td>}
-                        {isKeeper && <td className={ct}>{careerExt.passAtt > 0 ? ((careerExt.passComp / careerExt.passAtt) * 100).toFixed(1) + "%" : "—"}</td>}
-                        {isBeater && <td className={ct}>{careerExt.bludgersHit}</td>}
-                        {isBeater && <td className={ct}>{careerExt.turnoversForced}</td>}
-                        {isBeater && <td className={ct}>{careerExt.teammatesProtected}</td>}
-                        {isBeater && <td className={ct}>{careerTotals.gp > 0 && careerExt.bludgerShotsFaced > 0 ? (careerExt.bludgerShotsFaced / careerTotals.gp).toFixed(2) : "—"}</td>}
+                        {isKeeper && <td className={ct}>{careerTotals.shotsFaced > 0 ? ((careerTotals.saves / careerTotals.shotsFaced) * 100).toFixed(1) + "%" : "—"}</td>}
+                        {isKeeper && <td className={ct}>{careerTotals.keeperPassAtt > 0 ? ((careerTotals.keeperPassComp / careerTotals.keeperPassAtt) * 100).toFixed(1) + "%" : "—"}</td>}
+                        {isBeater && <td className={ct}>{careerTotals.bludgersHit}</td>}
+                        {isBeater && <td className={ct}>{careerTotals.turnoversForced}</td>}
+                        {isBeater && <td className={ct}>{careerTotals.teammatesProtected}</td>}
+                        {isBeater && <td className={ct}>{careerTotals.gp > 0 && careerTotals.bludgerShotsFaced > 0 ? (careerTotals.bludgerShotsFaced / careerTotals.gp).toFixed(2) : "—"}</td>}
                       </tr>
                     );
                   })()}
@@ -900,8 +803,8 @@ export default function PlayerProfile() {
               </table>
             </div>
             <div className="px-3 py-1.5 bg-secondary/50 text-xs text-muted-foreground font-sans flex gap-4 flex-wrap">
-              <span><span className="font-bold">Bold</span> = league leader</span>
-              <span><span className="bg-yellow-100 dark:bg-yellow-900/30 font-bold px-1 rounded">Shaded</span> = career best</span>
+              <span><span className="bg-yellow-100 dark:bg-yellow-900/30 px-1 rounded">Shaded</span> = league leader that season</span>
+              <span><span className="font-bold italic">Bold italic</span> = career best for competition</span>
               {isChaser && <span>Sh% = Shooting%, Pass% = Passing%</span>}
               {isBeater && <span>BH = Bludgers Hit, TF = Turnovers Forced, TP = Teammates Protected</span>}
               {isSeeker && <span>Spotted = Snitch Spottings</span>}
@@ -944,20 +847,20 @@ export default function PlayerProfile() {
                       <td className={`${tdClass} text-right font-mono`}>{totals.gp}</td>
                       <td className={`${tdClass} text-right font-mono`}>{totals.minutes > 0 ? totals.minutes : "—"}</td>
                       {isChaser && <td className={`${tdClass} text-right font-mono`}>{totals.goals}</td>}
-                      {isChaser && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.ext.shotAtt > 0 ? ((totals.ext.shotScored / totals.ext.shotAtt) * 100).toFixed(1) + "%" : "—"}</td>}
-                      {isChaser && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.ext.passAtt > 0 ? ((totals.ext.passComp / totals.ext.passAtt) * 100).toFixed(1) + "%" : "—"}</td>}
+                      {isChaser && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.shotAtt > 0 ? ((totals.shotScored / totals.shotAtt) * 100).toFixed(1) + "%" : "—"}</td>}
+                      {isChaser && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.passAtt > 0 ? ((totals.passComp / totals.passAtt) * 100).toFixed(1) + "%" : "—"}</td>}
                       {isChaser && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.minutes > 0 && totals.goals > 0 ? (totals.minutes / totals.goals).toFixed(1) : "—"}</td>}
                       {isSeeker && <td className={`${tdClass} text-right font-mono`}>{totals.gsc}</td>}
                       {isSeeker && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.gp > 0 ? ((totals.gsc / totals.gp) * 100).toFixed(1) + "%" : "—"}</td>}
-                      {isSeeker && <td className={`${tdClass} text-right font-mono`}>{totals.ext.snitchSpotted}</td>}
+                      {isSeeker && <td className={`${tdClass} text-right font-mono`}>{totals.snitchSpotted}</td>}
                       {isKeeper && <td className={`${tdClass} text-right font-mono`}>{totals.saves}</td>}
                       {isKeeper && <td className={`${tdClass} text-right font-mono`}>{totals.shotsFaced}</td>}
-                      {isKeeper && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.shotsFaced ? ((totals.saves / totals.shotsFaced) * 100).toFixed(1) + "%" : "—"}</td>}
-                      {isKeeper && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.ext.passAtt > 0 ? ((totals.ext.passComp / totals.ext.passAtt) * 100).toFixed(1) + "%" : "—"}</td>}
-                      {isBeater && <td className={`${tdClass} text-right font-mono`}>{totals.ext.bludgersHit}</td>}
-                      {isBeater && <td className={`${tdClass} text-right font-mono`}>{totals.ext.turnoversForced}</td>}
-                      {isBeater && <td className={`${tdClass} text-right font-mono`}>{totals.ext.teammatesProtected}</td>}
-                      {isBeater && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.gp > 0 && totals.ext.bludgerShotsFaced > 0 ? (totals.ext.bludgerShotsFaced / totals.gp).toFixed(2) : "—"}</td>}
+                      {isKeeper && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.shotsFaced > 0 ? ((totals.saves / totals.shotsFaced) * 100).toFixed(1) + "%" : "—"}</td>}
+                      {isKeeper && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.kPassAtt > 0 ? ((totals.kPassComp / totals.kPassAtt) * 100).toFixed(1) + "%" : "—"}</td>}
+                      {isBeater && <td className={`${tdClass} text-right font-mono`}>{totals.bh}</td>}
+                      {isBeater && <td className={`${tdClass} text-right font-mono`}>{totals.tf}</td>}
+                      {isBeater && <td className={`${tdClass} text-right font-mono`}>{totals.tp}</td>}
+                      {isBeater && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.gp > 0 && totals.bsf > 0 ? (totals.bsf / totals.gp).toFixed(2) : "—"}</td>}
                     </tr>
                   ))}
                 </tbody>
@@ -967,12 +870,9 @@ export default function PlayerProfile() {
 
           {/* Awards & Honours */}
           {(playerAwards.length > 0 || leagueLeaders.length > 0) && (() => {
-            // Group formal awards by name
-            const awardGroups = new Map<string, typeof playerAwards>();
-            playerAwards.forEach(a => {
-              if (!awardGroups.has(a.awardname)) awardGroups.set(a.awardname, []);
-              awardGroups.get(a.awardname)!.push(a);
-            });
+            const placementLabel = (n: number) => n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : `${n}th`;
+            const placementColor = (n: number) => n === 1 ? "text-yellow-600 font-bold" : n === 2 ? "text-slate-500 font-semibold" : n === 3 ? "text-amber-700 font-semibold" : "text-muted-foreground";
+            const placementBg = (n: number) => n === 1 ? "bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-400" : n === 2 ? "bg-slate-50 dark:bg-slate-800/30 border-l-4 border-slate-400" : n === 3 ? "bg-amber-50 dark:bg-amber-900/20 border-l-4 border-amber-600" : "border-l-4 border-transparent";
 
             // Group leaderboard by stat
             const leaderGroups = new Map<string, typeof leagueLeaders>();
@@ -984,73 +884,58 @@ export default function PlayerProfile() {
             return (
               <div className="border border-border rounded overflow-hidden">
                 <div className="bg-table-header px-3 py-2">
-                  <h3 className="font-display text-sm font-bold text-table-header-foreground">Awards, Leaderboards &amp; Honours</h3>
+                  <h3 className="font-display text-sm font-bold text-table-header-foreground">Awards &amp; Honours</h3>
                 </div>
-                <div className="bg-card">
-                  {/* Formal Awards grouped by award name */}
-                  {awardGroups.size > 0 && (
-                    <div className="border-b border-border">
-                      <div className="px-3 py-2 bg-secondary/40">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Awards</p>
+                <div className="bg-card divide-y divide-border">
+
+                  {/* Formal Awards */}
+                  {playerAwards.length > 0 && (
+                    <div>
+                      <div className="px-4 py-2 bg-secondary/30">
+                        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Awards</p>
                       </div>
-                      <table className="w-full text-sm font-sans">
-                        <tbody>
-                          {playerAwards.map((award, i) => (
-                              <tr key={`award-${award.awardname}-${award.seasonid}-${award.placement}`} className={`border-t border-border ${i % 2 === 0 ? "bg-card" : "bg-table-stripe"}`}>
-                                <td className="px-3 py-1.5 w-8 text-center">
-                                  <span className="text-base">
-                                    {award.placement === 1 ? "🏆" : award.placement === 2 ? "🥈" : award.placement === 3 ? "🥉" : "🎖️"}
-                                  </span>
-                                </td>
-                                <td className="px-3 py-1.5 font-medium text-foreground">
-                                  {award.placement === 1 ? award.awardname : `${ordinal(award.placement)} — ${award.awardname}`}
-                                </td>
-                                <td className="px-3 py-1.5 text-muted-foreground text-xs">
-                                  {abbrevLeague(award.leagueName || null)}
-                                </td>
-                                <td className="px-3 py-1.5 text-right font-mono text-xs text-muted-foreground">
-                                  {seasonLabel(award.seasonid)}
-                                </td>
-                              </tr>
-                          ))}
-                        </tbody>
-                      </table>
+                      <div className="divide-y divide-border/50">
+                        {playerAwards.map((award) => (
+                          <div key={`${award.awardname}-${award.seasonid}-${award.placement}`}
+                            className={`flex items-center px-4 py-2.5 gap-4 ${placementBg(award.placement)}`}>
+                            <span className={`text-sm font-mono w-8 text-center shrink-0 ${placementColor(award.placement)}`}>
+                              {placementLabel(award.placement)}
+                            </span>
+                            <span className="font-medium text-sm text-foreground flex-1">{award.awardname}</span>
+                            <span className="text-xs text-muted-foreground shrink-0">{abbrevLeague(award.leagueName || null)}</span>
+                            <span className="text-xs font-mono text-muted-foreground shrink-0 w-16 text-right">{seasonLabel(award.seasonid)}</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
 
-                  {/* Leaderboard appearances grouped by stat, then listed by season */}
+                  {/* Leaderboard appearances */}
                   {leaderGroups.size > 0 && (
                     <div>
-                      <div className="px-3 py-2 bg-secondary/40">
-                        <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Appearances on Leaderboards</p>
+                      <div className="px-4 py-2 bg-secondary/30">
+                        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Leaderboard Appearances</p>
                       </div>
                       {[...leaderGroups.entries()].map(([statName, entries]) => (
-                        <div key={statName} className="border-t border-border">
-                          <div className="px-3 py-1.5 bg-secondary/20">
+                        <div key={statName}>
+                          <div className="px-4 py-1.5 bg-secondary/10 border-t border-border/50">
                             <p className="text-xs font-semibold text-foreground">{statName}</p>
                           </div>
-                          <table className="w-full text-sm font-sans">
-                            <tbody>
-                              {entries.sort((a, b) => b.SeasonID - a.SeasonID).map((entry, i) => (
-                                <tr key={`leader-${statName}-${i}`} className={`border-t border-border ${i % 2 === 0 ? "bg-card" : "bg-table-stripe"}`}>
-                                  <td className="px-3 py-1 w-8 text-center">
-                                    <span className="text-sm">
-                                      {entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : entry.rank === 3 ? "🥉" : <span className="text-xs font-mono text-muted-foreground">#{entry.rank}</span>}
-                                    </span>
-                                  </td>
-                                  <td className="px-3 py-1 text-foreground text-xs">
-                                    {ordinal(entry.rank)} ({entry.value})
-                                  </td>
-                                  <td className="px-3 py-1 text-muted-foreground text-xs">
-                                    {entry.scope === "combined" ? "All Leagues" : abbrevLeague(entry.LeagueName)}
-                                  </td>
-                                  <td className="px-3 py-1 text-right font-mono text-xs text-muted-foreground">
-                                    {seasonLabel(entry.SeasonID)}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                          <div className="divide-y divide-border/30">
+                            {entries.sort((a, b) => b.SeasonID - a.SeasonID).map((entry, i) => (
+                              <div key={`leader-${statName}-${i}`}
+                                className={`flex items-center px-4 py-2 gap-4 ${placementBg(entry.rank)}`}>
+                                <span className={`text-sm font-mono w-8 text-center shrink-0 ${placementColor(entry.rank)}`}>
+                                  {placementLabel(entry.rank)}
+                                </span>
+                                <span className="text-sm font-mono font-bold text-foreground w-16 shrink-0">{entry.value.toLocaleString()}</span>
+                                <span className="text-xs text-muted-foreground flex-1">
+                                  {entry.scope === "combined" ? "All Leagues" : abbrevLeague(entry.LeagueName)}
+                                </span>
+                                <span className="text-xs font-mono text-muted-foreground shrink-0 w-16 text-right">{seasonLabel(entry.SeasonID)}</span>
+                              </div>
+                            ))}
+                          </div>
                         </div>
                       ))}
                     </div>

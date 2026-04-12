@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchAllRows } from "@/lib/fetchAll";
-import { useSortableTable } from "@/hooks/useSortableTable";
 
 type StatCategory = "Goals" | "GoldenSnitchCatches" | "KeeperSaves" | "KeeperShotsFaced" | "GamesPlayed";
 
@@ -78,16 +77,13 @@ export function LeagueLeaders() {
     : allStats.filter(s => s.LeagueName === selectedLeague);
 
   const posFilter = statLabels[category].position;
-  const filtered = leagueFilteredStats
+  const leaders = leagueFilteredStats
     .filter(s => !posFilter || s.Position === posFilter)
     .filter(s => ((s[category] as number) || 0) > 0)
     .sort((a, b) => ((b[category] as number) || 0) - ((a[category] as number) || 0))
     .slice(0, 10);
 
-  const { sorted, sortKey, sortDir, requestSort } = useSortableTable(filtered, category, "desc");
-
-  const thClass = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground cursor-pointer hover:text-foreground select-none";
-  const sortIndicator = (key: string) => sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
+  const thClass = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground";
   const seasonLabel = (id: number) => `${id - 1}–${String(id).slice(-2)}`;
 
   return (
@@ -136,14 +132,14 @@ export function LeagueLeaders() {
           <thead>
             <tr className="bg-secondary">
               <th className={`${thClass} text-left`}>#</th>
-              <th className={`${thClass} text-left`} onClick={() => requestSort("PlayerName")}>Player{sortIndicator("PlayerName")}</th>
-              <th className={`${thClass} text-left`} onClick={() => requestSort("FullName")}>Team{sortIndicator("FullName")}</th>
-              <th className={`${thClass} text-left`} onClick={() => requestSort("Position")}>Pos{sortIndicator("Position")}</th>
-              <th className={`${thClass} text-right`} onClick={() => requestSort(category)}>{statLabels[category].label}{sortIndicator(category)}</th>
+              <th className={`${thClass} text-left`}>Player</th>
+              <th className={`${thClass} text-left`}>Team</th>
+              <th className={`${thClass} text-left`}>Pos</th>
+              <th className={`${thClass} text-right`}>{statLabels[category].label}</th>
             </tr>
           </thead>
           <tbody>
-            {sorted.map((row, i) => {
+            {leaders.map((row, i) => {
               const pid = row.PlayerName ? playerMap[row.PlayerName] : null;
               return (
                 <tr
@@ -162,7 +158,7 @@ export function LeagueLeaders() {
                 </tr>
               );
             })}
-            {sorted.length === 0 && (
+            {leaders.length === 0 && (
               <tr><td colSpan={5} className="px-3 py-4 text-center text-muted-foreground italic">No data available.</td></tr>
             )}
           </tbody>
