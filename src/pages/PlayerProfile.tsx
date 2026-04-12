@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
@@ -124,6 +124,9 @@ function fmtMin(minutes: number | null): string {
   if (!minutes || minutes === 0) return "—";
   return minutes.toString();
 }
+
+type CompBest = { goals: number; gsc: number; saves: number; gp: number; mins: number };
+type ExtBest = { shotPct: number | null; passPct: number | null; snitchPct: number | null; svPct: number | null; keeperPassPct: number | null; bludgersHit: number; turnovers: number; teammates: number; sfPerGP: number | null; minPerGoal: number | null };
 
 export default function PlayerProfile() {
   const { id } = useParams();
@@ -538,8 +541,6 @@ export default function PlayerProfile() {
 
   // Career bests per competition (for gold shading)
   // Key is either the league name OR "domestic" for all domestic leagues pooled
-  type CompBest = { goals: number; gsc: number; saves: number; gp: number; mins: number };
-  type ExtBest = { shotPct: number | null; passPct: number | null; snitchPct: number | null; svPct: number | null; keeperPassPct: number | null; bludgersHit: number; turnovers: number; teammates: number; sfPerGP: number | null; minPerGoal: number | null };
   const bestByComp = new Map<string, CompBest>();
   const bestExtByComp = new Map<string, ExtBest>();
 
@@ -772,6 +773,7 @@ export default function PlayerProfile() {
                       : rowIsSeeker ? isLeagueLeader(s, "GoldenSnitchCatches")
                       : rowIsKeeper ? isLeagueLeader(s, "KeeperSaves")
                       : false;
+                    const mKey = `${s.SeasonID}|${s.LeagueName}`;
                     const compKey = compFilter === "domestic" && s.LeagueName && domesticLeagueNames.has(s.LeagueName)
                       ? "domestic"
                       : (s.LeagueName || "Unknown");
@@ -993,9 +995,8 @@ export default function PlayerProfile() {
                       </div>
                       <table className="w-full text-sm font-sans">
                         <tbody>
-                          {[...awardGroups.entries()].map(([awardName, entries]) => (
-                            entries.map((award, i) => (
-                              <tr key={`award-${awardName}-${i}`} className={`border-t border-border ${i % 2 === 0 ? "bg-card" : "bg-table-stripe"}`}>
+                          {playerAwards.map((award, i) => (
+                              <tr key={`award-${award.awardname}-${award.seasonid}-${award.placement}`} className={`border-t border-border ${i % 2 === 0 ? "bg-card" : "bg-table-stripe"}`}>
                                 <td className="px-3 py-1.5 w-8 text-center">
                                   <span className="text-base">
                                     {award.placement === 1 ? "🏆" : award.placement === 2 ? "🥈" : award.placement === 3 ? "🥉" : "🎖️"}
@@ -1011,7 +1012,6 @@ export default function PlayerProfile() {
                                   {seasonLabel(award.seasonid)}
                                 </td>
                               </tr>
-                            ))
                           ))}
                         </tbody>
                       </table>
