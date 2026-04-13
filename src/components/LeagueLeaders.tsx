@@ -3,14 +3,17 @@ import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchAllRows } from "@/lib/fetchAll";
 
-type StatCategory = "Goals" | "GoldenSnitchCatches" | "KeeperSaves" | "KeeperShotsFaced" | "GamesPlayed";
+type StatCategory = "Goals" | "GoldenSnitchCatches" | "KeeperSaves" | "KeeperShotsFaced" | "BludgersHit" | "TurnoversForced" | "TeammatesProtected" | "GamesPlayed";
 
 const statLabels: Record<StatCategory, { label: string; position: string | null }> = {
-  Goals:                 { label: "Goals",              position: "Chaser" },
-  GoldenSnitchCatches:   { label: "Snitch Catches",     position: "Seeker" },
-  KeeperSaves:           { label: "Keeper Saves",       position: "Keeper" },
-  KeeperShotsFaced:      { label: "Shots Faced",        position: "Keeper" },
-  GamesPlayed:           { label: "Games Played",       position: null },
+  Goals:                { label: "Goals",                position: "Chaser" },
+  GoldenSnitchCatches:  { label: "Snitch Catches",       position: "Seeker" },
+  KeeperSaves:          { label: "Saves",                position: "Keeper" },
+  KeeperShotsFaced:     { label: "Shots Faced",          position: "Keeper" },
+  BludgersHit:          { label: "Bludgers Hit",         position: "Beater" },
+  TurnoversForced:      { label: "Turnovers Forced",     position: "Beater" },
+  TeammatesProtected:   { label: "Teammates Protected",  position: "Beater" },
+  GamesPlayed:          { label: "Games Played",         position: null },
 };
 
 interface StatRow {
@@ -19,10 +22,14 @@ interface StatRow {
   Goals: number | null;
   GoldenSnitchCatches: number | null;
   KeeperSaves: number | null;
+  KeeperShotsFaced: number | null;
   GamesPlayed: number | null;
   Position: string | null;
   LeagueName: string | null;
   SeasonID: number | null;
+  BludgersHit: number | null;
+  TurnoversForced: number | null;
+  TeammatesProtected: number | null;
 }
 
 interface LeagueOption {
@@ -40,7 +47,7 @@ export function LeagueLeaders() {
   const [availableSeasons, setAvailableSeasons] = useState<number[]>([]);
 
   useEffect(() => {
-    const cats: StatCategory[] = ["Goals", "GoldenSnitchCatches", "KeeperSaves", "GamesPlayed"];
+    const cats: StatCategory[] = ["Goals", "GoldenSnitchCatches", "KeeperSaves", "BludgersHit", "GamesPlayed"];
     const picked = cats[Math.floor(Math.random() * cats.length)];
     setCategory(picked);
 
@@ -60,11 +67,11 @@ export function LeagueLeaders() {
     });
   }, []);
 
-  // Fetch stats only for the selected season
+  // Fetch stats only for the selected season from the new view
   useEffect(() => {
     if (!selectedSeason) return;
-    fetchAllRows("stats", {
-      select: "*",
+    fetchAllRows("player_season_stats", {
+      select: "PlayerName,FullName,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,GamesPlayed,Position,LeagueName,SeasonID,BludgersHit,TurnoversForced,TeammatesProtected",
       filters: [{ method: "eq", args: ["SeasonID", selectedSeason] }],
     }).then((statsData) => {
       setAllStats(statsData as StatRow[]);
@@ -93,14 +100,23 @@ export function LeagueLeaders() {
           League Leaders — {statLabels[category].label} {selectedSeason ? `(${seasonLabel(selectedSeason)})` : ""}
         </h3>
         <div className="flex items-center gap-2 flex-wrap">
-          <div className="flex gap-1">
-            {(Object.keys(statLabels) as StatCategory[]).map(cat => (
+          <div className="flex gap-1 flex-wrap">
+            {([
+              { key: "Goals", group: "C" },
+              { key: "GoldenSnitchCatches", group: "S" },
+              { key: "KeeperSaves", group: "K" },
+              { key: "KeeperShotsFaced", group: "K" },
+              { key: "BludgersHit", group: "B" },
+              { key: "TurnoversForced", group: "B" },
+              { key: "TeammatesProtected", group: "B" },
+              { key: "GamesPlayed", group: "" },
+            ] as { key: StatCategory; group: string }[]).map(({ key }) => (
               <button
-                key={cat}
-                onClick={() => setCategory(cat)}
-                className={`text-xs px-2 py-0.5 rounded font-sans ${category === cat ? "bg-accent text-accent-foreground" : "text-table-header-foreground/70 hover:text-table-header-foreground"}`}
+                key={key}
+                onClick={() => setCategory(key)}
+                className={`text-xs px-2 py-0.5 rounded font-sans transition-colors ${category === key ? "bg-accent text-accent-foreground" : "text-table-header-foreground/70 hover:text-table-header-foreground"}`}
               >
-                {statLabels[cat].label}
+                {statLabels[key].label}
               </button>
             ))}
           </div>

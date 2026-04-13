@@ -6,26 +6,29 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 
 /* ── types ── */
+/* Row from player_season_stats view — only columns we need for leaderboard computation */
 interface RawStat {
   PlayerName: string | null;
+  Position: string | null;
+  Nation: string | null;
   FullName: string | null;
+  SeasonID: number | null;
+  LeagueName: string | null;
   GamesPlayed: number | null;
+  MinPlayed: number | null;
   Goals: number | null;
   GoldenSnitchCatches: number | null;
   KeeperSaves: number | null;
   KeeperShotsFaced: number | null;
-  Position: string | null;
-  Nation: string | null;
-  SeasonID: number | null;
-  LeagueName: string | null;
-}
-
-interface MinRow {
-  PlayerName: string | null;
-  FullName: string | null;
-  SeasonID: number | null;
-  LeagueName: string | null;
-  MinutesPlayed: number | null;
+  ShotAtt: number | null;
+  ShotScored: number | null;
+  PassAtt: number | null;
+  PassComp: number | null;
+  KeeperPassAtt: number | null;
+  KeeperPassComp: number | null;
+  BludgersHit: number | null;
+  TurnoversForced: number | null;
+  TeammatesProtected: number | null;
 }
 
 interface LeagueInfo {
@@ -48,7 +51,6 @@ interface SLLine {
   KS: number;
   KSF: number;
   MIN: number;
-  // Extended stats from player_season_minutes or similar
   BH: number;
   TF: number;
   TP: number;
@@ -56,6 +58,8 @@ interface SLLine {
   ShotScored: number;
   PassAtt: number;
   PassComp: number;
+  KPassAtt: number;
+  KPassComp: number;
 }
 
 /* career grain */
@@ -78,6 +82,8 @@ interface CareerLine {
   ShotScored: number;
   PassAtt: number;
   PassComp: number;
+  KPassAtt: number;
+  KPassComp: number;
 }
 
 /* progressive entry */
@@ -93,37 +99,38 @@ type StatCat =
   | "GP" | "MIN"
   | "G" | "G_GP" | "SH_PCT" | "PASS_PCT_C" | "MIN_G"
   | "GSC" | "GSC_PCT" | "MIN_GSC"
-  | "KSF" | "KSF_GP" | "KS" | "SV_PCT" | "KS_GP"
+  | "KSF" | "KSF_GP" | "KS" | "SV_PCT" | "KS_GP" | "PASS_PCT_K"
   | "BH" | "BH_GP" | "TF" | "TF_GP" | "TP" | "TP_GP";
 type RegType = "career" | "active" | "season" | "progressive" | "yearly" | "yby";
 
 const STATS: { key: StatCat; label: string; abbr: string; higher: boolean; minGP?: number; requirePos?: string }[] = [
   // General
-  { key: "GP",        label: "Games Played",           abbr: "GP",      higher: true },
-  { key: "MIN",       label: "Minutes Played",          abbr: "MIN",     higher: true },
-  // Chaser counting
-  { key: "G",         label: "Goals",                   abbr: "G",       higher: true, requirePos: "Chaser" },
-  { key: "G_GP",      label: "Goals per Game",          abbr: "G/GP",    higher: true,  minGP: 10, requirePos: "Chaser" },
-  { key: "SH_PCT",    label: "Shooting Percentage",     abbr: "SH%",     higher: true,  minGP: 10, requirePos: "Chaser" },
-  { key: "PASS_PCT_C",label: "Pass Percentage (Chaser)",abbr: "PASS%",   higher: true,  minGP: 10, requirePos: "Chaser" },
-  { key: "MIN_G",     label: "Minutes per Goal",        abbr: "MIN/G",   higher: false, minGP: 10, requirePos: "Chaser" },
+  { key: "GP",         label: "Games Played",               abbr: "GP",       higher: true },
+  { key: "MIN",        label: "Minutes Played",              abbr: "MIN",      higher: true },
+  // Chaser
+  { key: "G",          label: "Goals",                       abbr: "G",        higher: true,  requirePos: "Chaser" },
+  { key: "G_GP",       label: "Goals per Game",              abbr: "G/GP",     higher: true,  minGP: 10, requirePos: "Chaser" },
+  { key: "SH_PCT",     label: "Shooting %",                  abbr: "SH%",      higher: true,  minGP: 10, requirePos: "Chaser" },
+  { key: "PASS_PCT_C", label: "Pass % (Chaser)",             abbr: "PASS%",    higher: true,  minGP: 10, requirePos: "Chaser" },
+  { key: "MIN_G",      label: "Minutes per Goal",            abbr: "MIN/G",    higher: false, minGP: 10, requirePos: "Chaser" },
   // Seeker
-  { key: "GSC",       label: "Snitch Catches",          abbr: "GSC",     higher: true, requirePos: "Seeker" },
-  { key: "GSC_PCT",   label: "Snitch Percentage",       abbr: "GSC%",    higher: true,  minGP: 10, requirePos: "Seeker" },
-  { key: "MIN_GSC",   label: "Minutes per Snitch",      abbr: "MIN/GSC", higher: false, minGP: 10, requirePos: "Seeker" },
-  // Keeper counting
-  { key: "KSF",       label: "Shots Faced",             abbr: "SF",      higher: true, requirePos: "Keeper" },
-  { key: "KSF_GP",    label: "Shots Faced per Game",    abbr: "SF/GP",   higher: true,  minGP: 10, requirePos: "Keeper" },
-  { key: "KS",        label: "Saves",                   abbr: "SV",      higher: true, requirePos: "Keeper" },
-  { key: "SV_PCT",    label: "Save Percentage",         abbr: "SV%",     higher: true,  minGP: 10, requirePos: "Keeper" },
-  { key: "KS_GP",     label: "Saves per Game",          abbr: "SV/GP",   higher: true,  minGP: 10, requirePos: "Keeper" },
-  // Beater counting
-  { key: "BH",        label: "Bludgers Hit",            abbr: "BH",      higher: true, requirePos: "Beater" },
-  { key: "BH_GP",     label: "Bludgers Hit per Game",   abbr: "BH/GP",   higher: true,  minGP: 10, requirePos: "Beater" },
-  { key: "TF",        label: "Turnovers Forced",        abbr: "TF",      higher: true, requirePos: "Beater" },
-  { key: "TF_GP",     label: "Turnovers Forced per Game", abbr: "TF/GP", higher: true,  minGP: 10, requirePos: "Beater" },
-  { key: "TP",        label: "Teammates Protected",     abbr: "TP",      higher: true, requirePos: "Beater" },
-  { key: "TP_GP",     label: "Teammates Protected per Game", abbr: "TP/GP", higher: true, minGP: 10, requirePos: "Beater" },
+  { key: "GSC",        label: "Snitch Catches",              abbr: "GSC",      higher: true,  requirePos: "Seeker" },
+  { key: "GSC_PCT",    label: "Snitch %",                    abbr: "GSC%",     higher: true,  minGP: 10, requirePos: "Seeker" },
+  { key: "MIN_GSC",    label: "Minutes per Snitch",          abbr: "MIN/GSC",  higher: false, minGP: 10, requirePos: "Seeker" },
+  // Keeper
+  { key: "KSF",        label: "Shots Faced",                 abbr: "SF",       higher: true,  requirePos: "Keeper" },
+  { key: "KSF_GP",     label: "Shots Faced per Game",        abbr: "SF/GP",    higher: true,  minGP: 10, requirePos: "Keeper" },
+  { key: "KS",         label: "Saves",                       abbr: "SV",       higher: true,  requirePos: "Keeper" },
+  { key: "SV_PCT",     label: "Save %",                      abbr: "SV%",      higher: true,  minGP: 10, requirePos: "Keeper" },
+  { key: "KS_GP",      label: "Saves per Game",              abbr: "SV/GP",    higher: true,  minGP: 10, requirePos: "Keeper" },
+  { key: "PASS_PCT_K", label: "Pass % (Keeper)",             abbr: "KP%",      higher: true,  minGP: 10, requirePos: "Keeper" },
+  // Beater
+  { key: "BH",         label: "Bludgers Hit",                abbr: "BH",       higher: true,  requirePos: "Beater" },
+  { key: "BH_GP",      label: "Bludgers Hit per Game",       abbr: "BH/GP",    higher: true,  minGP: 10, requirePos: "Beater" },
+  { key: "TF",         label: "Turnovers Forced",            abbr: "TF",       higher: true,  requirePos: "Beater" },
+  { key: "TF_GP",      label: "Turnovers Forced per Game",   abbr: "TF/GP",    higher: true,  minGP: 10, requirePos: "Beater" },
+  { key: "TP",         label: "Teammates Protected",         abbr: "TP",       higher: true,  requirePos: "Beater" },
+  { key: "TP_GP",      label: "Teammates Protected per Game", abbr: "TP/GP",   higher: true,  minGP: 10, requirePos: "Beater" },
 ];
 
 const REGS: { key: RegType; label: string }[] = [
@@ -136,7 +143,7 @@ const REGS: { key: RegType; label: string }[] = [
 ];
 
 function val(line: SLLine, cat: StatCat): number | null {
-  const { GP, G, GSC, KS, KSF, MIN, BH, TF, TP, ShotAtt, ShotScored, PassAtt, PassComp } = line;
+  const { GP, G, GSC, KS, KSF, MIN, BH, TF, TP, ShotAtt, ShotScored, PassAtt, PassComp, KPassAtt, KPassComp } = line;
   const statDef = STATS.find(s => s.key === cat);
   const minGP = statDef?.minGP ?? 0;
   if (GP < minGP) return null;
@@ -145,7 +152,7 @@ function val(line: SLLine, cat: StatCat): number | null {
     case "MIN": return MIN > 0 ? MIN : null;
     case "G": return G > 0 ? G : null;
     case "G_GP": return GP > 0 && G > 0 ? G / GP : null;
-    case "SH_PCT": return ShotAtt > 0 && G > 0 ? ShotScored / ShotAtt : null;
+    case "SH_PCT": return ShotAtt > 0 ? ShotScored / ShotAtt : null;
     case "PASS_PCT_C": return PassAtt > 0 ? PassComp / PassAtt : null;
     case "MIN_G": return G > 0 && MIN > 0 ? MIN / G : null;
     case "GSC": return GSC > 0 ? GSC : null;
@@ -156,6 +163,7 @@ function val(line: SLLine, cat: StatCat): number | null {
     case "KS": return KS > 0 ? KS : null;
     case "SV_PCT": return KSF > 0 ? KS / KSF : null;
     case "KS_GP": return GP > 0 && KS > 0 ? KS / GP : null;
+    case "PASS_PCT_K": return KPassAtt > 0 ? KPassComp / KPassAtt : null;
     case "BH": return BH > 0 ? BH : null;
     case "BH_GP": return GP > 0 && BH > 0 ? BH / GP : null;
     case "TF": return TF > 0 ? TF : null;
@@ -167,8 +175,7 @@ function val(line: SLLine, cat: StatCat): number | null {
 
 function fmt(v: number | null, cat: StatCat): string {
   if (v === null) return "—";
-  if (cat === "GSC_PCT" || cat === "SV_PCT") return (v * 100).toFixed(1) + "%";
-  if (cat === "SH_PCT" || cat === "PASS_PCT_C") return (v * 100).toFixed(1) + "%";
+  if (["GSC_PCT", "SV_PCT", "SH_PCT", "PASS_PCT_C", "PASS_PCT_K"].includes(cat)) return (v * 100).toFixed(1) + "%";
   if (["MIN_G", "MIN_GSC", "KSF_GP", "KS_GP", "G_GP", "BH_GP", "TF_GP", "TP_GP"].includes(cat)) return v.toFixed(2);
   return String(Math.round(v));
 }
@@ -191,7 +198,6 @@ export default function LeadersIndex() {
   };
 
   const [rawStats, setRawStats] = useState<RawStat[]>([]);
-  const [rawMin, setRawMin] = useState<MinRow[]>([]);
   const [playerMap, setPlayerMap] = useState<Map<string, number>>(new Map());
   const [leagues, setLeagues] = useState<LeagueInfo[]>([]);
   const [intlTeamNames, setIntlTeamNames] = useState<Set<string>>(new Set());
@@ -201,15 +207,17 @@ export default function LeadersIndex() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const [statsData, minData, pl, lg, teamsData] = await Promise.all([
-        fetchAllRows<RawStat>("stats"),
-        fetchAllRows<MinRow>("player_season_minutes"),
-        fetchAllRows("players", { select: "PlayerID, PlayerName" }),
+      const [statsData, pl, lg, teamsData] = await Promise.all([
+        // Single view replaces both stats + player_season_minutes
+        fetchAllRows<RawStat>("player_season_stats", {
+          select: "PlayerName,Position,Nation,FullName,SeasonID,LeagueName,GamesPlayed,MinPlayed,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,ShotAtt,ShotScored,PassAtt,PassComp,KeeperPassAtt,KeeperPassComp,BludgersHit,TurnoversForced,TeammatesProtected",
+          order: { column: "PlayerName", ascending: true },
+        }),
+        fetchAllRows("players", { select: "PlayerID, PlayerName", order: { column: "PlayerID", ascending: true } }),
         supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier"),
-        fetchAllRows("teams", { select: "TeamID, FullName" }),
+        fetchAllRows("teams", { select: "TeamID, FullName", order: { column: "TeamID", ascending: true } }),
       ]);
       setRawStats(statsData);
-      setRawMin(minData);
       const pm = new Map<string, number>();
       (pl || []).forEach((p: any) => { if (p.PlayerName) pm.set(p.PlayerName, p.PlayerID); });
       setPlayerMap(pm);
@@ -219,7 +227,6 @@ export default function LeadersIndex() {
         (lg.data as LeagueInfo[]).forEach(l => { if (l.LeagueName && l.LeagueID) lim.set(l.LeagueName, l.LeagueID); });
         setLeagueIdByName(lim);
       }
-      // Teams with ID > 1000 are national/international teams
       const intlNames = new Set<string>();
       (teamsData || []).forEach((t: any) => { if (t.TeamID > 1000 && t.FullName) intlNames.add(t.FullName); });
       setIntlTeamNames(intlNames);
@@ -230,21 +237,8 @@ export default function LeadersIndex() {
   /* intl league names set — kept for reference but intl scope now uses team IDs */
   const intlLeagues = useMemo(() => new Set(leagues.filter(l => l.LeagueTier === 0).map(l => l.LeagueName)), [leagues]);
 
-  /* season+league lines */
+  /* season+league lines — built directly from player_season_stats view */
   const slLines = useMemo(() => {
-    // build minutes map
-    const minMap = new Map<string, number>();
-    rawMin.forEach(m => {
-      if (!m.PlayerName || m.SeasonID == null || !m.LeagueName) return;
-      // filter scope — intl = played for a national team (TeamID > 1000)
-      const isIntl = m.FullName ? intlTeamNames.has(m.FullName) : intlLeagues.has(m.LeagueName);
-      if (scope === "club" && isIntl) return;
-      if (scope === "intl" && !isIntl) return;
-      const key = `${m.PlayerName}||${m.SeasonID}||${m.LeagueName}`;
-      minMap.set(key, (minMap.get(key) || 0) + (m.MinutesPlayed || 0));
-    });
-
-    // aggregate stats
     const map = new Map<string, SLLine>();
     rawStats.forEach(s => {
       if (!s.PlayerName || s.SeasonID == null || !s.LeagueName) return;
@@ -261,9 +255,11 @@ export default function LeadersIndex() {
           Teams: [],
           Positions: [],
           Nation: s.Nation || "",
-          GP: 0, G: 0, GSC: 0, KS: 0, KSF: 0,
-          MIN: minMap.get(key) || 0,
-          BH: 0, TF: 0, TP: 0, ShotAtt: 0, ShotScored: 0, PassAtt: 0, PassComp: 0,
+          GP: 0, G: 0, GSC: 0, KS: 0, KSF: 0, MIN: 0,
+          BH: 0, TF: 0, TP: 0,
+          ShotAtt: 0, ShotScored: 0,
+          PassAtt: 0, PassComp: 0,
+          KPassAtt: 0, KPassComp: 0,
         };
         map.set(key, line);
       }
@@ -272,11 +268,21 @@ export default function LeadersIndex() {
       line.GSC += s.GoldenSnitchCatches || 0;
       line.KS += s.KeeperSaves || 0;
       line.KSF += s.KeeperShotsFaced || 0;
+      line.MIN += s.MinPlayed || 0;
+      line.BH += s.BludgersHit || 0;
+      line.TF += s.TurnoversForced || 0;
+      line.TP += s.TeammatesProtected || 0;
+      line.ShotAtt += s.ShotAtt || 0;
+      line.ShotScored += s.ShotScored || 0;
+      line.PassAtt += s.PassAtt || 0;
+      line.PassComp += s.PassComp || 0;
+      line.KPassAtt += s.KeeperPassAtt || 0;
+      line.KPassComp += s.KeeperPassComp || 0;
       if (s.FullName && !line.Teams.includes(s.FullName)) line.Teams.push(s.FullName);
       if (s.Position && !line.Positions.includes(s.Position)) line.Positions.push(s.Position);
     });
     return [...map.values()];
-  }, [rawStats, rawMin, scope, intlLeagues, intlTeamNames]);
+  }, [rawStats, scope, intlLeagues, intlTeamNames]);
 
   /* season lines (per player per season, across leagues) */
   const seasonLines = useMemo(() => {
@@ -297,6 +303,7 @@ export default function LeadersIndex() {
         line.BH += sl.BH; line.TF += sl.TF; line.TP += sl.TP;
         line.ShotAtt += sl.ShotAtt; line.ShotScored += sl.ShotScored;
         line.PassAtt += sl.PassAtt; line.PassComp += sl.PassComp;
+        line.KPassAtt += sl.KPassAtt; line.KPassComp += sl.KPassComp;
         sl.Teams.forEach(t => { if (!line!.Teams.includes(t)) line!.Teams.push(t); });
         sl.Positions.forEach(p => { if (!line!.Positions.includes(p)) line!.Positions.push(p); });
       }
@@ -318,6 +325,7 @@ export default function LeadersIndex() {
           LatestSeason: sl.SeasonID,
           GP: 0, G: 0, GSC: 0, KS: 0, KSF: 0, MIN: 0,
           BH: 0, TF: 0, TP: 0, ShotAtt: 0, ShotScored: 0, PassAtt: 0, PassComp: 0,
+          KPassAtt: 0, KPassComp: 0,
         };
         map.set(sl.PlayerName, c);
       }
@@ -330,6 +338,7 @@ export default function LeadersIndex() {
       c.BH += sl.BH; c.TF += sl.TF; c.TP += sl.TP;
       c.ShotAtt += sl.ShotAtt; c.ShotScored += sl.ShotScored;
       c.PassAtt += sl.PassAtt; c.PassComp += sl.PassComp;
+      c.KPassAtt += sl.KPassAtt; c.KPassComp += sl.KPassComp;
       sl.Positions.forEach(p => { if (!c!.Positions.includes(p)) c!.Positions.push(p); });
       if (sl.SeasonID > c.LatestSeason) {
         c.LatestSeason = sl.SeasonID;
@@ -344,6 +353,7 @@ export default function LeadersIndex() {
   /* compute leaderboard for given register */
   const leaderboard = useMemo(() => {
     const info = STATS.find(s => s.key === stat)!;
+    const reqPos = info.requirePos;
     const sortFn = (a: any, b: any) => {
       const va = val(a, stat);
       const vb = val(b, stat);
@@ -352,7 +362,12 @@ export default function LeadersIndex() {
       if (vb === null) return -1;
       return info.higher ? vb - va : va - vb;
     };
-    const filterValid = (line: any) => val(line, stat) !== null;
+    // Filter: stat must have a value AND player must play the required position (if any)
+    const filterValid = (line: any) => {
+      if (val(line, stat) === null) return false;
+      if (reqPos && !line.Positions?.includes(reqPos)) return false;
+      return true;
+    };
 
     if (register === "career") {
       return careerLines.filter(filterValid).sort(sortFn).slice(0, 25).map(c => ({
@@ -376,18 +391,19 @@ export default function LeadersIndex() {
       // Row for season X shows who had the career-best stat value as of the end of that season
       const info2 = STATS.find(s => s.key === stat)!;
       const allSeasons = [...new Set(seasonLines.map(s => s.SeasonID))].sort((a, b) => a - b);
-      const cum = new Map<string, { GP: number; G: number; GSC: number; KS: number; KSF: number; MIN: number; BH: number; TF: number; TP: number; ShotAtt: number; ShotScored: number; PassAtt: number; PassComp: number; team: string; Positions: string[]; Nation: string }>();
+      const cum = new Map<string, { GP: number; G: number; GSC: number; KS: number; KSF: number; MIN: number; BH: number; TF: number; TP: number; ShotAtt: number; ShotScored: number; PassAtt: number; PassComp: number; KPassAtt: number; KPassComp: number; team: string; Positions: string[]; Nation: string }>();
       const entries: any[] = [];
 
       allSeasons.forEach(sid => {
         // Add this season's stats to each player's cumulative total
         seasonLines.filter(s => s.SeasonID === sid).forEach(s => {
           let c = cum.get(s.PlayerName);
-          if (!c) c = { GP: 0, G: 0, GSC: 0, KS: 0, KSF: 0, MIN: 0, BH: 0, TF: 0, TP: 0, ShotAtt: 0, ShotScored: 0, PassAtt: 0, PassComp: 0, team: s.Teams[0] || "", Positions: [], Nation: s.Nation };
+          if (!c) c = { GP: 0, G: 0, GSC: 0, KS: 0, KSF: 0, MIN: 0, BH: 0, TF: 0, TP: 0, ShotAtt: 0, ShotScored: 0, PassAtt: 0, PassComp: 0, KPassAtt: 0, KPassComp: 0, team: s.Teams[0] || "", Positions: [], Nation: s.Nation };
           c.GP += s.GP; c.G += s.G; c.GSC += s.GSC; c.KS += s.KS; c.KSF += s.KSF; c.MIN += s.MIN;
           c.BH += s.BH; c.TF += s.TF; c.TP += s.TP;
           c.ShotAtt += s.ShotAtt; c.ShotScored += s.ShotScored;
           c.PassAtt += s.PassAtt; c.PassComp += s.PassComp;
+          c.KPassAtt += s.KPassAtt; c.KPassComp += s.KPassComp;
           c.team = s.Teams[0] || c.team;
           s.Positions.forEach(p => { if (!c!.Positions.includes(p)) c!.Positions.push(p); });
           cum.set(s.PlayerName, c);
@@ -641,7 +657,22 @@ export default function LeadersIndex() {
         </div>
 
         {loading ? (
-          <p className="text-muted-foreground font-sans py-8 text-center">Loading statistics...</p>
+          <div className="border border-border rounded overflow-hidden">
+            <div className="bg-table-header px-3 py-2">
+              <p className="text-table-header-foreground font-sans text-sm font-medium">Loading statistics…</p>
+            </div>
+            <div className="bg-card divide-y divide-border">
+              {[...Array(10)].map((_, i) => (
+                <div key={i} className="px-3 py-2.5 flex items-center gap-4 animate-pulse">
+                  <div className="w-6 h-3 bg-muted rounded" />
+                  <div className="flex-1 h-3 bg-muted rounded" style={{ width: `${50 + Math.random() * 30}%` }} />
+                  <div className="w-20 h-3 bg-muted rounded" />
+                  <div className="w-16 h-3 bg-muted rounded" />
+                  <div className="w-12 h-3 bg-muted rounded" />
+                </div>
+              ))}
+            </div>
+          </div>
         ) : isProgressive ? (
           /* Progressive: register showing who led each year */
           <div className="border border-border rounded overflow-hidden">

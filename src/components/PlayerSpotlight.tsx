@@ -28,10 +28,11 @@ export function PlayerSpotlight() {
         .limit(1);
       const latestSeason = mdData?.[0]?.SeasonID || 1998;
 
-      // 2. Fetch ALL players active in latest season (paginated)
-      const statsData = await fetchAllRows("stats", {
+      // 2. Fetch ALL players active in latest season
+      const statsData = await fetchAllRows("player_season_stats", {
         select: "PlayerName, FullName, Position, GamesPlayed",
         filters: [{ method: "eq", args: ["SeasonID", latestSeason] }],
+        order: { column: "PlayerName", ascending: true },
       });
 
       if (!statsData || statsData.length === 0) return;
