@@ -1,35 +1,26 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchAllRows } from "@/lib/fetchAll";
 
 type StatCategory = "Goals" | "GoldenSnitchCatches" | "KeeperSaves" | "KeeperShotsFaced" | "BludgersHit" | "TurnoversForced" | "TeammatesProtected" | "GamesPlayed";
 
-const statLabels: Record<StatCategory, { label: string; position: string | null }> = {
-  Goals:                { label: "Goals",                position: "Chaser" },
-  GoldenSnitchCatches:  { label: "Snitch Catches",       position: "Seeker" },
-  KeeperSaves:          { label: "Saves",                position: "Keeper" },
-  KeeperShotsFaced:     { label: "Shots Faced",          position: "Keeper" },
-  BludgersHit:          { label: "Bludgers Hit",         position: "Beater" },
-  TurnoversForced:      { label: "Turnovers Forced",     position: "Beater" },
-  TeammatesProtected:   { label: "Teammates Protected",  position: "Beater" },
-  GamesPlayed:          { label: "Games Played",         position: null },
+const statLabels: Record<StatCategory, { label: string; position: string | null; col: string }> = {
+  Goals:               { label: "Goals",               position: "Chaser", col: "Goals" },
+  GoldenSnitchCatches: { label: "Snitch Catches",       position: "Seeker", col: "GoldenSnitchCatches" },
+  KeeperSaves:         { label: "Saves",                position: "Keeper", col: "KeeperSaves" },
+  KeeperShotsFaced:    { label: "Shots Faced",          position: "Keeper", col: "KeeperShotsFaced" },
+  BludgersHit:         { label: "Bludgers Hit",         position: "Beater", col: "BludgersHit" },
+  TurnoversForced:     { label: "Turnovers Forced",     position: "Beater", col: "TurnoversForced" },
+  TeammatesProtected:  { label: "Teammates Protected",  position: "Beater", col: "TeammatesProtected" },
+  GamesPlayed:         { label: "Games Played",         position: null,     col: "GamesPlayed" },
 };
 
-interface StatRow {
-  PlayerName: string | null;
-  FullName: string | null;
-  Goals: number | null;
-  GoldenSnitchCatches: number | null;
-  KeeperSaves: number | null;
-  KeeperShotsFaced: number | null;
-  GamesPlayed: number | null;
-  Position: string | null;
-  LeagueName: string | null;
-  SeasonID: number | null;
-  BludgersHit: number | null;
-  TurnoversForced: number | null;
-  TeammatesProtected: number | null;
+interface LeaderRow {
+  PlayerName: string;
+  FullName: string;
+  Position: string;
+  value: number;
+  pid: number | null;
 }
 
 interface LeagueOption {
@@ -37,61 +28,90 @@ interface LeagueOption {
   LeagueName: string;
 }
 
+const seasonLabel = (id: number) => `${id - 1}–${String(id).slice(-2)}`;
+
 export function LeagueLeaders() {
-  const [allStats, setAllStats] = useState<StatRow[]>([]);
   const [category, setCategory] = useState<StatCategory>("Goals");
-  const [playerMap, setPlayerMap] = useState<Record<string, number>>({});
+  const [leaders, setLeaders] = useState<LeaderRow[]>([]);
   const [leagues, setLeagues] = useState<LeagueOption[]>([]);
   const [selectedLeague, setSelectedLeague] = useState<string>("all");
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   const [availableSeasons, setAvailableSeasons] = useState<number[]>([]);
+  const [loadingLeaders, setLoadingLeaders] = useState(false);
+  const [loadingMeta, setLoadingMeta] = useState(true);
 
+  // Load metadata: latest season and leagues — small targeted queries
   useEffect(() => {
-    const cats: StatCategory[] = ["Goals", "GoldenSnitchCatches", "KeeperSaves", "BludgersHit", "GamesPlayed"];
-    const picked = cats[Math.floor(Math.random() * cats.length)];
-    setCategory(picked);
-
-    Promise.all([
-      fetchAllRows("players", { select: "PlayerID, PlayerName" }),
-      supabase.from("leagues").select("LeagueID, LeagueName").order("LeagueTier").order("LeagueName"),
-      fetchAllRows("matchdays", { select: "SeasonID" }),
-    ]).then(([playersData, { data: leagueData }, mdData]) => {
-      const map: Record<string, number> = {};
-      (playersData || []).forEach((p: any) => { if (p.PlayerName) map[p.PlayerName] = p.PlayerID; });
-      setPlayerMap(map);
+    (async () => {
+      const [{ data: mdData }, { data: leagueData }] = await Promise.all([
+        supabase.from("matchdays").select("SeasonID").order("SeasonID", { ascending: false }).limit(200),
+        supabase.from("leagues").select("LeagueID, LeagueName").order("LeagueTier").order("LeagueName"),
+      ]);
       if (leagueData) setLeagues(leagueData as LeagueOption[]);
-      // Get available seasons from matchdays (lightweight)
-      const seasons = [...new Set((mdData || []).map((m: any) => m.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number));
-      setAvailableSeasons(seasons as number[]);
-      if (seasons.length > 0) setSelectedSeason(seasons[0] as number);
-    });
+      if (mdData) {
+        const seasons = [...new Set(mdData.map((m: any) => m.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number)) as number[];
+        setAvailableSeasons(seasons);
+        if (seasons.length > 0) setSelectedSeason(seasons[0]);
+      }
+      setLoadingMeta(false);
+
+      // Pick random starting category
+      const cats: StatCategory[] = ["Goals", "GoldenSnitchCatches", "KeeperSaves", "BludgersHit", "GamesPlayed"];
+      setCategory(cats[Math.floor(Math.random() * cats.length)]);
+    })();
   }, []);
 
-  // Fetch stats only for the selected season from the new view
-  useEffect(() => {
+  // Fetch top 10 for selected category/season/league — direct query, no pagination needed
+  const fetchLeaders = useCallback(async () => {
     if (!selectedSeason) return;
-    fetchAllRows("player_season_stats", {
-      select: "PlayerName,FullName,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,GamesPlayed,Position,LeagueName,SeasonID,BludgersHit,TurnoversForced,TeammatesProtected",
-      filters: [{ method: "eq", args: ["SeasonID", selectedSeason] }],
-    }).then((statsData) => {
-      setAllStats(statsData as StatRow[]);
-    });
-  }, [selectedSeason]);
+    setLoadingLeaders(true);
 
-  // Filter by league within the already-season-filtered stats
-  const leagueFilteredStats = selectedLeague === "all"
-    ? allStats
-    : allStats.filter(s => s.LeagueName === selectedLeague);
+    const info = statLabels[category];
+    const col = info.col;
 
-  const posFilter = statLabels[category].position;
-  const leaders = leagueFilteredStats
-    .filter(s => !posFilter || s.Position === posFilter)
-    .filter(s => ((s[category] as number) || 0) > 0)
-    .sort((a, b) => ((b[category] as number) || 0) - ((a[category] as number) || 0))
-    .slice(0, 10);
+    // Build query: order by the stat column descending, limit 15 (to allow for position filtering)
+    let q = supabase
+      .from("player_season_stats")
+      .select(`PlayerName,FullName,Position,${col},PlayerID`)
+      .eq("SeasonID", selectedSeason)
+      .gt(col, 0)
+      .order(col, { ascending: false })
+      .limit(50); // overfetch slightly to handle position + league filtering
+
+    if (selectedLeague !== "all") {
+      q = q.eq("LeagueName", selectedLeague);
+    }
+    if (info.position) {
+      q = q.eq("Position", info.position);
+    }
+
+    const { data, error } = await q;
+    if (error) {
+      console.error("LeagueLeaders fetch error:", error);
+      setLoadingLeaders(false);
+      return;
+    }
+
+    const rows: LeaderRow[] = (data || [])
+      .map((r: any) => ({
+        PlayerName: r.PlayerName || "",
+        FullName: r.FullName || "",
+        Position: r.Position || "",
+        value: r[col] || 0,
+        pid: r.PlayerID || null,
+      }))
+      .filter(r => r.value > 0)
+      .slice(0, 10);
+
+    setLeaders(rows);
+    setLoadingLeaders(false);
+  }, [selectedSeason, selectedLeague, category]);
+
+  useEffect(() => {
+    fetchLeaders();
+  }, [fetchLeaders]);
 
   const thClass = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground";
-  const seasonLabel = (id: number) => `${id - 1}–${String(id).slice(-2)}`;
 
   return (
     <div className="border border-border rounded overflow-hidden">
@@ -101,22 +121,13 @@ export function LeagueLeaders() {
         </h3>
         <div className="flex items-center gap-2 flex-wrap">
           <div className="flex gap-1 flex-wrap">
-            {([
-              { key: "Goals", group: "C" },
-              { key: "GoldenSnitchCatches", group: "S" },
-              { key: "KeeperSaves", group: "K" },
-              { key: "KeeperShotsFaced", group: "K" },
-              { key: "BludgersHit", group: "B" },
-              { key: "TurnoversForced", group: "B" },
-              { key: "TeammatesProtected", group: "B" },
-              { key: "GamesPlayed", group: "" },
-            ] as { key: StatCategory; group: string }[]).map(({ key }) => (
+            {(Object.keys(statLabels) as StatCategory[]).map(cat => (
               <button
-                key={key}
-                onClick={() => setCategory(key)}
-                className={`text-xs px-2 py-0.5 rounded font-sans transition-colors ${category === key ? "bg-accent text-accent-foreground" : "text-table-header-foreground/70 hover:text-table-header-foreground"}`}
+                key={cat}
+                onClick={() => setCategory(cat)}
+                className={`text-xs px-2 py-0.5 rounded font-sans transition-colors ${category === cat ? "bg-accent text-accent-foreground" : "text-table-header-foreground/70 hover:text-table-header-foreground"}`}
               >
-                {statLabels[key].label}
+                {statLabels[cat].label}
               </button>
             ))}
           </div>
@@ -155,27 +166,32 @@ export function LeagueLeaders() {
             </tr>
           </thead>
           <tbody>
-            {leaders.map((row, i) => {
-              const pid = row.PlayerName ? playerMap[row.PlayerName] : null;
-              return (
-                <tr
-                  key={i}
-                  className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20 transition-colors`}
-                >
+            {loadingMeta || loadingLeaders ? (
+              [...Array(5)].map((_, i) => (
+                <tr key={i} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
+                  <td className="px-3 py-2 w-8"><div className="h-3 w-4 bg-muted rounded animate-pulse" /></td>
+                  <td className="px-3 py-2"><div className="h-3 w-32 bg-muted rounded animate-pulse" /></td>
+                  <td className="px-3 py-2"><div className="h-3 w-24 bg-muted rounded animate-pulse" /></td>
+                  <td className="px-3 py-2"><div className="h-3 w-12 bg-muted rounded animate-pulse" /></td>
+                  <td className="px-3 py-2 text-right"><div className="h-3 w-8 bg-muted rounded animate-pulse ml-auto" /></td>
+                </tr>
+              ))
+            ) : leaders.length === 0 ? (
+              <tr><td colSpan={5} className="px-3 py-4 text-center text-muted-foreground italic">No data available.</td></tr>
+            ) : (
+              leaders.map((row, i) => (
+                <tr key={i} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20 transition-colors`}>
                   <td className="px-3 py-1.5 font-mono text-muted-foreground">{i + 1}</td>
                   <td className="px-3 py-1.5 font-medium text-accent hover:underline">
-                    {pid ? <Link to={`/player/${pid}`}>{row.PlayerName}</Link> : row.PlayerName}
+                    {row.pid ? <Link to={`/player/${row.pid}`}>{row.PlayerName}</Link> : row.PlayerName}
                   </td>
                   <td className="px-3 py-1.5 text-accent hover:underline">
-                    <Link to={`/team/${encodeURIComponent(row.FullName || "")}`}>{row.FullName}</Link>
+                    <Link to={`/team/${encodeURIComponent(row.FullName)}`}>{row.FullName}</Link>
                   </td>
                   <td className="px-3 py-1.5 text-muted-foreground">{row.Position}</td>
-                  <td className="px-3 py-1.5 text-right font-mono font-bold">{row[category] ?? 0}</td>
+                  <td className="px-3 py-1.5 text-right font-mono font-bold">{row.value}</td>
                 </tr>
-              );
-            })}
-            {leaders.length === 0 && (
-              <tr><td colSpan={5} className="px-3 py-4 text-center text-muted-foreground italic">No data available.</td></tr>
+              ))
             )}
           </tbody>
         </table>

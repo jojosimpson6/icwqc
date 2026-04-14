@@ -207,19 +207,52 @@ export default function LeadersIndex() {
   useEffect(() => {
     (async () => {
       setLoading(true);
-      const [statsData, pl, lg, teamsData] = await Promise.all([
-        // Single view replaces both stats + player_season_minutes
-        fetchAllRows<RawStat>("player_season_stats", {
-          select: "PlayerName,Position,Nation,FullName,SeasonID,LeagueName,GamesPlayed,MinPlayed,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,ShotAtt,ShotScored,PassAtt,PassComp,KeeperPassAtt,KeeperPassComp,BludgersHit,TurnoversForced,TeammatesProtected",
-          order: { column: "PlayerName", ascending: true },
-        }),
-        fetchAllRows("players", { select: "PlayerID, PlayerName", order: { column: "PlayerID", ascending: true } }),
+
+      // Cache key — invalidate daily
+      const today = new Date().toISOString().slice(0, 10);
+      const cacheKey = `leaders_data_${today}`;
+
+      let statsData: RawStat[] | null = null;
+      let playersData: any[] | null = null;
+
+      // Try sessionStorage cache first
+      try {
+        const cached = sessionStorage.getItem(cacheKey);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          statsData = parsed.stats;
+          playersData = parsed.players;
+        }
+      } catch {
+        // sessionStorage unavailable or quota exceeded — fetch fresh
+      }
+
+      // Fetch what we don't have cached
+      const [lg, teamsData] = await Promise.all([
         supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier"),
         fetchAllRows("teams", { select: "TeamID, FullName", order: { column: "TeamID", ascending: true } }),
       ]);
-      setRawStats(statsData);
+
+      if (!statsData || !playersData) {
+        [statsData, playersData] = await Promise.all([
+          fetchAllRows<RawStat>("player_season_stats", {
+            select: "PlayerName,Position,Nation,FullName,SeasonID,LeagueName,GamesPlayed,MinPlayed,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,ShotAtt,ShotScored,PassAtt,PassComp,KeeperPassAtt,KeeperPassComp,BludgersHit,TurnoversForced,TeammatesProtected",
+            order: { column: "PlayerName", ascending: true },
+          }),
+          fetchAllRows("players", { select: "PlayerID, PlayerName", order: { column: "PlayerID", ascending: true } }),
+        ]);
+
+        // Save to sessionStorage for this browser session
+        try {
+          sessionStorage.setItem(cacheKey, JSON.stringify({ stats: statsData, players: playersData }));
+        } catch {
+          // Quota exceeded — just continue without caching
+        }
+      }
+
+      setRawStats(statsData || []);
       const pm = new Map<string, number>();
-      (pl || []).forEach((p: any) => { if (p.PlayerName) pm.set(p.PlayerName, p.PlayerID); });
+      (playersData || []).forEach((p: any) => { if (p.PlayerName) pm.set(p.PlayerName, p.PlayerID); });
       setPlayerMap(pm);
       if (lg.data) {
         setLeagues(lg.data as LeagueInfo[]);

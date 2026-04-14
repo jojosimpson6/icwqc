@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchAllRows } from "@/lib/fetchAll";
 import { formatHeight, getNationFlag } from "@/lib/helpers";
 
 interface SpotlightPlayer {
@@ -20,7 +19,7 @@ export function PlayerSpotlight() {
 
   useEffect(() => {
     (async () => {
-      // 1. Get latest season ID
+      // 1. Get latest season
       const { data: mdData } = await supabase
         .from("matchdays")
         .select("SeasonID")
@@ -28,61 +27,64 @@ export function PlayerSpotlight() {
         .limit(1);
       const latestSeason = mdData?.[0]?.SeasonID || 1998;
 
-      // 2. Fetch ALL players active in latest season
-      const statsData = await fetchAllRows("player_season_stats", {
-        select: "PlayerName, FullName, Position, GamesPlayed",
-        filters: [{ method: "eq", args: ["SeasonID", latestSeason] }],
-        order: { column: "PlayerName", ascending: true },
-      });
+      // 2. Get total count of active players this season
+      const { count } = await supabase
+        .from("player_season_stats")
+        .select("*", { count: "exact", head: true })
+        .eq("SeasonID", latestSeason);
 
-      if (!statsData || statsData.length === 0) return;
+      if (!count || count === 0) return;
 
-      // Deduplicate — keep best GP per player
-      const metaMap = new Map<string, { team: string; pos: string; gp: number }>();
-      statsData.forEach((s: any) => {
-        if (!s.PlayerName) return;
-        const existing = metaMap.get(s.PlayerName);
-        const gp = s.GamesPlayed || 0;
-        if (!existing || gp > existing.gp) {
-          metaMap.set(s.PlayerName, { team: s.FullName || "", pos: s.Position || "", gp });
-        }
-      });
-
-      // True random: use Fisher-Yates on indices
-      const names = [...metaMap.keys()];
-      for (let i = names.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [names[i], names[j]] = [names[j], names[i]];
+      // 3. Pick 6 random offsets, fetch one row each in parallel
+      const usedOffsets = new Set<number>();
+      while (usedOffsets.size < Math.min(6, count)) {
+        usedOffsets.add(Math.floor(Math.random() * count));
       }
-      const chosen = names.slice(0, 6);
+
+      const rowFetches = [...usedOffsets].map(offset =>
+        supabase
+          .from("player_season_stats")
+          .select("PlayerID,PlayerName,FullName,Position,GamesPlayed")
+          .eq("SeasonID", latestSeason)
+          .order("PlayerName", { ascending: true })
+          .range(offset, offset)
+      );
+
+      const results = await Promise.all(rowFetches);
+      const chosen = results
+        .map(r => r.data?.[0])
+        .filter(Boolean)
+        .filter((p, idx, arr) => arr.findIndex(x => x.PlayerID === p.PlayerID) === idx); // dedupe
+
       if (chosen.length === 0) return;
 
-      // 3. Fetch player details for the 6 chosen
-      const { data: pData } = await supabase
-        .from("players")
-        .select("PlayerID, PlayerName, Height, NationalityID, headshot_url")
-        .in("PlayerName", chosen);
-      if (!pData) return;
+      const pids = chosen.map((p: any) => p.PlayerID).filter(Boolean);
 
-      // 4. Fetch nation names
-      const natIds = [...new Set(pData.map((p: any) => p.NationalityID).filter(Boolean))];
-      const nationMap = new Map<number, string>();
-      if (natIds.length > 0) {
-        const { data: nData } = await supabase
+      // 4. Fetch player bios for the chosen IDs
+      const [{ data: pData }, { data: nData }] = await Promise.all([
+        supabase
+          .from("players")
+          .select("PlayerID, PlayerName, Height, NationalityID, headshot_url")
+          .in("PlayerID", pids),
+        supabase
           .from("nations")
           .select("NationID, Nation, ValidToDt")
-          .in("NationID", natIds)
-          .order("ValidToDt", { ascending: false });
-        (nData || []).forEach((n: any) => {
-          if (n.NationID && !nationMap.has(n.NationID)) nationMap.set(n.NationID, n.Nation || "");
-        });
-      }
+          .order("ValidToDt", { ascending: false }),
+      ]);
 
-      const result: SpotlightPlayer[] = pData.map((p: any) => {
-        const meta = metaMap.get(p.PlayerName) || { team: "", pos: "", gp: 0 };
+      const nationMap = new Map<number, string>();
+      (nData || []).forEach((n: any) => {
+        if (n.NationID && !nationMap.has(n.NationID)) nationMap.set(n.NationID, n.Nation || "");
+      });
+
+      const teamMap = new Map<number, { team: string; pos: string }>();
+      chosen.forEach((c: any) => teamMap.set(c.PlayerID, { team: c.FullName || "", pos: c.Position || "" }));
+
+      const result: SpotlightPlayer[] = (pData || []).map((p: any) => {
+        const meta = teamMap.get(p.PlayerID) || { team: "", pos: "" };
         return {
           PlayerID: p.PlayerID,
-          PlayerName: p.PlayerName,
+          PlayerName: p.PlayerName || "",
           Position: meta.pos,
           Height: p.Height,
           NationalityID: p.NationalityID,
@@ -103,7 +105,15 @@ export function PlayerSpotlight() {
       </div>
       <div className="bg-card divide-y divide-border">
         {players.length === 0 && (
-          <p className="px-3 py-4 text-xs text-muted-foreground italic">Loading...</p>
+          [...Array(6)].map((_, i) => (
+            <div key={i} className="flex items-center gap-3 px-3 py-2.5 animate-pulse">
+              <div className="w-10 h-10 rounded-full bg-muted shrink-0" />
+              <div className="flex-1 space-y-2">
+                <div className="h-3 w-28 bg-muted rounded" />
+                <div className="h-2 w-40 bg-muted rounded" />
+              </div>
+            </div>
+          ))
         )}
         {players.map((p) => (
           <Link
