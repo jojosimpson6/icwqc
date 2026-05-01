@@ -616,7 +616,11 @@ export default function LeaguePage() {
                                   );
                                   return (
                                     <tr key={awardName} className={`border-t border-border ${ai % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
-                                      <td className="px-2 py-1.5 font-medium">{awardName}</td>
+                                      <td className="px-2 py-1.5 font-medium">
+                                        <Link to={`/league/${league.LeagueID}/award/${encodeURIComponent(awardName)}`} className="text-accent hover:underline">
+                                          {awardName}
+                                        </Link>
+                                      </td>
                                       {cell(first, "bg-highlight/20")}
                                       {cell(second, "bg-secondary/60")}
                                       {cell(third, "bg-muted/40")}
