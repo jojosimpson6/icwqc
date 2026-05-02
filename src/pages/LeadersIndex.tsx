@@ -142,7 +142,7 @@ const REGS: { key: RegType; label: string }[] = [
   { key: "yby", label: "Year-by-Year" },
 ];
 
-function val(line: SLLine, cat: StatCat): number | null {
+function val(line: any, cat: StatCat): number | null {
   const { GP, G, GSC, KS, KSF, MIN, BH, TF, TP, ShotAtt, ShotScored, PassAtt, PassComp, KPassAtt, KPassComp } = line;
   const statDef = STATS.find(s => s.key === cat);
   const minGP = statDef?.minGP ?? 0;
