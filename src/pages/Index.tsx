@@ -6,8 +6,12 @@ import { LeagueLeaders } from "@/components/LeagueLeaders";
 import { HomeStandings } from "@/components/HomeStandings";
 import { ScoreTicker } from "@/components/ScoreTicker";
 import { EloChart } from "@/components/EloChart";
+import { useState } from "react";
+import { Link } from "react-router-dom";
 
 const Index = () => {
+  const [eloOpen, setEloOpen] = useState(false);
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <SiteHeader />
@@ -26,14 +30,31 @@ const Index = () => {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Main content — News is the focus */}
             <div className="lg:col-span-2 space-y-6">
               <NewsFeed />
               <LeagueLeaders />
-              <EloChart />
+              {/* Elo chart — collapsible, links to full page */}
+              <div className="border border-border rounded overflow-hidden">
+                <div
+                  className="bg-table-header px-3 py-2 flex items-center justify-between cursor-pointer"
+                  onClick={() => setEloOpen(o => !o)}
+                >
+                  <h3 className="font-display text-sm font-bold text-table-header-foreground">Team Elo Ratings</h3>
+                  <div className="flex items-center gap-3">
+                    <Link
+                      to="/elo"
+                      className="text-xs text-table-header-foreground/70 hover:text-table-header-foreground font-sans"
+                      onClick={e => e.stopPropagation()}
+                    >
+                      Full page →
+                    </Link>
+                    <span className="text-table-header-foreground/70 text-xs">{eloOpen ? "▲ collapse" : "▼ expand"}</span>
+                  </div>
+                </div>
+                {eloOpen && <EloChart />}
+              </div>
             </div>
 
-            {/* Sidebar */}
             <div className="space-y-6">
               <PlayerSpotlight />
               <HomeStandings />

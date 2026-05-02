@@ -162,7 +162,7 @@ export default function PlayerProfile() {
   const [leagueLeaders, setLeagueLeaders] = useState<LeagueLeaderEntry[]>([]);
   const [leagueMaxes, setLeagueMaxes] = useState<Map<string, Map<string, number>>>(new Map());
   const [matchLog, setMatchLog] = useState<MatchLogEntry[]>([]);
-  const [matchLogOpen, setMatchLogOpen] = useState(true);
+  const [matchLogOpen, setMatchLogOpen] = useState(false);
   const [matchLogSeason, setMatchLogSeason] = useState<number | "all">("all");
   const [matchLogSortKey, setMatchLogSortKey] = useState<string>("date");
   const [matchLogSortDir, setMatchLogSortDir] = useState<"asc" | "desc">("asc");
@@ -188,7 +188,7 @@ export default function PlayerProfile() {
 
     // Fetch player awards + league name map
     Promise.all([
-      supabase.from("awards").select("*").eq("playerid", pid).order("seasonid", { ascending: false }).order("awardname").order("placement"),
+      supabase.from("awards").select("*").eq("playerid", pid).order("seasonid", { ascending: true }).order("awardname").order("placement"),
       cachedQuery("leagues:all", () => supabase.from("leagues").select("LeagueID, LeagueName").then(r => r)),
     ]).then(([{ data: awardsData }, { data: leaguesData }]) => {
       const lnm = new Map<number, string>();
@@ -366,7 +366,7 @@ export default function PlayerProfile() {
         }
       }
       setLeagueMaxes(maxMap);
-      awardEntries.sort((a, b) => { if (a.scope !== b.scope) return a.scope === "league" ? -1 : 1; return b.SeasonID - a.SeasonID; });
+      awardEntries.sort((a, b) => { if (a.scope !== b.scope) return a.scope === "league" ? -1 : 1; return a.SeasonID - b.SeasonID; });
       setLeagueLeaders(awardEntries);
     });
   }, [id]);
@@ -988,7 +988,7 @@ export default function PlayerProfile() {
                                     <td className="px-3 py-2">
                                       <div className="flex flex-wrap gap-1.5">
                                         {placements.map(pl => {
-                                          const seasonEntries = byPl.get(pl)!.sort((a, b) => b.seasonid - a.seasonid);
+                                          const seasonEntries = byPl.get(pl)!.sort((a, b) => a.seasonid - b.seasonid);
                                           return seasonEntries.map(e => (
                                             <span
                                               key={`${pl}-${e.seasonid}`}
@@ -1029,7 +1029,11 @@ export default function PlayerProfile() {
                               )}
                               <tbody>
                                 <tr className="border-t border-border/50 bg-card">
-                                  <td className="px-3 py-2 font-medium text-foreground text-sm align-top">Team of the Year</td>
+                                  <td className="px-3 py-2 font-medium text-foreground text-sm align-top">
+                                    <Link to={`/league/${lid}/award/${encodeURIComponent("Team of the Year")}`} className="hover:text-accent hover:underline">
+                                      Team of the Year
+                                    </Link>
+                                  </td>
                                   <td className="px-3 py-2">
                                     <div className="flex flex-wrap gap-1.5">
                                       {totySeasons.map(sid => {
@@ -1086,7 +1090,7 @@ export default function PlayerProfile() {
                         </thead>
                         <tbody>
                           {[...leaderGroups.entries()].map(([statName, entries], ai) => {
-                            const sorted = [...entries].sort((a, b) => b.SeasonID - a.SeasonID);
+                            const sorted = [...entries].sort((a, b) => a.SeasonID - b.SeasonID);
                             return (
                               <tr key={statName} className={`border-t border-border/50 ${ai % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
                                 <td className="px-3 py-2 font-medium text-foreground text-sm align-top">{statName}</td>

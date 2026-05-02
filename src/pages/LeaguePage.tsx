@@ -90,6 +90,7 @@ export default function LeaguePage() {
   const [matchResults, setMatchResults] = useState<MatchResult[]>([]);
   const [teamMap, setTeamMap] = useState<Map<number, string>>(new Map());
   const [matchDayMap, setMatchDayMap] = useState<Map<string, string>>(new Map());
+  const [awardsOpen, setAwardsOpen] = useState(false);
 
   const lid = id ? parseInt(id) : 0;
   const isCup = lid >= 15 && lid <= 18;
@@ -200,7 +201,7 @@ export default function LeaguePage() {
   awardsBySeasonMap.forEach(seasonMap => {
     seasonMap.forEach(entries => entries.sort((a, b) => a.placement - b.placement));
   });
-  const awardSeasons = [...awardsBySeasonMap.keys()].sort((a, b) => b - a);
+  const awardSeasons = [...awardsBySeasonMap.keys()].sort((a, b) => a - b);
 
   // Cup/CL match data for selected season
   const seasonMatches = matchResults.filter(r => r.SeasonID === selectedSeason);
@@ -574,10 +575,14 @@ export default function LeaguePage() {
             {/* Annual Awards */}
             {awardSeasons.length > 0 && (
               <div className="border border-border rounded overflow-hidden">
-                <div className="bg-table-header px-3 py-2">
+                <div
+                  className="bg-table-header px-3 py-2 flex items-center justify-between cursor-pointer"
+                  onClick={() => setAwardsOpen(o => !o)}
+                >
                   <h3 className="font-display text-sm font-bold text-table-header-foreground">Annual Awards</h3>
+                  <span className="text-table-header-foreground/70 text-xs font-sans">{awardsOpen ? "▲ collapse" : "▼ expand"}</span>
                 </div>
-                <div className="bg-card divide-y divide-border">
+                {awardsOpen && <div className="bg-card divide-y divide-border">
                   {awardSeasons.map(seasonId => {
                     const seasonAwards = awardsBySeasonMap.get(seasonId)!;
                     const awardNames = [...seasonAwards.keys()];
@@ -632,7 +637,11 @@ export default function LeaguePage() {
                           )}
                           {teamOfYear && teamOfYear.length > 0 && (
                             <div>
-                              <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold mb-1">Team of the Year</p>
+                              <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold mb-1">
+                                <Link to={`/league/${league.LeagueID}/award/${encodeURIComponent("Team of the Year")}`} className="hover:text-accent hover:underline">
+                                  Team of the Year →
+                                </Link>
+                              </p>
                               {(() => {
                                 const placementCounts = new Map();
                                 teamOfYear.forEach(e => placementCounts.set(e.placement, (placementCounts.get(e.placement) || 0) + 1));
@@ -703,7 +712,7 @@ export default function LeaguePage() {
                       </div>
                     );
                   })}
-                </div>
+                </div>}
               </div>
             )}
           </div>

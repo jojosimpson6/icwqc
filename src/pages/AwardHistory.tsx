@@ -59,10 +59,8 @@ export default function AwardHistory() {
         ],
         order: { column: "seasonid", ascending: false },
       }),
-      cachedQuery("players:names-nationality", () =>
-        supabase.from("players").select("PlayerID, PlayerName, Nationality").then(r => r)
-      ),
-    ]).then(([{ data: leagueData }, awardsData, { data: playerData }]) => {
+      fetchAllRows("players", { select: "PlayerID, PlayerName, Nationality" }),
+    ]).then(([{ data: leagueData }, awardsData, playerData]) => {
       if (leagueData) setLeague(leagueData);
       if (awardsData) setAwards(awardsData as AwardEntry[]);
       if (playerData) {
@@ -84,7 +82,7 @@ export default function AwardHistory() {
     if (!bySeason.has(a.seasonid)) bySeason.set(a.seasonid, []);
     bySeason.get(a.seasonid)!.push(a);
   });
-  const seasons = [...bySeason.keys()].sort((a, b) => b - a);
+  const seasons = [...bySeason.keys()].sort((a, b) => a - b);
 
   // All-time winner stats (1st place)
   const winnerStats = new Map<number, { wins: number; seasons: number[] }>();
@@ -94,6 +92,12 @@ export default function AwardHistory() {
     s.wins++;
     s.seasons.push(a.seasonid);
   });
+  const isTOTY = awardName === "Team of the Year";
+  // TOTY: detect if placement = team number or sequential slot
+  const totyPlacementCounts = new Map<number, number>();
+  awards.forEach(e => totyPlacementCounts.set(e.placement, (totyPlacementCounts.get(e.placement) || 0) + 1));
+  const totyIsTeamNumber = [...totyPlacementCounts.values()].some(c => c > 1);
+
   const leaderboard = [...winnerStats.entries()]
     .sort((a, b) => b[1].wins - a[1].wins)
     .slice(0, 10);
@@ -150,6 +154,60 @@ export default function AwardHistory() {
               <div className="bg-table-header px-3 py-2">
                 <h3 className="font-display text-sm font-bold text-table-header-foreground">Season-by-Season Results</h3>
               </div>
+              {isTOTY ? (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm font-sans">
+                    <thead>
+                      <tr className="bg-secondary">
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
+                        {totyIsTeamNumber && <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</th>}
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Players</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {seasons.flatMap((sid, i) => {
+                        const entries = (bySeason.get(sid) || []);
+                        if (totyIsTeamNumber) {
+                          return [...new Set(entries.map(e => e.placement))].sort().map(pl => {
+                            const MEDAL_MAP: Record<number, {text: string, bg: string}> = {
+                              1: {text: "text-yellow-600 dark:text-yellow-400", bg: "bg-yellow-500/10"},
+                              2: {text: "text-slate-600 dark:text-slate-300", bg: "bg-slate-400/10"},
+                              3: {text: "text-amber-700 dark:text-amber-500", bg: "bg-amber-700/10"},
+                            };
+                            const m = MEDAL_MAP[pl] || {text: "text-muted-foreground", bg: ""};
+                            return (
+                              <tr key={`${sid}-${pl}`} className={`border-t border-border ${(i+pl)%2===1?"bg-table-stripe":"bg-card"}`}>
+                                <td className="px-3 py-2 font-mono text-accent font-medium">{seasonLabel(sid)}</td>
+                                <td className={`px-3 py-2 text-xs font-bold ${m.text}`}>{pl===1?"1st":pl===2?"2nd":"3rd"} Team</td>
+                                <td className="px-3 py-2">
+                                  <div className="flex flex-wrap gap-x-3 gap-y-1">
+                                    {entries.filter(e => e.placement === pl).map(e => (
+                                      <Link key={e.playerid} to={`/player/${e.playerid}`} className="text-accent hover:underline text-sm">{playerMap.get(e.playerid) || `#${e.playerid}`}</Link>
+                                    ))}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          });
+                        } else {
+                          return [(
+                            <tr key={sid} className={`border-t border-border ${i%2===1?"bg-table-stripe":"bg-card"}`}>
+                              <td className="px-3 py-2 font-mono text-accent font-medium">{seasonLabel(sid)}</td>
+                              <td className="px-3 py-2">
+                                <div className="flex flex-wrap gap-x-3 gap-y-1">
+                                  {entries.sort((a,b)=>a.placement-b.placement).map(e => (
+                                    <Link key={e.playerid} to={`/player/${e.playerid}`} className="text-accent hover:underline text-sm">{playerMap.get(e.playerid) || `#${e.playerid}`}</Link>
+                                  ))}
+                                </div>
+                              </td>
+                            </tr>
+                          )];
+                        }
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm font-sans">
                   <thead>
@@ -201,6 +259,7 @@ export default function AwardHistory() {
                   </tbody>
                 </table>
               </div>
+              )}
             </div>
           </div>
 

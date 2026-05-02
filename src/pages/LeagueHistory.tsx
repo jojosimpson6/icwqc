@@ -64,10 +64,8 @@ export default function LeagueHistory() {
       fetchAllRows("teams", { select: "TeamID, FullName", filters: [{ method: "eq", args: ["LeagueID", lid] }] }),
       fetchAllRows("standings", { select: "*", order: { column: "totalpoints", ascending: false } }),
       fetchAllRows("awards", { select: "*", filters: [{ method: "eq", args: ["leagueid", lid] }], order: { column: "seasonid", ascending: false } }),
-      cachedQuery("players:names", () =>
-        supabase.from("players").select("PlayerID, PlayerName").then(r => r)
-      ),
-    ]).then(([{ data: leagueData }, teamData, standingsData, awardsData, { data: playerData }]) => {
+      fetchAllRows("players", { select: "PlayerID, PlayerName" }),
+    ]).then(([{ data: leagueData }, teamData, standingsData, awardsData, playerData]) => {
       if (leagueData) setLeague(leagueData);
 
       const tMap: Record<number, string> = {};
@@ -139,10 +137,8 @@ export default function LeagueHistory() {
     m.get(a.awardname)!.push(a);
   });
 
-  // All unique individual award names
-  const allAwardNames = [...new Set(
-    awards.filter(a => a.awardname !== "Team of the Year").map(a => a.awardname)
-  )].sort();
+  // All unique award names (including TOTY)
+  const allAwardNames = [...new Set(awards.map(a => a.awardname))].sort();
 
   // Champion win counts
   const championCounts = new Map<string, number>();
@@ -362,11 +358,21 @@ export default function LeagueHistory() {
                             {/* Team of the Year */}
                             {seasonAwards.has("Team of the Year") && (() => {
                               const toty = seasonAwards.get("Team of the Year")!;
+                              const placementCounts = new Map<number, number>();
+                              toty.forEach(e => placementCounts.set(e.placement, (placementCounts.get(e.placement) || 0) + 1));
+                              const isTeamNumber = [...placementCounts.values()].some(c => c > 1);
                               const placements = [...new Set(toty.map(e => e.placement))].sort();
                               return (
                                 <div className="pt-1">
-                                  <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1.5">Team of the Year</p>
-                                  {placements.map(placement => {
+                                  <div className="flex items-center gap-2 mb-1.5">
+                                    <Link
+                                      to={`/league/${id}/award/${encodeURIComponent("Team of the Year")}`}
+                                      className="text-sm font-semibold text-accent hover:underline font-sans"
+                                    >
+                                      Team of the Year →
+                                    </Link>
+                                  </div>
+                                  {isTeamNumber ? placements.map(placement => {
                                     const m = placement === 1 ? MEDAL.gold : placement === 2 ? MEDAL.silver : MEDAL.bronze;
                                     return (
                                       <div key={placement} className="mb-1 flex gap-2 flex-wrap items-center">
@@ -381,7 +387,18 @@ export default function LeagueHistory() {
                                         ))}
                                       </div>
                                     );
-                                  })}
+                                  }) : (
+                                    <div className="flex flex-wrap gap-1">
+                                      {[...toty].sort((a, b) => a.placement - b.placement).map((e, i, arr) => (
+                                        <span key={e.playerid}>
+                                          <Link to={`/player/${e.playerid}`} className="text-accent hover:underline text-xs">
+                                            {playerMap.get(e.playerid) || `#${e.playerid}`}
+                                          </Link>
+                                          {i < arr.length - 1 && <span className="text-muted-foreground">, </span>}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
                               );
                             })()}
@@ -430,14 +447,19 @@ export default function LeagueHistory() {
             )}
 
             {allAwardNames.map(awardName => {
+              const isTOTY = awardName === "Team of the Year";
               const allWinners = awards
                 .filter(a => a.awardname === awardName && a.placement === 1)
-                .sort((a, b) => b.seasonid - a.seasonid);
+                .sort((a, b) => a.seasonid - b.seasonid);
 
-              // Multi-win leaders
               const winCounts = new Map<number, number>();
               allWinners.forEach(w => winCounts.set(w.playerid, (winCounts.get(w.playerid) || 0) + 1));
               const leaders = [...winCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3);
+
+              const totySeasonEntries = awards.filter(a => a.awardname === "Team of the Year");
+              const totyPlacementCounts = new Map<number, number>();
+              totySeasonEntries.forEach(e => totyPlacementCounts.set(e.placement, (totyPlacementCounts.get(e.placement) || 0) + 1));
+              const totyIsTeamNumber = [...totyPlacementCounts.values()].some(c => c > 1);
 
               return (
                 <div key={awardName} className="border border-border rounded overflow-hidden">
@@ -451,8 +473,7 @@ export default function LeagueHistory() {
                     </Link>
                   </div>
 
-                  {/* Multi-win leaders */}
-                  {leaders.length > 0 && (
+                  {!isTOTY && leaders.length > 0 && (
                     <div className="flex flex-wrap divide-x divide-border border-b border-border">
                       {leaders.map(([pid, count], i) => {
                         const m = i === 0 ? MEDAL.gold : i === 1 ? MEDAL.silver : MEDAL.bronze;
@@ -468,42 +489,89 @@ export default function LeagueHistory() {
                     </div>
                   )}
 
-                  {/* Season-by-season table */}
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm font-sans">
-                      <thead>
-                        <tr className="bg-secondary">
-                          <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
-                          <th className={`px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground ${MEDAL.gold.rowBg}`}>🥇 Winner</th>
-                          <th className={`px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground ${MEDAL.silver.rowBg}`}>🥈 Runner-up</th>
-                          <th className={`px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground ${MEDAL.bronze.rowBg}`}>🥉 3rd Place</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {allWinners.map((w, i) => {
-                          const seasonEntries = awards.filter(a => a.awardname === awardName && a.seasonid === w.seasonid);
-                          const p2 = seasonEntries.find(e => e.placement === 2);
-                          const p3 = seasonEntries.find(e => e.placement === 3);
-                          return (
-                            <tr key={w.seasonid} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
-                              <td className="px-3 py-1.5 font-medium text-accent font-mono">{seasonLabel(w.seasonid)}</td>
-                              <td className={`px-3 py-1.5 ${MEDAL.gold.rowBg}`}>
-                                <Link to={`/player/${w.playerid}`} className="text-accent hover:underline font-semibold">
-                                  {playerMap.get(w.playerid) || `#${w.playerid}`}
-                                </Link>
-                              </td>
-                              <td className={`px-3 py-1.5 ${MEDAL.silver.rowBg}`}>
-                                {p2 ? <Link to={`/player/${p2.playerid}`} className="text-accent hover:underline">{playerMap.get(p2.playerid) || `#${p2.playerid}`}</Link> : <span className="text-muted-foreground">—</span>}
-                              </td>
-                              <td className={`px-3 py-1.5 ${MEDAL.bronze.rowBg}`}>
-                                {p3 ? <Link to={`/player/${p3.playerid}`} className="text-accent hover:underline">{playerMap.get(p3.playerid) || `#${p3.playerid}`}</Link> : <span className="text-muted-foreground">—</span>}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
+                  {isTOTY ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm font-sans">
+                        <thead>
+                          <tr className="bg-secondary">
+                            <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
+                            {totyIsTeamNumber && <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</th>}
+                            <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Players</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...new Set(totySeasonEntries.map(e => e.seasonid))].sort((a, b) => a - b).flatMap((sid, i) => {
+                            const entries = totySeasonEntries.filter(e => e.seasonid === sid);
+                            if (totyIsTeamNumber) {
+                              return [...new Set(entries.map(e => e.placement))].sort().map(pl => {
+                                const m = pl === 1 ? MEDAL.gold : pl === 2 ? MEDAL.silver : MEDAL.bronze;
+                                return (
+                                  <tr key={`${sid}-${pl}`} className={`border-t border-border ${(i + pl) % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
+                                    <td className="px-3 py-1.5 font-mono font-medium text-accent">{seasonLabel(sid)}</td>
+                                    <td className={`px-3 py-1.5 text-xs font-bold ${m.text}`}>{pl === 1 ? "1st" : pl === 2 ? "2nd" : "3rd"} Team</td>
+                                    <td className="px-3 py-1.5">
+                                      <div className="flex flex-wrap gap-2">
+                                        {entries.filter(e => e.placement === pl).map(e => (
+                                          <Link key={e.playerid} to={`/player/${e.playerid}`} className="text-accent hover:underline text-xs">{playerMap.get(e.playerid) || `#${e.playerid}`}</Link>
+                                        ))}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              });
+                            } else {
+                              return [(
+                                <tr key={sid} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
+                                  <td className="px-3 py-1.5 font-mono font-medium text-accent">{seasonLabel(sid)}</td>
+                                  <td className="px-3 py-1.5">
+                                    <div className="flex flex-wrap gap-2">
+                                      {entries.sort((a, b) => a.placement - b.placement).map(e => (
+                                        <Link key={e.playerid} to={`/player/${e.playerid}`} className="text-accent hover:underline text-xs">{playerMap.get(e.playerid) || `#${e.playerid}`}</Link>
+                                      ))}
+                                    </div>
+                                  </td>
+                                </tr>
+                              )];
+                            }
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm font-sans">
+                        <thead>
+                          <tr className="bg-secondary">
+                            <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
+                            <th className={`px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground ${MEDAL.gold.rowBg}`}>🥇 Winner</th>
+                            <th className={`px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground ${MEDAL.silver.rowBg}`}>🥈 Runner-up</th>
+                            <th className={`px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground ${MEDAL.bronze.rowBg}`}>🥉 3rd Place</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {allWinners.map((w, i) => {
+                            const seasonEntries = awards.filter(a => a.awardname === awardName && a.seasonid === w.seasonid);
+                            const p2 = seasonEntries.find(e => e.placement === 2);
+                            const p3 = seasonEntries.find(e => e.placement === 3);
+                            return (
+                              <tr key={w.seasonid} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
+                                <td className="px-3 py-1.5 font-medium text-accent font-mono">{seasonLabel(w.seasonid)}</td>
+                                <td className={`px-3 py-1.5 ${MEDAL.gold.rowBg}`}>
+                                  <Link to={`/player/${w.playerid}`} className="text-accent hover:underline font-semibold">{playerMap.get(w.playerid) || `#${w.playerid}`}</Link>
+                                </td>
+                                <td className={`px-3 py-1.5 ${MEDAL.silver.rowBg}`}>
+                                  {p2 ? <Link to={`/player/${p2.playerid}`} className="text-accent hover:underline">{playerMap.get(p2.playerid) || `#${p2.playerid}`}</Link> : <span className="text-muted-foreground">—</span>}
+                                </td>
+                                <td className={`px-3 py-1.5 ${MEDAL.bronze.rowBg}`}>
+                                  {p3 ? <Link to={`/player/${p3.playerid}`} className="text-accent hover:underline">{playerMap.get(p3.playerid) || `#${p3.playerid}`}</Link> : <span className="text-muted-foreground">—</span>}
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
               );
             })}

@@ -18,6 +18,7 @@ import NationsIndex from "./pages/NationsIndex";
 import NewsArticle from "./pages/NewsArticle";
 import LeagueHistory from "./pages/LeagueHistory";
 import AwardHistory from "./pages/AwardHistory";
+import EloPage from "./pages/EloPage";
 import LeadersIndex from "./pages/LeadersIndex";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
@@ -36,6 +37,7 @@ const App = () => (
           <Route path="/league/:id" element={<LeaguePage />} />
           <Route path="/league/:id/history" element={<LeagueHistory />} />
           <Route path="/league/:id/award/:awardName" element={<AwardHistory />} />
+          <Route path="/elo" element={<EloPage />} />
           <Route path="/leagues" element={<LeaguesIndex />} />
           <Route path="/team/:name" element={<TeamPage />} />
           <Route path="/match/:id" element={<MatchPage />} />
