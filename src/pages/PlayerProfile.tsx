@@ -230,7 +230,7 @@ export default function PlayerProfile() {
           filters: [{ method: "or", args: [allOrFilters.join(",")] }],
           order: { column: "MatchID", ascending: false },
         }),
-        cachedQuery("leagues:all", () => supabase.from("leagues").select("LeagueID,LeagueName").then(r => r)),
+        cachedQuery("leagues:all", async () => await supabase.from("leagues").select("LeagueID,LeagueName")),
         fetchAllRows("teams", { select: "TeamID, FullName" }),
         fetchAllRows("matchdays", { select: "MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek" }),
       ]);
