@@ -374,14 +374,14 @@ export default function LeadersIndex() {
     if (register === "career") {
       return careerLines.filter(filterValid).sort(sortFn).slice(0, 25).map(c => ({
         ...c, statVal: val(c, stat), team: c.Team, season: null as number | null,
-      }));
+      })) as any[];
     }
     if (register === "active") {
       const topSeasons = [...new Set(careerLines.map(c => c.LatestSeason))].sort((a, b) => b - a).slice(0, 2);
       const minActiveSeason = topSeasons[topSeasons.length - 1] ?? maxSeason;
       return careerLines.filter(c => c.LatestSeason >= minActiveSeason && filterValid(c)).sort(sortFn).slice(0, 25).map(c => ({
         ...c, statVal: val(c, stat), team: c.Team, season: null as number | null,
-      }));
+      })) as any[];
     }
     if (register === "season") {
       return seasonLines.filter(filterValid).sort(sortFn).slice(0, 25).map(s => ({
