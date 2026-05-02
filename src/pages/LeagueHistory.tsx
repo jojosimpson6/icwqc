@@ -5,6 +5,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { getLeagueTierLabel } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
+import { cachedQuery } from "@/lib/queryCache";
 
 interface League {
   LeagueID: number;
@@ -63,8 +64,10 @@ export default function LeagueHistory() {
       fetchAllRows("teams", { select: "TeamID, FullName", filters: [{ method: "eq", args: ["LeagueID", lid] }] }),
       fetchAllRows("standings", { select: "*", order: { column: "totalpoints", ascending: false } }),
       fetchAllRows("awards", { select: "*", filters: [{ method: "eq", args: ["leagueid", lid] }], order: { column: "seasonid", ascending: false } }),
-      fetchAllRows("players", { select: "PlayerID, PlayerName" }),
-    ]).then(([{ data: leagueData }, teamData, standingsData, awardsData, playerData]) => {
+      cachedQuery("players:names", () =>
+        supabase.from("players").select("PlayerID, PlayerName").then(r => r)
+      ),
+    ]).then(([{ data: leagueData }, teamData, standingsData, awardsData, { data: playerData }]) => {
       if (leagueData) setLeague(leagueData);
 
       const tMap: Record<number, string> = {};
@@ -109,7 +112,7 @@ export default function LeagueHistory() {
       if (awardsData) setAwards(awardsData as AwardEntry[]);
       if (playerData) {
         const pm = new Map<number, string>();
-        playerData.forEach((p: any) => { if (p.PlayerID && p.PlayerName) pm.set(p.PlayerID, p.PlayerName); });
+        (playerData as any[]).forEach((p: any) => { if (p.PlayerID && p.PlayerName) pm.set(p.PlayerID, p.PlayerName); });
         setPlayerMap(pm);
       }
     });

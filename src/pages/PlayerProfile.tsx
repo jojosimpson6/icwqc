@@ -5,6 +5,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { formatHeight, calculateAge, formatDate, getNationFlag } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
+import { cachedQuery } from "@/lib/queryCache";
 import { ChevronDown, ChevronRight } from "lucide-react";
 
 interface Player {
@@ -188,7 +189,7 @@ export default function PlayerProfile() {
     // Fetch player awards + league name map
     Promise.all([
       supabase.from("awards").select("*").eq("playerid", pid).order("seasonid", { ascending: false }).order("awardname").order("placement"),
-      supabase.from("leagues").select("LeagueID, LeagueName"),
+      cachedQuery("leagues:all", () => supabase.from("leagues").select("LeagueID, LeagueName").then(r => r)),
     ]).then(([{ data: awardsData }, { data: leaguesData }]) => {
       const lnm = new Map<number, string>();
       (leaguesData || []).forEach((l: any) => { if (l.LeagueID && l.LeagueName) lnm.set(l.LeagueID, l.LeagueName); });
@@ -229,7 +230,7 @@ export default function PlayerProfile() {
           filters: [{ method: "or", args: [allOrFilters.join(",")] }],
           order: { column: "MatchID", ascending: false },
         }),
-        supabase.from("leagues").select("LeagueID,LeagueName"),
+        cachedQuery("leagues:all", () => supabase.from("leagues").select("LeagueID,LeagueName").then(r => r)),
         fetchAllRows("teams", { select: "TeamID, FullName" }),
         fetchAllRows("matchdays", { select: "MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek" }),
       ]);
@@ -295,17 +296,23 @@ export default function PlayerProfile() {
       logEntries.sort((a, b) => (a.SeasonID || 0) - (b.SeasonID || 0) || (a.date || "").localeCompare(b.date || ""));
       setMatchLog(logEntries);
 
-      // Build league maxes for leader highlighting — use player_season_stats for all players
+      // Build league maxes for leader highlighting — fetch all seasons in PARALLEL (not sequential)
       const playerName = (sData[0] as any).PlayerName;
       const seasonIds = [...new Set(sData.map((s: any) => s.SeasonID).filter(Boolean))] as number[];
       const maxMap = new Map<string, Map<string, number>>();
       const awardEntries: LeagueLeaderEntry[] = [];
 
-      for (const sid of seasonIds) {
-        const seasonStats = await fetchAllRows("player_season_stats", {
-          select: "PlayerName,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,GamesPlayed,Position,SeasonID,LeagueName",
-          filters: [{ method: "eq", args: ["SeasonID", sid] }],
-        });
+      // Parallel fetch — all seasons at once, results cached by fetchAllRows
+      const allSeasonStats = await Promise.all(
+        seasonIds.map(sid =>
+          fetchAllRows("player_season_stats", {
+            select: "PlayerName,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,GamesPlayed,Position,SeasonID,LeagueName",
+            filters: [{ method: "eq", args: ["SeasonID", sid] }],
+          }).then(data => ({ sid, data }))
+        )
+      );
+
+      for (const { sid, data: seasonStats } of allSeasonStats) {
         if (!seasonStats || seasonStats.length === 0) continue;
         const grouped = new Map<string, typeof seasonStats>();
         seasonStats.forEach((r: Record<string, unknown>) => {
@@ -868,13 +875,42 @@ export default function PlayerProfile() {
             </div>
           </div>
 
-          {/* Awards & Honours */}
+          {/* Awards & Honours — Baseball Reference style */}
           {(playerAwards.length > 0 || leagueLeaders.length > 0) && (() => {
-            const placementLabel = (n: number) => n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : `${n}th`;
-            const placementColor = (n: number) => n === 1 ? "text-yellow-600 font-bold" : n === 2 ? "text-slate-500 font-semibold" : n === 3 ? "text-amber-700 font-semibold" : "text-muted-foreground";
-            const placementBg = (n: number) => n === 1 ? "bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-400" : n === 2 ? "bg-slate-50 dark:bg-slate-800/30 border-l-4 border-slate-400" : n === 3 ? "bg-amber-50 dark:bg-amber-900/20 border-l-4 border-amber-600" : "border-l-4 border-transparent";
+            const plLabel = (n: number) => n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : `${n}th`;
+            const plColor = (n: number) =>
+              n === 1 ? "text-yellow-600 dark:text-yellow-400 font-bold"
+              : n === 2 ? "text-slate-500 dark:text-slate-300 font-semibold"
+              : n === 3 ? "text-amber-700 dark:text-amber-500 font-semibold"
+              : "text-muted-foreground";
 
-            // Group leaderboard by stat
+            // ── Group formal awards by league, then by award name ──
+            // For TOTY: detect whether placement = "team number" (BIQL style, multiple players share same placement)
+            // or "player slot" (sequential 1…N, one player per placement).
+            // Heuristic: if any placement has > 1 row → it's team number. Otherwise sequential.
+
+            type AwardEntry = typeof playerAwards[0];
+
+            const totyByLeague = new Map<number, AwardEntry[]>();
+            const regularByLeague = new Map<number, AwardEntry[]>();
+
+            playerAwards.forEach(a => {
+              if (a.awardname === "Team of the Year") {
+                if (!totyByLeague.has(a.leagueid)) totyByLeague.set(a.leagueid, []);
+                totyByLeague.get(a.leagueid)!.push(a);
+              } else {
+                if (!regularByLeague.has(a.leagueid)) regularByLeague.set(a.leagueid, []);
+                regularByLeague.get(a.leagueid)!.push(a);
+              }
+            });
+
+            // All leagues that have any award
+            const allLeagueIds = [...new Set(playerAwards.map(a => a.leagueid))].sort((a, b) => a - b);
+
+            // For regular awards: group by (leagueId, awardname) → array of { seasonid, placement }
+            // Then render as a mini table: rows = seasons, cols = placement badges
+
+            // Group leaderboard by stat for the leaders section
             const leaderGroups = new Map<string, typeof leagueLeaders>();
             leagueLeaders.forEach(e => {
               if (!leaderGroups.has(e.stat)) leaderGroups.set(e.stat, []);
@@ -886,61 +922,201 @@ export default function PlayerProfile() {
                 <div className="bg-table-header px-3 py-2">
                   <h3 className="font-display text-sm font-bold text-table-header-foreground">Awards &amp; Honours</h3>
                 </div>
-                <div className="bg-card divide-y divide-border">
 
-                  {/* Formal Awards */}
-                  {playerAwards.length > 0 && (
-                    <div>
-                      <div className="px-4 py-2 bg-secondary/30">
-                        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Awards</p>
-                      </div>
-                      <div className="divide-y divide-border/50">
-                        {playerAwards.map((award) => (
-                          <div key={`${award.awardname}-${award.seasonid}-${award.placement}`}
-                            className={`flex items-center px-4 py-2.5 gap-4 ${placementBg(award.placement)}`}>
-                            <span className={`text-sm font-mono w-8 text-center shrink-0 ${placementColor(award.placement)}`}>
-                              {placementLabel(award.placement)}
-                            </span>
-                            <span className="font-medium text-sm text-foreground flex-1">{award.awardname}</span>
-                            <span className="text-xs text-muted-foreground shrink-0">{abbrevLeague(award.leagueName || null)}</span>
-                            <span className="text-xs font-mono text-muted-foreground shrink-0 w-16 text-right">{seasonLabel(award.seasonid)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
+                {/* ── Per-league award panels ── */}
+                {allLeagueIds.map(lid => {
+                  const lname = playerAwards.find(a => a.leagueid === lid)?.leagueName || `League ${lid}`;
+                  const labbr = abbrevLeague(lname);
+                  const regular = regularByLeague.get(lid) || [];
+                  const toty = totyByLeague.get(lid) || [];
 
-                  {/* Leaderboard appearances */}
-                  {leaderGroups.size > 0 && (
-                    <div>
-                      <div className="px-4 py-2 bg-secondary/30">
-                        <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Leaderboard Appearances</p>
+                  // Group regular awards by awardname
+                  const awardGroups = new Map<string, AwardEntry[]>();
+                  regular.forEach(a => {
+                    if (!awardGroups.has(a.awardname)) awardGroups.set(a.awardname, []);
+                    awardGroups.get(a.awardname)!.push(a);
+                  });
+
+                  // TOTY: detect if placement = team number or sequential slot
+                  // Group TOTY by seasonid first
+                  const totySeasonsMap = new Map<number, AwardEntry[]>();
+                  toty.forEach(a => {
+                    if (!totySeasonsMap.has(a.seasonid)) totySeasonsMap.set(a.seasonid, []);
+                    totySeasonsMap.get(a.seasonid)!.push(a);
+                  });
+                  // For display: just show "TOTY 1st Team / 2nd Team" per season using placement as team#
+                  // If placement > 3 it's probably a slot number — treat all as "Team of the Year" membership
+                  const totySeasons = [...totySeasonsMap.keys()].sort((a, b) => b - a);
+
+                  if (awardGroups.size === 0 && toty.length === 0) return null;
+
+                  return (
+                    <div key={lid} className="border-t border-border first:border-t-0">
+                      {/* League header */}
+                      <div className="px-3 py-1.5 bg-secondary/40 flex items-center gap-2">
+                        <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">{labbr}</span>
+                        <span className="text-xs text-muted-foreground font-sans">— {lname}</span>
                       </div>
-                      {[...leaderGroups.entries()].map(([statName, entries]) => (
-                        <div key={statName}>
-                          <div className="px-4 py-1.5 bg-secondary/10 border-t border-border/50">
-                            <p className="text-xs font-semibold text-foreground">{statName}</p>
-                          </div>
-                          <div className="divide-y divide-border/30">
-                            {entries.sort((a, b) => b.SeasonID - a.SeasonID).map((entry, i) => (
-                              <div key={`leader-${statName}-${i}`}
-                                className={`flex items-center px-4 py-2 gap-4 ${placementBg(entry.rank)}`}>
-                                <span className={`text-sm font-mono w-8 text-center shrink-0 ${placementColor(entry.rank)}`}>
-                                  {placementLabel(entry.rank)}
-                                </span>
-                                <span className="text-sm font-mono font-bold text-foreground w-16 shrink-0">{entry.value.toLocaleString()}</span>
-                                <span className="text-xs text-muted-foreground flex-1">
-                                  {entry.scope === "combined" ? "All Leagues" : abbrevLeague(entry.LeagueName)}
-                                </span>
-                                <span className="text-xs font-mono text-muted-foreground shrink-0 w-16 text-right">{seasonLabel(entry.SeasonID)}</span>
-                              </div>
-                            ))}
+
+                      {/* Regular awards: one row per award name, columns = winning seasons grouped */}
+                      {awardGroups.size > 0 && (
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-sm font-sans">
+                            <thead>
+                              <tr className="bg-secondary/30">
+                                <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground w-48">Award</th>
+                                <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Seasons</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {[...awardGroups.entries()].map(([awardName, entries], ai) => {
+                                // Sort seasons newest first; group by placement
+                                const byPl = new Map<number, AwardEntry[]>();
+                                entries.forEach(e => {
+                                  if (!byPl.has(e.placement)) byPl.set(e.placement, []);
+                                  byPl.get(e.placement)!.push(e);
+                                });
+                                const placements = [...byPl.keys()].sort();
+
+                                return (
+                                  <tr key={awardName} className={`border-t border-border/50 ${ai % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
+                                    <td className="px-3 py-2 font-medium text-foreground text-sm align-top">
+                                      <Link to={`/league/${lid}/award/${encodeURIComponent(awardName)}`} className="hover:text-accent hover:underline">
+                                        {awardName}
+                                      </Link>
+                                    </td>
+                                    <td className="px-3 py-2">
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {placements.map(pl => {
+                                          const seasonEntries = byPl.get(pl)!.sort((a, b) => b.seasonid - a.seasonid);
+                                          return seasonEntries.map(e => (
+                                            <span
+                                              key={`${pl}-${e.seasonid}`}
+                                              title={`${plLabel(pl)} place`}
+                                              className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono
+                                                ${pl === 1 ? "bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
+                                                  : pl === 2 ? "bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300"
+                                                  : pl === 3 ? "bg-amber-700/15 border-amber-700/40 text-amber-700 dark:text-amber-500"
+                                                  : "bg-muted/40 border-border text-muted-foreground"}`}
+                                            >
+                                              <span className="font-bold">{plLabel(pl)}</span>
+                                              <span>{seasonLabel(e.seasonid)}</span>
+                                            </span>
+                                          ));
+                                        })}
+                                      </div>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {/* Team of the Year: show per season, with team number */}
+                      {toty.length > 0 && (
+                        <div className={`${awardGroups.size > 0 ? "border-t border-border/50" : ""}`}>
+                          <div className="overflow-x-auto">
+                            <table className="w-full text-sm font-sans">
+                              {awardGroups.size === 0 && (
+                                <thead>
+                                  <tr className="bg-secondary/30">
+                                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground w-48">Award</th>
+                                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Seasons</th>
+                                  </tr>
+                                </thead>
+                              )}
+                              <tbody>
+                                <tr className="border-t border-border/50 bg-card">
+                                  <td className="px-3 py-2 font-medium text-foreground text-sm align-top">Team of the Year</td>
+                                  <td className="px-3 py-2">
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {totySeasons.map(sid => {
+                                        const entries = totySeasonsMap.get(sid)!;
+                                        // If max placement <= 3 AND multiple players share a placement → it's team number
+                                        // Otherwise treat all as just "selection" (show no team number)
+                                        const placementCounts = new Map<number, number>();
+                                        entries.forEach(e => placementCounts.set(e.placement, (placementCounts.get(e.placement) || 0) + 1));
+                                        const maxPl = Math.max(...entries.map(e => e.placement));
+                                        const isTeamNumber = maxPl <= 3 || [...placementCounts.values()].some(c => c > 1);
+
+                                        // Get this player's placement(s) for this season
+                                        const myPlacements = entries.map(e => e.placement).sort();
+                                        const uniquePlacements = [...new Set(myPlacements)];
+
+                                        return uniquePlacements.map(pl => (
+                                          <span
+                                            key={`toty-${sid}-${pl}`}
+                                            className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono
+                                              ${pl === 1 ? "bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
+                                                : pl === 2 ? "bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300"
+                                                : "bg-amber-700/15 border-amber-700/40 text-amber-700 dark:text-amber-500"}`}
+                                          >
+                                            {isTeamNumber && <span className="font-bold">{plLabel(pl)}</span>}
+                                            <span>{seasonLabel(sid)}</span>
+                                          </span>
+                                        ));
+                                      })}
+                                    </div>
+                                  </td>
+                                </tr>
+                              </tbody>
+                            </table>
                           </div>
                         </div>
-                      ))}
+                      )}
                     </div>
-                  )}
-                </div>
+                  );
+                })}
+
+                {/* ── Leaderboard appearances ── */}
+                {leaderGroups.size > 0 && (
+                  <div className="border-t border-border">
+                    <div className="px-3 py-1.5 bg-secondary/40">
+                      <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Leaderboard Appearances</span>
+                    </div>
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm font-sans">
+                        <thead>
+                          <tr className="bg-secondary/30">
+                            <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground w-48">Stat</th>
+                            <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Seasons</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {[...leaderGroups.entries()].map(([statName, entries], ai) => {
+                            const sorted = [...entries].sort((a, b) => b.SeasonID - a.SeasonID);
+                            return (
+                              <tr key={statName} className={`border-t border-border/50 ${ai % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
+                                <td className="px-3 py-2 font-medium text-foreground text-sm align-top">{statName}</td>
+                                <td className="px-3 py-2">
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {sorted.map((entry, i) => (
+                                      <span
+                                        key={i}
+                                        title={`${entry.scope === "combined" ? "All Leagues" : abbrevLeague(entry.LeagueName)} — ${entry.value.toLocaleString()}`}
+                                        className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono
+                                          ${entry.rank === 1 ? "bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
+                                            : entry.rank === 2 ? "bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300"
+                                            : entry.rank === 3 ? "bg-amber-700/15 border-amber-700/40 text-amber-700 dark:text-amber-500"
+                                            : "bg-muted/40 border-border text-muted-foreground"}`}
+                                      >
+                                        <span className="font-bold">{plLabel(entry.rank)}</span>
+                                        <span>{seasonLabel(entry.SeasonID)}</span>
+                                        <span className="opacity-60">{entry.scope === "combined" ? "★" : abbrevLeague(entry.LeagueName)}</span>
+                                      </span>
+                                    ))}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
               </div>
             );
           })()}

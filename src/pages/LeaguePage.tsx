@@ -633,11 +633,45 @@ export default function LeaguePage() {
                           {teamOfYear && teamOfYear.length > 0 && (
                             <div>
                               <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold mb-1">Team of the Year</p>
-                              {[...new Set(teamOfYear.map(e => e.placement))].sort().map(placement => {
-                                const teamEntries = teamOfYear.filter(e => e.placement === placement);
-                                return (
-                                  <div key={placement} className="mb-2">
-                                    <p className="text-xs text-muted-foreground font-mono mb-0.5">{ordinal(placement)} Team</p>
+                              {(() => {
+                                const placementCounts = new Map();
+                                teamOfYear.forEach(e => placementCounts.set(e.placement, (placementCounts.get(e.placement) || 0) + 1));
+                                const isTeamNumber = [...placementCounts.values()].some(c => c > 1);
+                                if (isTeamNumber) {
+                                  const teamNumbers = [...new Set(teamOfYear.map(e => e.placement))].sort();
+                                  return teamNumbers.map(placement => {
+                                    const teamEntries = teamOfYear.filter(e => e.placement === placement);
+                                    return (
+                                      <div key={placement} className="mb-2">
+                                        <p className="text-xs text-muted-foreground font-mono mb-0.5">{ordinal(placement)} Team</p>
+                                        <table className="w-full text-sm font-sans">
+                                          <thead>
+                                            <tr className="bg-secondary">
+                                              <th className="px-2 py-1 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Player</th>
+                                              <th className="px-2 py-1 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pos</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {teamEntries.map((entry, i) => {
+                                              const pName = playerMap.get(entry.playerid) || `Player #${entry.playerid}`;
+                                              const pos = playerPosMap.get(entry.playerid) || "—";
+                                              return (
+                                                <tr key={i} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
+                                                  <td className="px-2 py-1">
+                                                    <Link to={`/player/${entry.playerid}`} className="text-accent hover:underline font-medium">{pName}</Link>
+                                                  </td>
+                                                  <td className="px-2 py-1 text-muted-foreground text-xs">{pos}</td>
+                                                </tr>
+                                              );
+                                            })}
+                                          </tbody>
+                                        </table>
+                                      </div>
+                                    );
+                                  });
+                                } else {
+                                  const sorted = [...teamOfYear].sort((a, b) => a.placement - b.placement);
+                                  return (
                                     <table className="w-full text-sm font-sans">
                                       <thead>
                                         <tr className="bg-secondary">
@@ -646,7 +680,7 @@ export default function LeaguePage() {
                                         </tr>
                                       </thead>
                                       <tbody>
-                                        {teamEntries.map((entry, i) => {
+                                        {sorted.map((entry, i) => {
                                           const pName = playerMap.get(entry.playerid) || `Player #${entry.playerid}`;
                                           const pos = playerPosMap.get(entry.playerid) || "—";
                                           return (
@@ -660,9 +694,9 @@ export default function LeaguePage() {
                                         })}
                                       </tbody>
                                     </table>
-                                  </div>
-                                );
-                              })}
+                                  );
+                                }
+                              })()}
                             </div>
                           )}
                         </div>

@@ -5,6 +5,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { getLeagueTierLabel } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
+import { cachedQuery } from "@/lib/queryCache";
 
 interface League {
   LeagueID: number;
@@ -58,14 +59,16 @@ export default function AwardHistory() {
         ],
         order: { column: "seasonid", ascending: false },
       }),
-      fetchAllRows("players", { select: "PlayerID, PlayerName, Nationality" }),
-    ]).then(([{ data: leagueData }, awardsData, playerData]) => {
+      cachedQuery("players:names-nationality", () =>
+        supabase.from("players").select("PlayerID, PlayerName, Nationality").then(r => r)
+      ),
+    ]).then(([{ data: leagueData }, awardsData, { data: playerData }]) => {
       if (leagueData) setLeague(leagueData);
       if (awardsData) setAwards(awardsData as AwardEntry[]);
       if (playerData) {
         const pm = new Map<number, string>();
         const pnm = new Map<number, string>();
-        playerData.forEach((p: any) => {
+        (playerData as any[]).forEach((p: any) => {
           if (p.PlayerID && p.PlayerName) pm.set(p.PlayerID, p.PlayerName);
           if (p.PlayerID && p.Nationality) pnm.set(p.PlayerID, p.Nationality);
         });
