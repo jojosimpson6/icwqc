@@ -189,7 +189,7 @@ export default function PlayerProfile() {
     // Fetch player awards + league name map
     Promise.all([
       supabase.from("awards").select("*").eq("playerid", pid).order("seasonid", { ascending: true }).order("awardname").order("placement"),
-      cachedQuery("leagues:all", () => supabase.from("leagues").select("LeagueID, LeagueName").then(r => r)),
+      cachedQuery("leagues:all", async () => await supabase.from("leagues").select("LeagueID, LeagueName")),
     ]).then(([{ data: awardsData }, { data: leaguesData }]) => {
       const lnm = new Map<number, string>();
       (leaguesData || []).forEach((l: any) => { if (l.LeagueID && l.LeagueName) lnm.set(l.LeagueID, l.LeagueName); });
@@ -230,7 +230,7 @@ export default function PlayerProfile() {
           filters: [{ method: "or", args: [allOrFilters.join(",")] }],
           order: { column: "MatchID", ascending: false },
         }),
-        cachedQuery("leagues:all", () => supabase.from("leagues").select("LeagueID,LeagueName").then(r => r)),
+        cachedQuery("leagues:all", async () => await supabase.from("leagues").select("LeagueID,LeagueName")),
         fetchAllRows("teams", { select: "TeamID, FullName" }),
         fetchAllRows("matchdays", { select: "MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek" }),
       ]);
@@ -272,7 +272,7 @@ export default function PlayerProfile() {
           const g = chasers.find(([cid]) => cid === pid2)?.[1] as number || 0;
           stat = String(g);
         } else if (matchPos === "Seeker") {
-          const caught = r.SnitchCaughtBy === pid2 || (isHome ? r.HomeSeekerID === pid2 && r.HomeTeamScore > (r.AwayTeamScore as number || 0) + 140 : r.AwaySeekerID === pid2 && r.AwayTeamScore > (r.HomeTeamScore as number || 0) + 140);
+          const caught = r.SnitchCaughtBy === pid2 || (isHome ? r.HomeSeekerID === pid2 && (r.HomeTeamScore as number) > ((r.AwayTeamScore as number) || 0) + 140 : r.AwaySeekerID === pid2 && (r.AwayTeamScore as number) > ((r.HomeTeamScore as number) || 0) + 140);
           stat = caught ? "1" : "0";
         } else if (matchPos === "Keeper") {
           const saves = (isHome ? r.HomeKeeperSaves : r.AwayKeeperSaves) as number || 0;
