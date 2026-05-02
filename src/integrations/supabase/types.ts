@@ -626,6 +626,43 @@ export type Database = {
         }
         Relationships: []
       }
+      player_season_stats: {
+        Row: {
+          BludgersHit: number | null
+          BludgerShotsFaced: number | null
+          CatchAttempts: number | null
+          CatchRatePct: number | null
+          FullName: string | null
+          GamesPlayed: number | null
+          Goals: number | null
+          GoldenSnitchCatches: number | null
+          KeeperPassAtt: number | null
+          KeeperPassComp: number | null
+          KeeperPassCompPct: number | null
+          KeeperSaves: number | null
+          KeeperShotsConceded: number | null
+          KeeperShotsFaced: number | null
+          KeeperShotsParried: number | null
+          LeagueName: string | null
+          MinPlayed: number | null
+          Nation: string | null
+          PassAtt: number | null
+          PassComp: number | null
+          PassCompPct: number | null
+          PlayerID: number | null
+          PlayerName: string | null
+          Position: string | null
+          SavePct: number | null
+          SeasonID: number | null
+          ShotAccPct: number | null
+          ShotAtt: number | null
+          ShotScored: number | null
+          SnitchSpotted: number | null
+          TeammatesProtected: number | null
+          TurnoversForced: number | null
+        }
+        Relationships: []
+      }
       schedule: {
         Row: {
           away_team: string | null
