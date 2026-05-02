@@ -272,7 +272,7 @@ export default function PlayerProfile() {
           const g = chasers.find(([cid]) => cid === pid2)?.[1] as number || 0;
           stat = String(g);
         } else if (matchPos === "Seeker") {
-          const caught = r.SnitchCaughtBy === pid2 || (isHome ? r.HomeSeekerID === pid2 && r.HomeTeamScore > (r.AwayTeamScore as number || 0) + 140 : r.AwaySeekerID === pid2 && r.AwayTeamScore > (r.HomeTeamScore as number || 0) + 140);
+          const caught = r.SnitchCaughtBy === pid2 || (isHome ? r.HomeSeekerID === pid2 && (r.HomeTeamScore as number) > ((r.AwayTeamScore as number) || 0) + 140 : r.AwaySeekerID === pid2 && (r.AwayTeamScore as number) > ((r.HomeTeamScore as number) || 0) + 140);
           stat = caught ? "1" : "0";
         } else if (matchPos === "Keeper") {
           const saves = (isHome ? r.HomeKeeperSaves : r.AwayKeeperSaves) as number || 0;
