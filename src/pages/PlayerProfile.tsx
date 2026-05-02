@@ -189,7 +189,7 @@ export default function PlayerProfile() {
     // Fetch player awards + league name map
     Promise.all([
       supabase.from("awards").select("*").eq("playerid", pid).order("seasonid", { ascending: true }).order("awardname").order("placement"),
-      cachedQuery("leagues:all", () => supabase.from("leagues").select("LeagueID, LeagueName").then(r => r)),
+      cachedQuery("leagues:all", async () => await supabase.from("leagues").select("LeagueID, LeagueName")),
     ]).then(([{ data: awardsData }, { data: leaguesData }]) => {
       const lnm = new Map<number, string>();
       (leaguesData || []).forEach((l: any) => { if (l.LeagueID && l.LeagueName) lnm.set(l.LeagueID, l.LeagueName); });
