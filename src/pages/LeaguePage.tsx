@@ -103,7 +103,7 @@ export default function LeaguePage() {
     Promise.all([
       supabase.from("leagues").select("*").eq("LeagueID", lid).single(),
       fetchAllRows("teams", { select: "*", filters: [{ method: "eq", args: ["LeagueID", lid] }], order: { column: "FullName", ascending: true } }),
-      fetchAllRows<StandingRow>("standings", { select: "*", order: { column: "totalpoints", ascending: false } }),
+      fetchAllRows<StandingRow>("standings", { select: "*", filters: [{ method: "eq", args: ["LeagueID", lid] }], order: { column: "totalpoints", ascending: false } }),
       fetchAllRows("awards", { select: "*", filters: [{ method: "eq", args: ["leagueid", lid] }], order: { column: "seasonid", ascending: false } }),
       fetchAllRows("players", { select: "PlayerID, PlayerName, Position" }),
       fetchAllRows("teams", { select: "TeamID, FullName" }),

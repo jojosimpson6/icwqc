@@ -43,7 +43,6 @@ export default function AwardHistory() {
   const [league, setLeague] = useState<League | null>(null);
   const [awards, setAwards] = useState<AwardEntry[]>([]);
   const [playerMap, setPlayerMap] = useState<Map<number, string>>(new Map());
-  const [playerNationMap, setPlayerNationMap] = useState<Map<number, string>>(new Map());
 
   useEffect(() => {
     if (!id || !awardName) return;
@@ -59,19 +58,16 @@ export default function AwardHistory() {
         ],
         order: { column: "seasonid", ascending: false },
       }),
-      fetchAllRows("players", { select: "PlayerID, PlayerName, Nationality" }),
+      fetchAllRows("players", { select: "PlayerID, PlayerName" }),
     ]).then(([{ data: leagueData }, awardsData, playerData]) => {
       if (leagueData) setLeague(leagueData);
       if (awardsData) setAwards(awardsData as AwardEntry[]);
       if (playerData) {
         const pm = new Map<number, string>();
-        const pnm = new Map<number, string>();
         (playerData as any[]).forEach((p: any) => {
           if (p.PlayerID && p.PlayerName) pm.set(p.PlayerID, p.PlayerName);
-          if (p.PlayerID && p.Nationality) pnm.set(p.PlayerID, p.Nationality);
         });
         setPlayerMap(pm);
-        setPlayerNationMap(pnm);
       }
     });
   }, [id, awardName]);

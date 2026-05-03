@@ -62,7 +62,7 @@ export default function LeagueHistory() {
     Promise.all([
       supabase.from("leagues").select("*").eq("LeagueID", lid).single(),
       fetchAllRows("teams", { select: "TeamID, FullName", filters: [{ method: "eq", args: ["LeagueID", lid] }] }),
-      fetchAllRows("standings", { select: "*", order: { column: "totalpoints", ascending: false } }),
+      fetchAllRows("standings", { select: "*", filters: [{ method: "eq", args: ["LeagueID", lid] }], order: { column: "totalpoints", ascending: false } }),
       fetchAllRows("awards", { select: "*", filters: [{ method: "eq", args: ["leagueid", lid] }], order: { column: "seasonid", ascending: false } }),
       fetchAllRows("players", { select: "PlayerID, PlayerName" }),
     ]).then(([{ data: leagueData }, teamData, standingsData, awardsData, playerData]) => {
