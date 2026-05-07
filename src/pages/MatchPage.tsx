@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { SiteHeader } from "@/components/SiteHeader";
+import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
 
 type PlayerMap = Map<number, { name: string; id: number }>;
@@ -78,7 +79,7 @@ export default function MatchPage() {
 
   if (!match) {
     return (
-      <div className="min-h-screen bg-background flex flex-col">
+      <div className="min-h-screen bg-background flex flex-col pb-14 md:pb-0">
         <SiteHeader />
         <main className="flex-1 container py-8">
           <p className="text-muted-foreground font-sans">Loading match...</p>
@@ -351,6 +352,7 @@ export default function MatchPage() {
         </div>
       </main>
       <SiteFooter />
+      <MobileBottomNav />
     </div>
   );
 }

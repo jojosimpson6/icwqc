@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { SiteHeader } from "@/components/SiteHeader";
+import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
 import { EloChart } from "@/components/EloChart";
 
@@ -119,7 +120,7 @@ export default function EloPage() {
   const intlLeagues = leagues.filter(l => l.LeagueTier === 0);
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen bg-background flex flex-col pb-14 md:pb-0">
       <SiteHeader />
       <main className="flex-1 container py-8">
 
@@ -221,6 +222,7 @@ export default function EloPage() {
 
       </main>
       <SiteFooter />
+      <MobileBottomNav />
     </div>
   );
 }

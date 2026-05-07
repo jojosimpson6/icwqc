@@ -122,3 +122,14 @@
     font-family: 'JetBrains Mono', monospace;
   }
 }
+
+/* Mobile bottom nav padding */
+.pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+
+/* Hide scrollbar but keep scroll */
+.scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+
+/* Sticky first column for wide tables */
+.sticky-col { position: sticky; left: 0; z-index: 1; }
+.sticky-col-header { position: sticky; left: 0; z-index: 2; }

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
+import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
 import { useSortableTable } from "@/hooks/useSortableTable";
 import { getContrastText, formatHeight, getNationFlag, isLightColor } from "@/lib/helpers";
@@ -586,7 +587,7 @@ export default function TeamPage() {
 
   if (!team) {
     return (
-      <div className="min-h-screen bg-background flex flex-col">
+      <div className="min-h-screen bg-background flex flex-col pb-14 md:pb-0">
         <SiteHeader />
         <main className="flex-1 container py-8"><p className="text-muted-foreground font-sans">Loading team...</p></main>
         <SiteFooter />
@@ -1184,6 +1185,7 @@ export default function TeamPage() {
         })()}
       </main>
       <SiteFooter />
+      <MobileBottomNav />
     </div>
   );
 }

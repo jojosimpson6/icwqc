@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
+import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
 import { getLeagueTierLabel } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
@@ -117,7 +118,7 @@ export default function AwardHistory() {
 
   if (!league) {
     return (
-      <div className="min-h-screen bg-background flex flex-col">
+      <div className="min-h-screen bg-background flex flex-col pb-14 md:pb-0">
         <SiteHeader />
         <main className="flex-1 container py-8"><p className="text-muted-foreground font-sans">Loading...</p></main>
         <SiteFooter />
@@ -343,6 +344,7 @@ export default function AwardHistory() {
 
       </main>
       <SiteFooter />
+      <MobileBottomNav />
     </div>
   );
 }

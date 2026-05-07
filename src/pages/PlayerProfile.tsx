@@ -2,6 +2,7 @@ import { useEffect, useState, useMemo } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
+import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
 import { formatHeight, calculateAge, formatDate, getNationFlag } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
@@ -374,7 +375,7 @@ export default function PlayerProfile() {
 
   if (!player) {
     return (
-      <div className="min-h-screen bg-background flex flex-col">
+      <div className="min-h-screen bg-background flex flex-col pb-14 md:pb-0">
         <SiteHeader />
         <main className="flex-1 container py-8">
           <p className="text-muted-foreground font-sans">Loading player...</p>
@@ -585,9 +586,17 @@ export default function PlayerProfile() {
               )}
             </div>
             <div className="flex-1">
-              <h1 className="font-display text-3xl font-bold text-foreground">
-                {player.FirstName} {player.LastName}
-              </h1>
+              <div className="flex items-start justify-between gap-2">
+                <h1 className="font-display text-3xl font-bold text-foreground">
+                  {player.FirstName} {player.LastName}
+                </h1>
+                <Link
+                  to={`/compare?p1=${player.PlayerID}`}
+                  className="text-xs font-sans text-muted-foreground hover:text-accent border border-border rounded px-2 py-1 hover:border-accent transition-colors shrink-0 mt-1.5"
+                >
+                  Compare →
+                </Link>
+              </div>
               <p className="text-lg text-muted-foreground font-sans mt-1">
                 {positionDisplay} ·{" "}
                 {mostRecentTeam ? (
@@ -1202,6 +1211,7 @@ export default function PlayerProfile() {
         </div>
       </main>
       <SiteFooter />
+      <MobileBottomNav />
     </div>
   );
 }

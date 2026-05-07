@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
+import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
 import { getLeagueTierLabel } from "@/lib/helpers";
 import { useSortableTable } from "@/hooks/useSortableTable";
@@ -332,7 +333,7 @@ export default function LeaguePage() {
 
   if (!league) {
     return (
-      <div className="min-h-screen bg-background flex flex-col">
+      <div className="min-h-screen bg-background flex flex-col pb-14 md:pb-0">
         <SiteHeader />
         <main className="flex-1 container py-8"><p className="text-muted-foreground font-sans">Loading league...</p></main>
         <SiteFooter />
@@ -416,7 +417,15 @@ export default function LeaguePage() {
       <main className="flex-1 container py-8">
         <div className="mb-6 border-b-2 border-primary pb-2">
           <p className="text-xs text-muted-foreground font-sans uppercase tracking-wide">{getLeagueTierLabel(league.LeagueTier)}</p>
-          <h1 className="font-display text-3xl font-bold text-foreground">{league.LeagueName}</h1>
+          <div className="flex items-center justify-between gap-4">
+            <h1 className="font-display text-3xl font-bold text-foreground">{league.LeagueName}</h1>
+            <Link
+              to={`/league/${league.LeagueID}/history`}
+              className="text-sm font-sans text-accent hover:underline border border-border rounded px-3 py-1.5 hover:border-accent transition-colors shrink-0"
+            >
+              View History →
+            </Link>
+          </div>
           <div className="flex items-center gap-4 mt-1">
             <Link to={`/league/${league.LeagueID}/history`} className="text-sm text-accent hover:underline font-sans inline-block">
               Season-by-Season History →
@@ -745,6 +754,7 @@ export default function LeaguePage() {
         </div>
       </main>
       <SiteFooter />
+      <MobileBottomNav />
     </div>
   );
 }
