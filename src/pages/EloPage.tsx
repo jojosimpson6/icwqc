@@ -61,6 +61,9 @@ export default function EloPage() {
       });
       setTeamLeagueMap(tlm);
       setTeamLinkMap(tlidMap);
+    }).catch(err => {
+      console.error("EloPage load error:", err);
+    }).finally(() => {
       setLoading(false);
     });
   }, []);

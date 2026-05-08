@@ -59,40 +59,67 @@
   }
 
   .dark {
-    --background: 220 30% 8%;
-    --foreground: 40 20% 90%;
-    --card: 220 25% 12%;
-    --card-foreground: 40 20% 90%;
-    --popover: 220 25% 12%;
-    --popover-foreground: 40 20% 90%;
-    --primary: 40 30% 90%;
-    --primary-foreground: 220 60% 15%;
-    --secondary: 220 20% 18%;
-    --secondary-foreground: 40 20% 90%;
-    --muted: 220 15% 18%;
-    --muted-foreground: 220 10% 55%;
-    --accent: 0 72% 55%;
+    /* === Dark Mode — Rich Navy/Slate palette === */
+
+    /* Page background: very dark navy-slate, not pure black */
+    --background: 222 25% 10%;
+    --foreground: 210 20% 92%;
+
+    /* Cards slightly lighter than page bg */
+    --card: 222 22% 14%;
+    --card-foreground: 210 20% 92%;
+
+    --popover: 222 22% 16%;
+    --popover-foreground: 210 20% 92%;
+
+    /* Primary = the top nav bar. Keep it rich navy in dark mode too */
+    --primary: 222 55% 22%;
+    --primary-foreground: 210 20% 93%;
+
+    /* Secondary = subtle raised surface (table headers, filter bars) */
+    --secondary: 222 18% 19%;
+    --secondary-foreground: 210 18% 85%;
+
+    /* Muted = very subtle backgrounds */
+    --muted: 222 15% 17%;
+    --muted-foreground: 220 12% 58%;
+
+    /* Accent = red links, stay vibrant */
+    --accent: 0 68% 58%;
     --accent-foreground: 0 0% 100%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 220 15% 22%;
-    --input: 220 15% 22%;
-    --ring: 40 30% 90%;
-    --sidebar-background: 220 30% 8%;
-    --sidebar-foreground: 40 20% 90%;
-    --sidebar-primary: 40 30% 90%;
-    --sidebar-primary-foreground: 220 60% 15%;
-    --sidebar-accent: 220 20% 18%;
-    --sidebar-accent-foreground: 40 20% 90%;
-    --sidebar-border: 220 15% 22%;
-    --sidebar-ring: 40 30% 90%;
-    --navy: 220 50% 28%;
-    --navy-light: 220 40% 35%;
-    --cream: 220 30% 8%;
-    --cream-dark: 220 20% 14%;
-    --table-stripe: 220 20% 14%;
-    --table-header: 220 40% 25%;
-    --table-header-foreground: 40 20% 90%;
+
+    --destructive: 0 55% 45%;
+    --destructive-foreground: 0 0% 100%;
+
+    /* Borders: visible but not harsh */
+    --border: 222 16% 24%;
+    --input: 222 16% 24%;
+    --ring: 210 60% 55%;
+
+    /* Sidebar */
+    --sidebar-background: 222 30% 8%;
+    --sidebar-foreground: 210 20% 92%;
+    --sidebar-primary: 210 20% 92%;
+    --sidebar-primary-foreground: 222 30% 12%;
+    --sidebar-accent: 222 22% 18%;
+    --sidebar-accent-foreground: 210 20% 92%;
+    --sidebar-border: 222 18% 20%;
+    --sidebar-ring: 210 60% 55%;
+
+    /* Custom tokens */
+    --navy: 222 55% 22%;
+    --navy-light: 222 45% 30%;
+    --cream: 222 25% 10%;
+    --cream-dark: 222 20% 16%;
+
+    /* Table: alternating rows, distinct but not glaring */
+    --table-stripe: 222 18% 17%;
+    /* Table header: rich navy matching the nav bar */
+    --table-header: 222 50% 20%;
+    --table-header-foreground: 210 25% 92%;
+
+    /* Hover highlight: warm gold tint */
+    --highlight: 45 70% 55%;
   }
 }
 

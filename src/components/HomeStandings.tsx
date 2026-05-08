@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { useSortableTable } from "@/hooks/useSortableTable";
 import { fetchAllRows } from "@/lib/fetchAll";
+import { useSortableTable } from "@/hooks/useSortableTable";
 
 interface StandingRow {
   FullName: string | null;
@@ -18,130 +18,129 @@ interface StandingRow {
 interface LeagueOption {
   LeagueID: number;
   LeagueName: string;
+  LeagueTier: number | null;
 }
+
+const seasonLabel = (id: number) => `${id - 1}–${String(id).slice(-2)}`;
 
 export function HomeStandings() {
   const [standings, setStandings] = useState<StandingRow[]>([]);
   const [leagues, setLeagues] = useState<LeagueOption[]>([]);
   const [selectedLeague, setSelectedLeague] = useState<number>(1);
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
-  const [teamsByLeague, setTeamsByLeague] = useState<Record<number, string[]>>({});
+  const [availableSeasons, setAvailableSeasons] = useState<number[]>([]);
+  const [loadingStandings, setLoadingStandings] = useState(false);
 
+  // Load league list once
   useEffect(() => {
-    Promise.all([
-      supabase.from("leagues").select("LeagueID, LeagueName").order("LeagueTier").order("LeagueName"),
-      fetchAllRows("teams", { select: "TeamID, FullName, LeagueID" }),
-      fetchAllRows<StandingRow>("standings", { select: "*", order: { column: "totalpoints", ascending: false } }),
-    ]).then(([{ data: leagueData }, teamData, standingsData]) => {
-      if (leagueData) setLeagues(leagueData as LeagueOption[]);
-      if (teamData) {
-        const map: Record<number, string[]> = {};
-        teamData.forEach((t: any) => {
-          if (!map[t.LeagueID]) map[t.LeagueID] = [];
-          map[t.LeagueID].push(t.FullName);
-        });
-        setTeamsByLeague(map);
-      }
-      setStandings(standingsData);
-      // Set default season to latest
-      const seasons = [...new Set(standingsData.map(s => s.SeasonID).filter(Boolean))].sort((a, b) => (b || 0) - (a || 0));
-      if (seasons.length > 0) setSelectedSeason(seasons[0]);
-    });
+    supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier")
+      .order("LeagueTier").order("LeagueName")
+      .then(({ data }) => {
+        if (data) {
+          const domestic = (data as LeagueOption[]).filter(l => l.LeagueTier === 1 || l.LeagueTier === 2);
+          setLeagues(domestic);
+          if (domestic.length > 0) setSelectedLeague(domestic[0].LeagueID);
+        }
+      });
   }, []);
 
-  const leagueTeams = teamsByLeague[selectedLeague] || [];
-  const filtered = standings.filter((s) =>
-    leagueTeams.includes(s.FullName || "") && s.SeasonID === selectedSeason
-  );
+  // Fetch standings for selected league only — fast, targeted query
+  const loadStandings = useCallback(async (lid: number) => {
+    setLoadingStandings(true);
+    const data = await fetchAllRows<StandingRow>("standings", {
+      select: "*",
+      filters: [{ method: "eq", args: ["LeagueID", lid] }],
+      order: { column: "totalpoints", ascending: false },
+    });
+    setStandings(data);
+    const seasons = [...new Set(data.map(s => s.SeasonID).filter(Boolean))].sort((a, b) => (b || 0) - (a || 0)) as number[];
+    setAvailableSeasons(seasons);
+    setSelectedSeason(seasons[0] ?? null);
+    setLoadingStandings(false);
+  }, []);
 
-  const availableSeasons = [...new Set(
-    standings.filter(s => leagueTeams.includes(s.FullName || "")).map(s => s.SeasonID).filter(Boolean)
-  )].sort((a, b) => (b || 0) - (a || 0)) as number[];
-
-  // Reset season when league changes if current season not available
   useEffect(() => {
-    if (availableSeasons.length > 0 && !availableSeasons.includes(selectedSeason!)) {
-      setSelectedSeason(availableSeasons[0]);
-    }
-  }, [selectedLeague, availableSeasons.join(",")]);
-  
+    if (selectedLeague) loadStandings(selectedLeague);
+  }, [selectedLeague, loadStandings]);
+
+  const filtered = standings.filter(s => s.SeasonID === selectedSeason);
   const { sorted, sortKey, sortDir, requestSort } = useSortableTable(filtered, "totalpoints", "desc");
 
-  const selectedLeagueName = leagues.find((l) => l.LeagueID === selectedLeague)?.LeagueName || "";
+  const thClass = "px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground cursor-pointer hover:text-foreground select-none";
+  const ind = (k: string) => sortKey === k ? (sortDir === "asc" ? " ↑" : " ↓") : "";
 
-  const thClass = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground cursor-pointer hover:text-foreground select-none";
-  const sortIndicator = (key: string) => sortKey === key ? (sortDir === "asc" ? " ↑" : " ↓") : "";
-
-  const seasonLabel = (id: number) => `${id - 1}–${String(id).slice(-2)}`;
+  const selectedLeagueName = leagues.find(l => l.LeagueID === selectedLeague)?.LeagueName || "";
 
   return (
     <div className="border border-border rounded overflow-hidden">
       <div className="bg-table-header px-3 py-2 flex items-center justify-between flex-wrap gap-2">
         <h3 className="font-display text-sm font-bold text-table-header-foreground">
-          {selectedLeagueName} — Standings {selectedSeason ? `(${seasonLabel(selectedSeason)})` : ""}
+          Standings
         </h3>
-        <div className="flex items-center gap-2">
-          <select
-            value={selectedLeague}
-            onChange={(e) => setSelectedLeague(parseInt(e.target.value))}
-            className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
-          >
-            {leagues.map((l) => (
-              <option key={l.LeagueID} value={l.LeagueID}>{l.LeagueName}</option>
-            ))}
+        <Link to={`/league/${selectedLeague}`} className="text-xs text-table-header-foreground/70 hover:text-table-header-foreground font-sans">
+          Full table →
+        </Link>
+      </div>
+
+      {/* League + season selectors */}
+      <div className="bg-secondary/30 border-b border-border px-3 py-2 flex flex-wrap gap-2">
+        <select value={selectedLeague} onChange={e => setSelectedLeague(parseInt(e.target.value))}
+          className="flex-1 min-w-[120px] text-xs bg-card border border-border rounded px-2 py-1 font-sans focus:outline-none">
+          {leagues.map(l => <option key={l.LeagueID} value={l.LeagueID}>{l.LeagueName}</option>)}
+        </select>
+        {availableSeasons.length > 0 && (
+          <select value={selectedSeason ?? ""} onChange={e => setSelectedSeason(parseInt(e.target.value))}
+            className="text-xs bg-card border border-border rounded px-2 py-1 font-sans focus:outline-none">
+            {availableSeasons.map(s => <option key={s} value={s}>{seasonLabel(s)}</option>)}
           </select>
-          {availableSeasons.length > 1 && (
-            <select
-              value={selectedSeason ?? ""}
-              onChange={(e) => setSelectedSeason(parseInt(e.target.value))}
-              className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
-            >
-              {availableSeasons.map(s => (
-                <option key={s} value={s}>{seasonLabel(s)}</option>
-              ))}
-            </select>
-          )}
-          <Link to={`/league/${selectedLeague}`} className="text-xs text-table-header-foreground/70 hover:text-table-header-foreground font-sans whitespace-nowrap">
-            Full Standings →
-          </Link>
+        )}
+      </div>
+
+      {loadingStandings ? (
+        <div className="bg-card divide-y divide-border">
+          {[...Array(6)].map((_, i) => (
+            <div key={i} className="px-3 py-2 flex gap-3 animate-pulse">
+              <div className="h-3 bg-secondary rounded w-4 shrink-0" />
+              <div className="h-3 bg-secondary rounded flex-1" />
+              <div className="h-3 bg-secondary rounded w-8" />
+            </div>
+          ))}
         </div>
-      </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm font-sans">
-          <thead>
-            <tr className="bg-secondary">
-              <th className={`${thClass} text-left`}>#</th>
-              <th className={`${thClass} text-left`} onClick={() => requestSort("FullName")}>Team{sortIndicator("FullName")}</th>
-              <th className={`${thClass} text-right`} onClick={() => requestSort("totalgamesplayed")}>GP{sortIndicator("totalgamesplayed")}</th>
-              <th className={`${thClass} text-right`} onClick={() => requestSort("totalpoints")}>Pts{sortIndicator("totalpoints")}</th>
-              <th className={`${thClass} text-right`} onClick={() => requestSort("GoalsFor")}>GF{sortIndicator("GoalsFor")}</th>
-              <th className={`${thClass} text-right`} onClick={() => requestSort("GoalsAgainst")}>GA{sortIndicator("GoalsAgainst")}</th>
-              <th className={`${thClass} text-right`} onClick={() => requestSort("totalgsc")}>GSC{sortIndicator("totalgsc")}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {sorted.map((team, i) => (
-              <tr
-                key={team.FullName}
-                className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20 transition-colors`}
-              >
-                <td className="px-3 py-1.5 font-mono text-muted-foreground">{i + 1}</td>
-                <td className="px-3 py-1.5 font-medium text-accent hover:underline">
-                  <Link to={`/team/${encodeURIComponent(team.FullName || "")}`}>{team.FullName}</Link>
-                </td>
-                <td className="px-3 py-1.5 text-right font-mono">{team.totalgamesplayed}</td>
-                <td className="px-3 py-1.5 text-right font-mono font-bold">{team.totalpoints}</td>
-                <td className="px-3 py-1.5 text-right font-mono">{team.GoalsFor}</td>
-                <td className="px-3 py-1.5 text-right font-mono">{team.GoalsAgainst}</td>
-                <td className="px-3 py-1.5 text-right font-mono">{team.totalgsc}</td>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm font-sans">
+            <thead>
+              <tr className="bg-secondary">
+                <th className="px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground text-left w-6">#</th>
+                <th className="px-2 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground text-left">Team</th>
+                <th className={`${thClass} text-right`} onClick={() => requestSort("totalgamesplayed")}>GP{ind("totalgamesplayed")}</th>
+                <th className={`${thClass} text-right`} onClick={() => requestSort("totalpoints")}>Pts{ind("totalpoints")}</th>
+                <th className={`${thClass} text-right hidden sm:table-cell`} onClick={() => requestSort("GoalsFor")}>GF{ind("GoalsFor")}</th>
+                <th className={`${thClass} text-right hidden sm:table-cell`} onClick={() => requestSort("GoalsAgainst")}>GA{ind("GoalsAgainst")}</th>
               </tr>
-            ))}
-            {sorted.length === 0 && (
-              <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground italic">No standings data for this league.</td></tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {sorted.map((row, i) => (
+                <tr key={row.FullName} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
+                  <td className="px-2 py-1.5 font-mono text-muted-foreground text-xs">{i + 1}</td>
+                  <td className="px-2 py-1.5 font-medium">
+                    <Link to={`/team/${encodeURIComponent(row.FullName || "")}`} className="text-accent hover:underline text-xs">
+                      {row.FullName}
+                    </Link>
+                  </td>
+                  <td className="px-2 py-1.5 text-right font-mono text-xs">{row.totalgamesplayed}</td>
+                  <td className="px-2 py-1.5 text-right font-mono font-bold text-xs">{row.totalpoints}</td>
+                  <td className="px-2 py-1.5 text-right font-mono text-xs hidden sm:table-cell">{row.GoalsFor}</td>
+                  <td className="px-2 py-1.5 text-right font-mono text-xs hidden sm:table-cell">{row.GoalsAgainst}</td>
+                </tr>
+              ))}
+              {!loadingStandings && sorted.length === 0 && (
+                <tr><td colSpan={6} className="px-3 py-4 text-center text-muted-foreground text-xs italic">No standings data.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
