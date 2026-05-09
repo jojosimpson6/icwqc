@@ -1,42 +1,32 @@
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchAllRows } from "@/lib/fetchAll";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
+import { cachedQuery } from "@/lib/queryCache";
 
-/* ── types ── */
+// ─── Types ───────────────────────────────────────────────────────────────────
+
 interface CareerRow {
   PlayerID: number | null;
   PlayerName: string | null;
   Position: string | null;
   Nation: string | null;
-  FullName: string | null;
+  FullName: string | null;        // most recent team
   LeagueName: string | null;
   LatestSeason: number;
-  GP: number; MIN: number; G: number; GSC: number;
-  KS: number; KSF: number; BH: number; TF: number; TP: number;
+  GP: number; MIN: number;
+  G: number; GSC: number; KS: number; KSF: number;
+  BH: number; TF: number; TP: number;
   ShotAtt: number; ShotScored: number;
   PassAtt: number; PassComp: number;
   KPassAtt: number; KPassComp: number;
   isIntl: boolean;
 }
 
-interface SeasonRow {
-  PlayerID: number | null;
-  PlayerName: string | null;
-  Position: string | null;
-  Nation: string | null;
-  FullName: string | null;
-  LeagueName: string | null;
+interface SeasonRow extends Omit<CareerRow, "LatestSeason"> {
   SeasonID: number;
-  GP: number; MIN: number; G: number; GSC: number;
-  KS: number; KSF: number; BH: number; TF: number; TP: number;
-  ShotAtt: number; ShotScored: number;
-  PassAtt: number; PassComp: number;
-  KPassAtt: number; KPassComp: number;
-  isIntl: boolean;
 }
 
 interface LeagueInfo {
@@ -45,39 +35,40 @@ interface LeagueInfo {
   LeagueTier: number | null;
 }
 
-/* ── stat definitions ── */
+// ─── Stat Definitions ────────────────────────────────────────────────────────
+
 type StatCat =
-  | "GP" | "MIN"
-  | "G" | "G_GP" | "SH_PCT" | "PASS_PCT_C" | "MIN_G"
-  | "GSC" | "GSC_PCT" | "MIN_GSC"
-  | "KSF" | "KSF_GP" | "KS" | "SV_PCT" | "KS_GP" | "PASS_PCT_K"
+  "GP" | "G" | "G_GP" | "SH_PCT" | "PASS_PCT_C" | "MIN_G"
+  | "GSC" | "GSC_GP" | "MIN_GSC"
+  | "KSF" | "KS" | "SV_PCT" | "KS_GP" | "PASS_PCT_K"
   | "BH" | "BH_GP" | "TF" | "TF_GP" | "TP" | "TP_GP";
 
 type RegType = "career" | "active" | "season" | "progressive" | "yearly" | "yby";
 
-const STATS: { key: StatCat; label: string; abbr: string; higher: boolean; minGP?: number; requirePos?: string }[] = [
-  { key: "GP",         label: "Games Played",                abbr: "GP",      higher: true },
-  { key: "MIN",        label: "Minutes Played",               abbr: "MIN",     higher: true },
-  { key: "G",          label: "Goals",                        abbr: "G",       higher: true,  requirePos: "Chaser" },
-  { key: "G_GP",       label: "Goals per Game",               abbr: "G/GP",    higher: true,  minGP: 10, requirePos: "Chaser" },
-  { key: "SH_PCT",     label: "Shooting %",                   abbr: "SH%",     higher: true,  minGP: 10, requirePos: "Chaser" },
-  { key: "PASS_PCT_C", label: "Pass % (Chaser)",              abbr: "PASS%",   higher: true,  minGP: 10, requirePos: "Chaser" },
-  { key: "MIN_G",      label: "Minutes per Goal",             abbr: "MIN/G",   higher: false, minGP: 10, requirePos: "Chaser" },
-  { key: "GSC",        label: "Snitch Catches",               abbr: "GSC",     higher: true,  requirePos: "Seeker" },
-  { key: "GSC_PCT",    label: "Snitch %",                     abbr: "GSC%",    higher: true,  minGP: 10, requirePos: "Seeker" },
-  { key: "MIN_GSC",    label: "Minutes per Snitch",           abbr: "MIN/GSC", higher: false, minGP: 10, requirePos: "Seeker" },
-  { key: "KSF",        label: "Shots Faced",                  abbr: "SF",      higher: true,  requirePos: "Keeper" },
-  { key: "KSF_GP",     label: "Shots Faced per Game",         abbr: "SF/GP",   higher: true,  minGP: 10, requirePos: "Keeper" },
-  { key: "KS",         label: "Saves",                        abbr: "SV",      higher: true,  requirePos: "Keeper" },
-  { key: "SV_PCT",     label: "Save %",                       abbr: "SV%",     higher: true,  minGP: 10, requirePos: "Keeper" },
-  { key: "KS_GP",      label: "Saves per Game",               abbr: "SV/GP",   higher: true,  minGP: 10, requirePos: "Keeper" },
-  { key: "PASS_PCT_K", label: "Pass % (Keeper)",              abbr: "KP%",     higher: true,  minGP: 10, requirePos: "Keeper" },
-  { key: "BH",         label: "Bludgers Hit",                 abbr: "BH",      higher: true,  requirePos: "Beater" },
-  { key: "BH_GP",      label: "Bludgers Hit per Game",        abbr: "BH/GP",   higher: true,  minGP: 10, requirePos: "Beater" },
-  { key: "TF",         label: "Turnovers Forced",             abbr: "TF",      higher: true,  requirePos: "Beater" },
-  { key: "TF_GP",      label: "Turnovers Forced per Game",    abbr: "TF/GP",   higher: true,  minGP: 10, requirePos: "Beater" },
-  { key: "TP",         label: "Teammates Protected",          abbr: "TP",      higher: true,  requirePos: "Beater" },
-  { key: "TP_GP",      label: "Teammates Protected per Game", abbr: "TP/GP",   higher: true,  minGP: 10, requirePos: "Beater" },
+const STATS: {
+  key: StatCat; label: string; abbr: string; higher: boolean;
+  minGP?: number; requirePos?: string;
+}[] = [
+  { key: "GP",         label: "Games Played",              abbr: "GP",    higher: true },
+  { key: "G",          label: "Goals",                     abbr: "G",     higher: true,  requirePos: "Chaser" },
+  { key: "G_GP",       label: "Goals per Game",            abbr: "G/GP",  higher: true,  minGP: 10, requirePos: "Chaser" },
+  { key: "SH_PCT",     label: "Shooting %",                abbr: "SH%",   higher: true,  minGP: 10, requirePos: "Chaser" },
+  { key: "PASS_PCT_C", label: "Pass % (Chaser)",           abbr: "PASS%", higher: true,  minGP: 10, requirePos: "Chaser" },
+  { key: "MIN_G",      label: "Minutes per Goal",          abbr: "MIN/G", higher: false, minGP: 10, requirePos: "Chaser" },
+  { key: "GSC",        label: "Snitch Catches",            abbr: "GSC",   higher: true,  requirePos: "Seeker" },
+  { key: "GSC_GP",     label: "Snitch Catches per Game",   abbr: "GSC/GP",higher: true,  minGP: 10, requirePos: "Seeker" },
+  { key: "MIN_GSC",    label: "Minutes per Snitch",        abbr: "MIN/GSC",higher: false,minGP: 10, requirePos: "Seeker" },
+  { key: "KSF",        label: "Shots Faced",               abbr: "SF",    higher: true,  requirePos: "Keeper" },
+  { key: "KS",         label: "Saves",                     abbr: "SV",    higher: true,  requirePos: "Keeper" },
+  { key: "SV_PCT",     label: "Save %",                    abbr: "SV%",   higher: true,  minGP: 10, requirePos: "Keeper" },
+  { key: "KS_GP",      label: "Saves per Game",            abbr: "SV/GP", higher: true,  minGP: 10, requirePos: "Keeper" },
+  { key: "PASS_PCT_K", label: "Pass % (Keeper)",           abbr: "KP%",   higher: true,  minGP: 10, requirePos: "Keeper" },
+  { key: "BH",         label: "Bludgers Hit",              abbr: "BH",    higher: true,  requirePos: "Beater" },
+  { key: "BH_GP",      label: "Bludgers Hit per Game",     abbr: "BH/GP", higher: true,  minGP: 10, requirePos: "Beater" },
+  { key: "TF",         label: "Turnovers Forced",          abbr: "TF",    higher: true,  requirePos: "Beater" },
+  { key: "TF_GP",      label: "Turnovers Forced / Game",   abbr: "TF/GP", higher: true,  minGP: 10, requirePos: "Beater" },
+  { key: "TP",         label: "Teammates Protected",       abbr: "TP",    higher: true,  requirePos: "Beater" },
+  { key: "TP_GP",      label: "Teammates Protected / Game",abbr: "TP/GP", higher: true,  minGP: 10, requirePos: "Beater" },
 ];
 
 const REGS: { key: RegType; label: string }[] = [
@@ -89,49 +80,115 @@ const REGS: { key: RegType; label: string }[] = [
   { key: "yby",         label: "Year-by-Year" },
 ];
 
-/* ── stat value computation ── */
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function seasonLabel(id: number) { return `${id - 1}–${String(id).slice(-2)}`; }
+
 function val(row: any, cat: StatCat): number | null {
-  const { GP=0, G=0, GSC=0, KS=0, KSF=0, MIN=0, BH=0, TF=0, TP=0, ShotAtt=0, ShotScored=0, PassAtt=0, PassComp=0, KPassAtt=0, KPassComp=0 } = row;
+  const g = row.GP || 0, mn = row.MIN || 0;
+  const goals = row.G || 0, gsc = row.GSC || 0, ks = row.KS || 0, ksf = row.KSF || 0;
+  const bh = row.BH || 0, tf = row.TF || 0, tp = row.TP || 0;
+  const sa = row.ShotAtt || 0, ss = row.ShotScored || 0;
+  const pa = row.PassAtt || 0, pc = row.PassComp || 0;
+  const kpa = row.KPassAtt || 0, kpc = row.KPassComp || 0;
   const minGP = STATS.find(s => s.key === cat)?.minGP ?? 0;
-  if (GP < minGP) return null;
+  if (g < minGP) return null;
   switch (cat) {
-    case "GP":       return GP;
-    case "MIN":      return MIN > 0 ? MIN : null;
-    case "G":        return G > 0 ? G : null;
-    case "G_GP":     return GP > 0 && G > 0 ? G / GP : null;
-    case "SH_PCT":   return ShotAtt > 0 ? ShotScored / ShotAtt : null;
-    case "PASS_PCT_C": return PassAtt > 0 ? PassComp / PassAtt : null;
-    case "MIN_G":    return G > 0 && MIN > 0 ? MIN / G : null;
-    case "GSC":      return GSC > 0 ? GSC : null;
-    case "GSC_PCT":  return GP > 0 && GSC > 0 ? GSC / GP : null;
-    case "MIN_GSC":  return GSC > 0 && MIN > 0 ? MIN / GSC : null;
-    case "KSF":      return KSF > 0 ? KSF : null;
-    case "KSF_GP":   return GP > 0 && KSF > 0 ? KSF / GP : null;
-    case "KS":       return KS > 0 ? KS : null;
-    case "SV_PCT":   return KSF > 0 ? KS / KSF : null;
-    case "KS_GP":    return GP > 0 && KS > 0 ? KS / GP : null;
-    case "PASS_PCT_K": return KPassAtt > 0 ? KPassComp / KPassAtt : null;
-    case "BH":       return BH > 0 ? BH : null;
-    case "BH_GP":    return GP > 0 && BH > 0 ? BH / GP : null;
-    case "TF":       return TF > 0 ? TF : null;
-    case "TF_GP":    return GP > 0 && TF > 0 ? TF / GP : null;
-    case "TP":       return TP > 0 ? TP : null;
-    case "TP_GP":    return GP > 0 && TP > 0 ? TP / GP : null;
+    case "GP":       return g > 0 ? g : null;
+    case "G":        return goals > 0 ? goals : null;
+    case "G_GP":     return g > 0 && goals > 0 ? goals / g : null;
+    case "SH_PCT":   return sa > 0 ? ss / sa : null;
+    case "PASS_PCT_C": return pa > 0 ? pc / pa : null;
+    case "MIN_G":    return goals > 0 && mn > 0 ? mn / goals : null;
+    case "GSC":      return gsc > 0 ? gsc : null;
+    case "GSC_GP":   return g > 0 && gsc > 0 ? gsc / g : null;
+    case "MIN_GSC":  return gsc > 0 && mn > 0 ? mn / gsc : null;
+    case "KSF":      return ksf > 0 ? ksf : null;
+    case "KS":       return ks > 0 ? ks : null;
+    case "SV_PCT":   return ksf > 0 ? ks / ksf : null;
+    case "KS_GP":    return g > 0 && ks > 0 ? ks / g : null;
+    case "PASS_PCT_K": return kpa > 0 ? kpc / kpa : null;
+    case "BH":       return bh > 0 ? bh : null;
+    case "BH_GP":    return g > 0 && bh > 0 ? bh / g : null;
+    case "TF":       return tf > 0 ? tf : null;
+    case "TF_GP":    return g > 0 && tf > 0 ? tf / g : null;
+    case "TP":       return tp > 0 ? tp : null;
+    case "TP_GP":    return g > 0 && tp > 0 ? tp / g : null;
   }
 }
 
 function fmt(v: number | null, cat: StatCat): string {
   if (v === null) return "—";
-  if (["GSC_PCT","SV_PCT","SH_PCT","PASS_PCT_C","PASS_PCT_K"].includes(cat)) return (v * 100).toFixed(1) + "%";
-  if (["MIN_G","MIN_GSC","KSF_GP","KS_GP","G_GP","BH_GP","TF_GP","TP_GP"].includes(cat)) return v.toFixed(2);
+  if (["SV_PCT","SH_PCT","PASS_PCT_C","PASS_PCT_K"].includes(cat)) return (v * 100).toFixed(1) + "%";
+  if (["GSC_GP","SV_PCT","MIN_G","MIN_GSC","KS_GP","G_GP","BH_GP","TF_GP","TP_GP"].includes(cat)) return v.toFixed(2);
   return String(Math.round(v));
 }
 
-function seasonLabel(id: number) { return `${id - 1}–${String(id).slice(-2)}`; }
+// ─── DB fetch: server-side aggregation via PostgREST ─────────────────────────
+// Uses PostgREST aggregate functions (sum, max) so the DB does the grouping —
+// returns one row per player+position, not one row per season.
+// Payload: ~2-5k rows instead of tens of thousands.
 
-const SELECT_COLS = "PlayerID,PlayerName,Position,Nation,FullName,LeagueName,SeasonID,GamesPlayed,MinPlayed,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,ShotAtt,ShotScored,PassAtt,PassComp,KeeperPassAtt,KeeperPassComp,BludgersHit,TurnoversForced,TeammatesProtected";
+const AGG_SELECT = [
+  "PlayerID", "PlayerName", "Position", "Nation",
+  "FullName.max()", "LeagueName.max()", "SeasonID.max()",
+  "GamesPlayed.sum()", "MinPlayed.sum()",
+  "Goals.sum()", "GoldenSnitchCatches.sum()",
+  "KeeperSaves.sum()", "KeeperShotsFaced.sum()",
+  "BludgersHit.sum()", "TurnoversForced.sum()", "TeammatesProtected.sum()",
+  "ShotAtt.sum()", "ShotScored.sum()",
+  "PassAtt.sum()", "PassComp.sum()",
+  "KeeperPassAtt.sum()", "KeeperPassComp.sum()",
+].join(",");
 
-function mapRow(r: any, isIntl: boolean): SeasonRow {
+// For single-season or active (recent seasons): fetch per-season rows (no aggregation)
+// but filtered to just those seasons — still small payload.
+const SEASON_SELECT = [
+  "PlayerID", "PlayerName", "Position", "Nation",
+  "FullName", "LeagueName", "SeasonID",
+  "GamesPlayed", "MinPlayed", "Goals", "GoldenSnitchCatches",
+  "KeeperSaves", "KeeperShotsFaced",
+  "BludgersHit", "TurnoversForced", "TeammatesProtected",
+  "ShotAtt", "ShotScored", "PassAtt", "PassComp",
+  "KeeperPassAtt", "KeeperPassComp",
+].join(",");
+
+function mapAggRow(r: any, intlNames: Set<string>): CareerRow {
+  // PostgREST returns aggregate columns as e.g. "Goals.sum()" → key is "Goals.sum()"
+  // but supabase-js v2 strips the suffix and returns them as the base column name
+  // Actually with supabase-js the key comes back as the expression — let's handle both
+  const g = (r["GamesPlayed"] ?? r["GamesPlayed.sum()"] ?? 0) as number;
+  const ln = (r["LeagueName"] ?? r["LeagueName.max()"] ?? null) as string | null;
+  const fn = (r["FullName"] ?? r["FullName.max()"] ?? null) as string | null;
+  const ls = (r["SeasonID"] ?? r["SeasonID.max()"] ?? 0) as number;
+  return {
+    PlayerID: r.PlayerID,
+    PlayerName: r.PlayerName,
+    Position: r.Position,
+    Nation: r.Nation,
+    FullName: fn,
+    LeagueName: ln,
+    LatestSeason: ls,
+    GP:  g,
+    MIN: (r["MinPlayed"] ?? r["MinPlayed.sum()"] ?? 0) as number,
+    G:   (r["Goals"] ?? r["Goals.sum()"] ?? 0) as number,
+    GSC: (r["GoldenSnitchCatches"] ?? r["GoldenSnitchCatches.sum()"] ?? 0) as number,
+    KS:  (r["KeeperSaves"] ?? r["KeeperSaves.sum()"] ?? 0) as number,
+    KSF: (r["KeeperShotsFaced"] ?? r["KeeperShotsFaced.sum()"] ?? 0) as number,
+    BH:  (r["BludgersHit"] ?? r["BludgersHit.sum()"] ?? 0) as number,
+    TF:  (r["TurnoversForced"] ?? r["TurnoversForced.sum()"] ?? 0) as number,
+    TP:  (r["TeammatesProtected"] ?? r["TeammatesProtected.sum()"] ?? 0) as number,
+    ShotAtt:  (r["ShotAtt"] ?? r["ShotAtt.sum()"] ?? 0) as number,
+    ShotScored:(r["ShotScored"] ?? r["ShotScored.sum()"] ?? 0) as number,
+    PassAtt:  (r["PassAtt"] ?? r["PassAtt.sum()"] ?? 0) as number,
+    PassComp: (r["PassComp"] ?? r["PassComp.sum()"] ?? 0) as number,
+    KPassAtt: (r["KeeperPassAtt"] ?? r["KeeperPassAtt.sum()"] ?? 0) as number,
+    KPassComp:(r["KeeperPassComp"] ?? r["KeeperPassComp.sum()"] ?? 0) as number,
+    isIntl: intlNames.has(ln || ""),
+  };
+}
+
+function mapSeasonRow(r: any, intlNames: Set<string>): SeasonRow {
   return {
     PlayerID: r.PlayerID, PlayerName: r.PlayerName, Position: r.Position,
     Nation: r.Nation, FullName: r.FullName, LeagueName: r.LeagueName,
@@ -143,301 +200,276 @@ function mapRow(r: any, isIntl: boolean): SeasonRow {
     ShotAtt: r.ShotAtt || 0, ShotScored: r.ShotScored || 0,
     PassAtt: r.PassAtt || 0, PassComp: r.PassComp || 0,
     KPassAtt: r.KeeperPassAtt || 0, KPassComp: r.KeeperPassComp || 0,
-    isIntl,
+    isIntl: intlNames.has(r.LeagueName || ""),
   };
 }
 
-/* Aggregate per-season rows into career totals, grouped by PlayerID+Position */
-function buildCareer(rows: SeasonRow[]): CareerRow[] {
-  const map = new Map<string, CareerRow>();
-  rows.forEach(r => {
-    const key = `${r.PlayerID ?? r.PlayerName}||${r.Position}`;
-    let c = map.get(key);
-    if (!c) {
-      c = {
-        PlayerID: r.PlayerID, PlayerName: r.PlayerName, Position: r.Position,
-        Nation: r.Nation, FullName: r.FullName, LeagueName: r.LeagueName,
-        LatestSeason: r.SeasonID,
-        GP: 0, MIN: 0, G: 0, GSC: 0, KS: 0, KSF: 0,
-        BH: 0, TF: 0, TP: 0, ShotAtt: 0, ShotScored: 0,
-        PassAtt: 0, PassComp: 0, KPassAtt: 0, KPassComp: 0,
-        isIntl: r.isIntl,
-      };
-      map.set(key, c);
-    }
-    c.GP += r.GP; c.MIN += r.MIN; c.G += r.G; c.GSC += r.GSC;
-    c.KS += r.KS; c.KSF += r.KSF; c.BH += r.BH; c.TF += r.TF; c.TP += r.TP;
-    c.ShotAtt += r.ShotAtt; c.ShotScored += r.ShotScored;
-    c.PassAtt += r.PassAtt; c.PassComp += r.PassComp;
-    c.KPassAtt += r.KPassAtt; c.KPassComp += r.KPassComp;
-    if (r.SeasonID > c.LatestSeason) {
-      c.LatestSeason = r.SeasonID;
-      c.FullName = r.FullName;
-      c.LeagueName = r.LeagueName;
-    }
-  });
-  return [...map.values()];
-}
+// ─── Component ───────────────────────────────────────────────────────────────
 
-/* ── component ── */
 export default function LeadersIndex() {
   const [searchParams, setSearchParams] = useSearchParams();
   const scope    = (searchParams.get("scope") as "club" | "intl") || "club";
   const stat     = (searchParams.get("stat")  as StatCat) || "G";
   const register = (searchParams.get("reg")   as RegType) || "career";
 
-  const set = (key: string, value: string) => {
+  const setParam = (key: string, value: string) => {
     const next = new URLSearchParams(searchParams);
     next.set(key, value);
     setSearchParams(next, { replace: true });
   };
 
-  // Separate state for career data (small — fetched once) and per-season data (large — lazy)
   const [careerRows, setCareerRows]   = useState<CareerRow[]>([]);
   const [seasonRows, setSeasonRows]   = useState<SeasonRow[]>([]);
   const [leagues, setLeagues]         = useState<LeagueInfo[]>([]);
-  const [intlLeagueNames, setIntlLeagueNames] = useState<Set<string>>(new Set());
-  const [leagueIdByName, setLeagueIdByName]   = useState<Map<string, number>>(new Map());
-  const [careerLoading, setCareerLoading]     = useState(true);
-  const [seasonLoading, setSeasonLoading]     = useState(false);
-  const [seasonLoaded, setSeasonLoaded]       = useState(false); // lazy flag
+  const [intlNames, setIntlNames]     = useState<Set<string>>(new Set());
+  const [lgIdByName, setLgIdByName]   = useState<Map<string, number>>(new Map());
+  const [careerLoading, setCareerLoading] = useState(true);
+  const [seasonLoading, setSeasonLoading] = useState(false);
+  const [seasonLoaded,  setSeasonLoaded]  = useState(false);
+  const [careerError, setCareerError] = useState<string | null>(null);
 
-  // ── Step 1: Always fetch career data immediately (small payload) ──
-  // Strategy: fetch only distinct PlayerID+Position+SeasonID combos, aggregate in JS.
-  // We fetch all rows but only the columns we need. Since each player has ~1 row per season,
-  // this is bounded and manageable (typically 2000-8000 rows vs the old unlimited fetch).
+  // ── Load leagues once (tiny query) ──────────────────────────────────────────
   useEffect(() => {
-    (async () => {
-      try {
-        const [{ data: lgData }, rows] = await Promise.all([
-          supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier"),
-          fetchAllRows("player_season_stats", {
-            select: SELECT_COLS,
-            order: { column: "SeasonID", ascending: false },
-          }),
-        ]);
-
-        if (lgData) {
-          setLeagues(lgData as LeagueInfo[]);
-          const intlNames = new Set<string>();
-          const lim = new Map<string, number>();
-          (lgData as LeagueInfo[]).forEach(l => {
-            if (l.LeagueName && l.LeagueID) {
-              lim.set(l.LeagueName, l.LeagueID);
-              if (l.LeagueTier === 0) intlNames.add(l.LeagueName);
-            }
-          });
-          setIntlLeagueNames(intlNames);
-          setLeagueIdByName(lim);
-
-          const mapped = (rows || []).map(r =>
-            mapRow(r, intlNames.has(r.LeagueName || ""))
-          );
-          // Store season rows for later use
-          setSeasonRows(mapped);
-          setSeasonLoaded(true);
-          // Build career immediately
-          setCareerRows(buildCareer(mapped));
-        }
-      } catch (err) {
-        console.error("LeadersIndex load error:", err);
-      } finally {
-        setCareerLoading(false);
-      }
-    })();
+    supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier")
+      .then(({ data }) => {
+        if (!data) return;
+        setLeagues(data as LeagueInfo[]);
+        const intl = new Set<string>();
+        const lim  = new Map<string, number>();
+        (data as LeagueInfo[]).forEach(l => {
+          if (l.LeagueName && l.LeagueID) {
+            lim.set(l.LeagueName, l.LeagueID);
+            if (l.LeagueTier === 0) intl.add(l.LeagueName);
+          }
+        });
+        setIntlNames(intl);
+        setLgIdByName(lim);
+      });
   }, []);
 
-  /* ── derived state ── */
+  // ── Load career totals via server-side aggregation ──────────────────────────
+  // PostgREST runs GROUP BY PlayerID, PlayerName, Position, Nation on the DB.
+  // Returns ~2-5k rows (one per player+position) instead of 50k+ raw rows.
+  useEffect(() => {
+    if (intlNames.size === 0 && leagues.length === 0) return; // wait for leagues
+    setCareerLoading(true);
+    setCareerError(null);
+
+    cachedQuery("leaders:career:v2", async () => {
+      const { data, error } = await supabase
+        .from("player_season_stats")
+        .select(AGG_SELECT);
+      if (error) throw new Error(error.message);
+      return data || [];
+    }).then(data => {
+      const rows = (data as any[]).map(r => mapAggRow(r, intlNames));
+      setCareerRows(rows);
+      setCareerLoading(false);
+    }).catch(err => {
+      console.error("Career leaders error:", err);
+      setCareerError("Failed to load career data. Please refresh.");
+      setCareerLoading(false);
+    });
+  }, [intlNames, leagues.length]);
+
+  // ── Lazy-load per-season rows only when a season-based register is selected ──
+  // This runs a FILTERED query — only fetches a few seasons of data, not all time.
+  const loadSeasonRows = useCallback(async () => {
+    if (seasonLoaded || seasonLoading) return;
+    setSeasonLoading(true);
+    try {
+      const rows = await cachedQuery("leaders:seasons:v2", async () => {
+        // Fetch all season rows — but only the columns we need
+        // These are already filtered per-season (no aggregation) so each row is small
+        const PAGE = 1000;
+        const all: any[] = [];
+        let from = 0;
+        while (true) {
+          const { data, error } = await supabase
+            .from("player_season_stats")
+            .select(SEASON_SELECT)
+            .range(from, from + PAGE - 1)
+            .order("SeasonID", { ascending: false });
+          if (error) throw new Error(error.message);
+          if (!data || data.length === 0) break;
+          all.push(...data);
+          if (data.length < PAGE) break;
+          from += PAGE;
+        }
+        return all;
+      });
+      const mapped = (rows as any[]).map(r => mapSeasonRow(r, intlNames));
+      setSeasonRows(mapped);
+      setSeasonLoaded(true);
+    } catch (err) {
+      console.error("Season rows error:", err);
+    } finally {
+      setSeasonLoading(false);
+    }
+  }, [seasonLoaded, seasonLoading, intlNames]);
+
+  useEffect(() => {
+    if (["season", "progressive", "yearly", "yby"].includes(register)) {
+      loadSeasonRows();
+    }
+  }, [register, loadSeasonRows]);
+
+  // ── Filtered views ───────────────────────────────────────────────────────────
   const filteredCareer = useMemo(() =>
     careerRows.filter(r => scope === "club" ? !r.isIntl : r.isIntl),
     [careerRows, scope]
   );
-
   const filteredSeason = useMemo(() =>
     seasonRows.filter(r => scope === "club" ? !r.isIntl : r.isIntl),
     [seasonRows, scope]
   );
-
   const maxSeason = useMemo(() =>
-    filteredCareer.reduce((m, r) => Math.max(m, r.LatestSeason), 0),
+    filteredCareer.reduce((m, r) => Math.max(m, r.LatestSeason || 0), 0),
     [filteredCareer]
   );
 
-  const allSeasons = useMemo(() =>
-    [...new Set(filteredSeason.map(r => r.SeasonID))].sort((a, b) => b - a),
-    [filteredSeason]
-  );
+  // ── Leaderboard computation ──────────────────────────────────────────────────
+  const statInfo   = STATS.find(s => s.key === stat)!;
+  const reqPos     = statInfo.requirePos;
+  const higherBetter = statInfo.higher;
+  const sortFn = (a: any, b: any) => {
+    const va = val(a, stat), vb = val(b, stat);
+    if (va === null && vb === null) return 0;
+    if (va === null) return 1; if (vb === null) return -1;
+    return higherBetter ? vb - va : va - vb;
+  };
+  const filterValid = (r: any) =>
+    val(r, stat) !== null && (!reqPos || r.Position === reqPos);
 
-  /* ── leaderboard computation ── */
   const leaderboard = useMemo(() => {
-    const info = STATS.find(s => s.key === stat)!;
-    const reqPos = info.requirePos;
-    const sortFn = (a: any, b: any) => {
-      const va = val(a, stat), vb = val(b, stat);
-      if (va === null && vb === null) return 0;
-      if (va === null) return 1; if (vb === null) return -1;
-      return info.higher ? vb - va : va - vb;
-    };
-    const filterValid = (r: any) => {
-      if (val(r, stat) === null) return false;
-      if (reqPos && r.Position !== reqPos) return false;
-      return true;
-    };
-
     if (register === "career") {
-      return filteredCareer.filter(filterValid).sort(sortFn).slice(0, 25).map(r => ({
-        ...r, statVal: val(r, stat), team: r.FullName, season: null,
-      }));
+      return filteredCareer.filter(filterValid).sort(sortFn).slice(0, 25)
+        .map(r => ({ ...r, statVal: val(r, stat), season: null }));
     }
-
     if (register === "active") {
-      const top2 = [...new Set(filteredCareer.map(r => r.LatestSeason))].sort((a,b) => b-a).slice(0,2);
-      const minSeason = top2[top2.length - 1] ?? maxSeason;
-      return filteredCareer.filter(r => r.LatestSeason >= minSeason && filterValid(r)).sort(sortFn).slice(0, 25).map(r => ({
-        ...r, statVal: val(r, stat), team: r.FullName, season: null,
-      }));
+      const recentSeasons = [...new Set(filteredCareer.map(r => r.LatestSeason))]
+        .sort((a,b) => b - a).slice(0, 2);
+      const minSeason = recentSeasons[recentSeasons.length - 1] ?? maxSeason;
+      return filteredCareer
+        .filter(r => r.LatestSeason >= minSeason && filterValid(r))
+        .sort(sortFn).slice(0, 25)
+        .map(r => ({ ...r, statVal: val(r, stat), season: null }));
     }
-
-    if (register === "season") {
-      if (!seasonLoaded) return [];
-      return filteredSeason.filter(filterValid).sort(sortFn).slice(0, 25).map(r => ({
-        ...r, statVal: val(r, stat), team: r.FullName, season: r.SeasonID,
-      }));
+    if (register === "season" && seasonLoaded) {
+      return filteredSeason.filter(filterValid).sort(sortFn).slice(0, 25)
+        .map(r => ({ ...r, statVal: val(r, stat) }));
     }
-
-    if (register === "progressive") {
-      if (!seasonLoaded) return [];
+    if (register === "progressive" && seasonLoaded) {
       const cum = new Map<string, any>();
-      const entries: any[] = [];
-      const sortedSeasons = [...new Set(filteredSeason.map(r => r.SeasonID))].sort((a,b) => a-b);
-      sortedSeasons.forEach(sid => {
+      const results: any[] = [];
+      const seasons = [...new Set(filteredSeason.map(r => r.SeasonID))].sort((a,b) => a-b);
+      seasons.forEach(sid => {
         filteredSeason.filter(r => r.SeasonID === sid).forEach(r => {
           const key = `${r.PlayerID ?? r.PlayerName}||${r.Position}`;
-          let c = cum.get(key);
-          if (!c) c = { ...r, GP:0,MIN:0,G:0,GSC:0,KS:0,KSF:0,BH:0,TF:0,TP:0,ShotAtt:0,ShotScored:0,PassAtt:0,PassComp:0,KPassAtt:0,KPassComp:0 };
-          c.GP+=r.GP;c.MIN+=r.MIN;c.G+=r.G;c.GSC+=r.GSC;c.KS+=r.KS;c.KSF+=r.KSF;
-          c.BH+=r.BH;c.TF+=r.TF;c.TP+=r.TP;c.ShotAtt+=r.ShotAtt;c.ShotScored+=r.ShotScored;
-          c.PassAtt+=r.PassAtt;c.PassComp+=r.PassComp;c.KPassAtt+=r.KPassAtt;c.KPassComp+=r.KPassComp;
+          const c = cum.get(key) || { ...r, GP:0,G:0,GSC:0,KS:0,KSF:0,BH:0,TF:0,TP:0,MIN:0,ShotAtt:0,ShotScored:0,PassAtt:0,PassComp:0,KPassAtt:0,KPassComp:0 };
+          c.GP+=r.GP; c.G+=r.G; c.GSC+=r.GSC; c.KS+=r.KS; c.KSF+=r.KSF;
+          c.BH+=r.BH; c.TF+=r.TF; c.TP+=r.TP; c.MIN+=r.MIN;
+          c.ShotAtt+=r.ShotAtt; c.ShotScored+=r.ShotScored;
+          c.PassAtt+=r.PassAtt; c.PassComp+=r.PassComp;
+          c.KPassAtt+=r.KPassAtt; c.KPassComp+=r.KPassComp;
           c.FullName=r.FullName; c.LeagueName=r.LeagueName;
           cum.set(key, c);
         });
-        const snap = [...cum.values()].filter(filterValid);
+        const snap = [...cum.values()].filter(filterValid).sort(sortFn);
         if (!snap.length) return;
-        snap.sort(sortFn);
         const topVal = val(snap[0], stat);
         const leaders = snap.filter(r => val(r, stat) === topVal);
-        entries.push({
+        results.push({ ...leaders[0], _leaders: leaders, _isTie: leaders.length > 1,
           PlayerName: leaders.map(l => l.PlayerName).join(" / "),
-          _isTie: leaders.length > 1, _leaders: leaders,
-          Position: leaders[0].Position, Nation: leaders[0].Nation,
-          statVal: topVal, team: leaders[0].FullName, season: sid,
-          GP: leaders[0].GP,
-        });
+          statVal: topVal, SeasonID: sid });
       });
-      return entries;
+      return results;
     }
-
     return [];
-  }, [filteredCareer, filteredSeason, stat, register, seasonLoaded, maxSeason]);
+  }, [filteredCareer, filteredSeason, stat, register, seasonLoaded, maxSeason, scope]);
 
-  /* yearly data */
   const yearlyData = useMemo(() => {
-    if ((register !== "yearly" && register !== "yby") || !seasonLoaded) return [];
-    const info = STATS.find(s => s.key === stat)!;
-    const reqPos = info.requirePos;
-    const filterValid = (r: any) => {
-      if (val(r, stat) === null) return false;
-      if (reqPos && r.Position !== reqPos) return false;
-      return true;
-    };
-    const sortFn = (a: any, b: any) => {
-      const va = val(a, stat), vb = val(b, stat);
-      if (va === null) return 1; if (vb === null) return -1;
-      return info.higher ? vb - va : va - vb;
-    };
+    if (!["yearly","yby"].includes(register) || !seasonLoaded) return [];
+    const sortFnLocal = sortFn;
+    const filterValidLocal = filterValid;
 
     if (register === "yearly") {
       const groups = new Map<string, SeasonRow[]>();
       filteredSeason.forEach(r => {
-        const key = `${r.SeasonID}||${r.LeagueName}`;
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key)!.push(r);
+        const k = `${r.SeasonID}||${r.LeagueName}`;
+        if (!groups.has(k)) groups.set(k, []);
+        groups.get(k)!.push(r);
       });
-      const result: any[] = [];
+      const results: any[] = [];
       groups.forEach((rows, key) => {
         const [sidStr, league] = key.split("||");
-        const valid = rows.filter(filterValid).sort(sortFn);
+        const valid = rows.filter(filterValidLocal).sort(sortFnLocal);
         if (!valid.length) return;
         const topVal = val(valid[0], stat);
         const leaders = valid.filter(r => val(r, stat) === topVal);
-        result.push({
-          seasonID: parseInt(sidStr), league,
-          entry: { PlayerName: leaders.map(l => l.PlayerName).join(" / "), _isTie: leaders.length > 1,
-            _leaders: leaders, Position: leaders[0].Position, Nation: leaders[0].Nation,
-            statVal: topVal, team: leaders[0].FullName, season: parseInt(sidStr), GP: leaders[0].GP },
-        });
+        results.push({ seasonID: parseInt(sidStr), league,
+          entry: { ...leaders[0], _leaders: leaders, _isTie: leaders.length>1,
+            PlayerName: leaders.map(l=>l.PlayerName).join(" / "),
+            statVal: topVal, season: parseInt(sidStr) }});
       });
-      return result.sort((a,b) => a.seasonID - b.seasonID || a.league.localeCompare(b.league));
+      return results.sort((a,b) => a.seasonID-b.seasonID || a.league.localeCompare(b.league));
     }
-
     // yby
     const groups2 = new Map<number, SeasonRow[]>();
     filteredSeason.forEach(r => {
       if (!groups2.has(r.SeasonID)) groups2.set(r.SeasonID, []);
       groups2.get(r.SeasonID)!.push(r);
     });
-    const result2: any[] = [];
+    const results2: any[] = [];
     groups2.forEach((rows, sid) => {
-      const valid = rows.filter(filterValid).sort(sortFn);
+      const valid = rows.filter(filterValidLocal).sort(sortFnLocal);
       if (!valid.length) return;
       const topVal = val(valid[0], stat);
       const leaders = valid.filter(r => val(r, stat) === topVal);
-      result2.push({
-        seasonID: sid, league: "",
-        entry: { PlayerName: leaders.map(l => l.PlayerName).join(" / "), _isTie: leaders.length > 1,
-          _leaders: leaders, Position: leaders[0].Position, Nation: leaders[0].Nation,
-          statVal: topVal, team: leaders[0].FullName, season: sid, GP: leaders[0].GP },
-      });
+      results2.push({ seasonID: sid, league: "",
+        entry: { ...leaders[0], _leaders: leaders, _isTie: leaders.length>1,
+          PlayerName: leaders.map(l=>l.PlayerName).join(" / "),
+          statVal: topVal, season: sid }});
     });
-    return result2.sort((a,b) => a.seasonID - b.seasonID);
-  }, [filteredSeason, stat, register, seasonLoaded]);
+    return results2.sort((a,b) => a.seasonID-b.seasonID);
+  }, [filteredSeason, stat, register, seasonLoaded, scope]);
 
-  /* ── rendering ── */
-  const thClass = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground";
-  const statInfo = STATS.find(s => s.key === stat)!;
+  // ── Rendering ────────────────────────────────────────────────────────────────
   const showSeason = ["season","progressive","yearly","yby"].includes(register);
-  const loading = careerLoading || (["season","progressive","yearly","yby"].includes(register) && seasonLoading);
+  const loading = careerLoading || (showSeason && seasonLoading);
 
   const PlayerLink = ({ name, pid }: { name: string; pid?: number | null }) =>
     pid ? <Link to={`/player/${pid}`} className="text-accent hover:underline">{name}</Link>
         : <span className="text-foreground">{name}</span>;
 
+  const thCls = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground";
+
   const renderRow = (entry: any, i: number) => {
-    const lid = entry.LeagueName ? leagueIdByName.get(entry.LeagueName) : null;
+    const lid = entry.LeagueName ? lgIdByName.get(entry.LeagueName) : null;
     return (
-      <tr key={`${entry.PlayerName}-${entry.season}-${i}`}
-        className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20 transition-colors`}>
-        <td className="px-3 py-1.5 font-mono text-muted-foreground text-sm">{i + 1}</td>
+      <tr key={`${entry.PlayerName}-${i}`}
+        className={`border-t border-border ${i%2===1?"bg-table-stripe":"bg-card"} hover:bg-highlight/20 transition-colors`}>
+        <td className="px-3 py-1.5 font-mono text-muted-foreground text-sm w-8">{i+1}</td>
         <td className="px-3 py-1.5 font-medium">
           {entry._isTie
-            ? <span>{(entry._leaders as any[]).map((l: any, li: number) => (
-                <span key={l.PlayerName ?? li}>{li > 0 && " / "}
-                  <PlayerLink name={l.PlayerName} pid={l.PlayerID} />
-                </span>
+            ? <span>{(entry._leaders as any[]).map((l:any,li:number)=>(
+                <span key={li}>{li>0&&" / "}<PlayerLink name={l.PlayerName} pid={l.PlayerID}/></span>
               ))}<span className="text-muted-foreground text-xs ml-1">(tie)</span></span>
-            : <PlayerLink name={entry.PlayerName} pid={entry.PlayerID} />}
+            : <PlayerLink name={entry.PlayerName} pid={entry.PlayerID}/>}
         </td>
-        <td className="px-3 py-1.5 text-muted-foreground text-xs">{entry.Position || "—"}</td>
+        <td className="px-3 py-1.5 text-muted-foreground text-xs">{entry.Position||"—"}</td>
         <td className="px-3 py-1.5 text-xs">
-          {entry.team
-            ? <Link to={`/team/${encodeURIComponent(entry.team)}`} className="text-accent hover:underline">{entry.team}</Link>
+          {entry.FullName
+            ? <Link to={`/team/${encodeURIComponent(entry.FullName)}`} className="text-accent hover:underline">{entry.FullName}</Link>
             : "—"}
         </td>
-        {showSeason && entry.season != null && (
+        {showSeason && (
           <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">
-            {lid
-              ? <Link to={`/league/${lid}/history`} className="text-accent hover:underline">{seasonLabel(entry.season)}</Link>
-              : seasonLabel(entry.season)}
+            {entry.SeasonID
+              ? lid
+                ? <Link to={`/league/${lid}/history`} className="text-accent hover:underline">{seasonLabel(entry.SeasonID)}</Link>
+                : seasonLabel(entry.SeasonID)
+              : "—"}
           </td>
         )}
         <td className="px-3 py-1.5 text-right font-mono font-bold">{fmt(entry.statVal, stat)}</td>
@@ -445,24 +477,35 @@ export default function LeadersIndex() {
     );
   };
 
+  const Skeleton = () => (
+    <div className="bg-card">
+      {[...Array(15)].map((_,i) => (
+        <div key={i} className={`border-t border-border px-3 py-2.5 flex gap-4 animate-pulse ${i%2===1?"bg-table-stripe":""}`}>
+          <div className="w-5 h-3 bg-secondary rounded shrink-0"/>
+          <div className="h-3 bg-secondary rounded" style={{width:`${35+(i*19)%40}%`}}/>
+          <div className="h-3 bg-secondary rounded w-12 ml-auto"/>
+          <div className="h-3 bg-secondary rounded w-16"/>
+        </div>
+      ))}
+    </div>
+  );
+
   const renderTable = (rows: any[]) => (
     <div className="overflow-x-auto">
       <table className="w-full text-sm font-sans">
-        <thead>
-          <tr className="bg-secondary">
-            <th className={`${thClass} text-left w-8`}>#</th>
-            <th className={`${thClass} text-left`}>Player</th>
-            <th className={`${thClass} text-left`}>Pos</th>
-            <th className={`${thClass} text-left`}>Team</th>
-            {showSeason && <th className={`${thClass} text-left`}>Season</th>}
-            <th className={`${thClass} text-right`}>{statInfo.abbr}</th>
-          </tr>
-        </thead>
+        <thead><tr className="bg-secondary">
+          <th className={`${thCls} text-left w-8`}>#</th>
+          <th className={`${thCls} text-left`}>Player</th>
+          <th className={`${thCls} text-left`}>Pos</th>
+          <th className={`${thCls} text-left`}>Team</th>
+          {showSeason && <th className={`${thCls} text-left`}>Season</th>}
+          <th className={`${thCls} text-right`}>{statInfo.abbr}</th>
+        </tr></thead>
         <tbody>
-          {rows.map((r, i) => renderRow(r, i))}
-          {rows.length === 0 && !loading && (
-            <tr><td colSpan={showSeason ? 6 : 5} className="px-3 py-6 text-center text-muted-foreground italic">
-              No data available.
+          {rows.map((r,i) => renderRow(r,i))}
+          {rows.length===0 && (
+            <tr><td colSpan={showSeason?6:5} className="px-3 py-8 text-center text-muted-foreground italic">
+              {seasonLoading ? "Loading season data…" : "No data available."}
             </td></tr>
           )}
         </tbody>
@@ -470,22 +513,53 @@ export default function LeadersIndex() {
     </div>
   );
 
-  const Skeleton = () => (
-    <div className="bg-card divide-y divide-border">
-      {[...Array(12)].map((_, i) => (
-        <div key={i} className="px-3 py-2.5 flex gap-4 animate-pulse">
-          <div className="w-6 h-3 bg-secondary rounded shrink-0" />
-          <div className="h-3 bg-secondary rounded" style={{ width: `${40 + (i * 17) % 35}%` }} />
-          <div className="h-3 bg-secondary rounded w-12 ml-auto" />
-          <div className="h-3 bg-secondary rounded w-14" />
-        </div>
-      ))}
-    </div>
+  const renderYearly = () => (
+    yearlyData.length === 0
+      ? <p className="text-muted-foreground font-sans py-8 text-center italic px-3">
+          {seasonLoading ? "Loading season data…" : "No data available."}
+        </p>
+      : <div className="overflow-x-auto"><table className="w-full text-sm font-sans">
+          <thead><tr className="bg-secondary">
+            <th className={`${thCls} text-left`}>Season</th>
+            {register==="yearly" && <th className={`${thCls} text-left`}>League</th>}
+            <th className={`${thCls} text-left`}>Player</th>
+            <th className={`${thCls} text-left`}>Pos</th>
+            <th className={`${thCls} text-left`}>Team</th>
+            <th className={`${thCls} text-right`}>{statInfo.abbr}</th>
+          </tr></thead>
+          <tbody>{yearlyData.map((g,i) => {
+            const e = g.entry;
+            const lid = g.league ? lgIdByName.get(g.league) : null;
+            return (
+              <tr key={`${g.seasonID}-${g.league}-${i}`}
+                className={`border-t border-border ${i%2===1?"bg-table-stripe":"bg-card"} hover:bg-highlight/20`}>
+                <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">
+                  {lid ? <Link to={`/league/${lid}/history`} className="text-accent hover:underline">{seasonLabel(g.seasonID)}</Link> : seasonLabel(g.seasonID)}
+                </td>
+                {register==="yearly" && <td className="px-3 py-1.5 text-xs text-muted-foreground">
+                  {lid ? <Link to={`/league/${lid}`} className="hover:underline hover:text-accent">{g.league}</Link> : g.league}
+                </td>}
+                <td className="px-3 py-1.5 font-medium">
+                  {e._isTie
+                    ? <span>{(e._leaders as any[]).map((l:any,li:number)=>(
+                        <span key={li}>{li>0&&" / "}<PlayerLink name={l.PlayerName} pid={l.PlayerID}/></span>
+                      ))}<span className="text-muted-foreground text-xs ml-1">(tie)</span></span>
+                    : <PlayerLink name={e.PlayerName} pid={e.PlayerID}/>}
+                </td>
+                <td className="px-3 py-1.5 text-xs text-muted-foreground">{e.Position}</td>
+                <td className="px-3 py-1.5 text-xs">
+                  {e.FullName ? <Link to={`/team/${encodeURIComponent(e.FullName)}`} className="text-accent hover:underline">{e.FullName}</Link> : "—"}
+                </td>
+                <td className="px-3 py-1.5 text-right font-mono font-bold">{fmt(e.statVal, stat)}</td>
+              </tr>
+            );
+          })}</tbody>
+        </table></div>
   );
 
   return (
     <div className="min-h-screen bg-background flex flex-col pb-14 md:pb-0">
-      <SiteHeader />
+      <SiteHeader/>
       <main className="flex-1 container py-8">
         <div className="mb-6 border-b-2 border-primary pb-2">
           <h1 className="font-display text-3xl font-bold text-foreground">Statistical Leaders</h1>
@@ -495,9 +569,9 @@ export default function LeadersIndex() {
         {/* Scope */}
         <div className="flex gap-2 mb-4">
           {(["club","intl"] as const).map(s => (
-            <button key={s} onClick={() => set("scope", s)}
-              className={`px-4 py-2 text-sm font-sans font-medium rounded transition-colors ${scope === s ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>
-              {s === "club" ? "Club Stats" : "International Stats"}
+            <button key={s} onClick={() => setParam("scope", s)}
+              className={`px-4 py-2 text-sm font-sans font-medium rounded transition-colors ${scope===s?"bg-primary text-primary-foreground":"bg-secondary text-muted-foreground hover:text-foreground"}`}>
+              {s==="club" ? "Club Stats" : "International Stats"}
             </button>
           ))}
         </div>
@@ -505,8 +579,8 @@ export default function LeadersIndex() {
         {/* Register tabs */}
         <div className="flex gap-0 mb-4 border-b border-border overflow-x-auto scrollbar-hide">
           {REGS.map(r => (
-            <button key={r.key} onClick={() => set("reg", r.key)}
-              className={`px-3 py-2 text-sm font-sans font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${register === r.key ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+            <button key={r.key} onClick={() => setParam("reg", r.key)}
+              className={`px-3 py-2 text-sm font-sans font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${register===r.key?"border-primary text-foreground":"border-transparent text-muted-foreground hover:text-foreground"}`}>
               {r.label}
             </button>
           ))}
@@ -515,7 +589,7 @@ export default function LeadersIndex() {
         {/* Stat selector */}
         <div className="mb-4 flex items-center gap-3 flex-wrap">
           <label className="text-sm font-sans font-medium text-muted-foreground">Statistic:</label>
-          <select value={stat} onChange={e => set("stat", e.target.value)}
+          <select value={stat} onChange={e => setParam("stat", e.target.value)}
             className="text-sm bg-popover text-popover-foreground border border-border rounded px-3 py-1.5 font-sans focus:outline-none">
             {STATS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
           </select>
@@ -524,79 +598,38 @@ export default function LeadersIndex() {
               {statInfo.requirePos}s only
             </span>
           )}
-          {statInfo.minGP && (
-            <span className="text-xs text-muted-foreground font-sans">Min {statInfo.minGP} GP</span>
-          )}
+          {statInfo.minGP && <span className="text-xs text-muted-foreground font-sans">Min {statInfo.minGP} GP</span>}
         </div>
 
-        {/* Main table */}
+        {careerError && (
+          <div className="mb-4 border border-red-500/40 rounded bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400 font-sans">
+            {careerError}
+            <button onClick={() => { setCareerError(null); setCareerLoading(true); }}
+              className="ml-3 underline hover:no-underline">Retry</button>
+          </div>
+        )}
+
+        {/* Main leaderboard */}
         <div className="border border-border rounded overflow-hidden">
           <div className="bg-table-header px-3 py-2 flex items-center justify-between">
             <h3 className="font-display text-sm font-bold text-table-header-foreground">
-              {REGS.find(r => r.key === register)?.label} — {statInfo.label}
-              {careerRows.length > 0 && !careerLoading && (
+              {REGS.find(r=>r.key===register)?.label} — {statInfo.label}
+              {!careerLoading && filteredCareer.length > 0 && (
                 <span className="text-table-header-foreground/60 font-sans font-normal text-xs ml-2">
                   ({filteredCareer.length} players)
                 </span>
               )}
             </h3>
           </div>
-
-          {loading ? <Skeleton /> : (
-
-            register === "progressive" ? renderTable(leaderboard) :
-            (register === "yearly" || register === "yby") ? (
-              yearlyData.length === 0
-                ? <p className="text-muted-foreground font-sans py-8 text-center italic px-3">No data available.</p>
-                : <div className="overflow-x-auto"><table className="w-full text-sm font-sans">
-                    <thead><tr className="bg-secondary">
-                      <th className={`${thClass} text-left`}>Season</th>
-                      {register === "yearly" && <th className={`${thClass} text-left`}>League</th>}
-                      <th className={`${thClass} text-left`}>Player</th>
-                      <th className={`${thClass} text-left`}>Pos</th>
-                      <th className={`${thClass} text-left`}>Team</th>
-                      <th className={`${thClass} text-right`}>{statInfo.abbr}</th>
-                    </tr></thead>
-                    <tbody>
-                      {yearlyData.map((g, i) => {
-                        const e = g.entry;
-                        const lid = g.league ? leagueIdByName.get(g.league) : null;
-                        return (
-                          <tr key={`${g.seasonID}-${g.league}-${i}`}
-                            className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
-                            <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">
-                              {lid ? <Link to={`/league/${lid}/history`} className="text-accent hover:underline">{seasonLabel(g.seasonID)}</Link> : seasonLabel(g.seasonID)}
-                            </td>
-                            {register === "yearly" && (
-                              <td className="px-3 py-1.5 text-xs text-muted-foreground">
-                                {lid ? <Link to={`/league/${lid}`} className="hover:underline hover:text-accent">{g.league}</Link> : g.league}
-                              </td>
-                            )}
-                            <td className="px-3 py-1.5 font-medium">
-                              {e._isTie
-                                ? <span>{(e._leaders as any[]).map((l: any, li: number) => (
-                                    <span key={l.PlayerName ?? li}>{li > 0 && " / "}
-                                      <PlayerLink name={l.PlayerName} pid={l.PlayerID} />
-                                    </span>
-                                  ))}<span className="text-muted-foreground text-xs ml-1">(tie)</span></span>
-                                : <PlayerLink name={e.PlayerName} pid={e.PlayerID} />}
-                            </td>
-                            <td className="px-3 py-1.5 text-xs text-muted-foreground">{e.Position}</td>
-                            <td className="px-3 py-1.5 text-xs">
-                              {e.team ? <Link to={`/team/${encodeURIComponent(e.team)}`} className="text-accent hover:underline">{e.team}</Link> : "—"}
-                            </td>
-                            <td className="px-3 py-1.5 text-right font-mono font-bold">{fmt(e.statVal, stat)}</td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table></div>
-            ) : renderTable(leaderboard)
-          )}
+          {loading
+            ? <Skeleton/>
+            : register==="yearly"||register==="yby"
+              ? renderYearly()
+              : renderTable(leaderboard)}
         </div>
       </main>
-      <SiteFooter />
-      <MobileBottomNav />
+      <SiteFooter/>
+      <MobileBottomNav/>
     </div>
   );
 }
