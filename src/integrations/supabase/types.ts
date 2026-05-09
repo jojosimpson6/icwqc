@@ -632,7 +632,6 @@ export type Database = {
           BludgerShotsFaced: number | null
           CatchAttempts: number | null
           CatchRatePct: number | null
-          FullName: string | null
           GamesPlayed: number | null
           Goals: number | null
           GoldenSnitchCatches: number | null
@@ -643,6 +642,7 @@ export type Database = {
           KeeperShotsConceded: number | null
           KeeperShotsFaced: number | null
           KeeperShotsParried: number | null
+          LeagueID: number | null
           LeagueName: string | null
           MinPlayed: number | null
           Nation: string | null
@@ -658,6 +658,8 @@ export type Database = {
           ShotAtt: number | null
           ShotScored: number | null
           SnitchSpotted: number | null
+          TeamFullName: string | null
+          TeamID: number | null
           TeammatesProtected: number | null
           TurnoversForced: number | null
         }
