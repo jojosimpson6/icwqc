@@ -619,10 +619,13 @@ export type Database = {
       player_season_minutes: {
         Row: {
           FullName: string | null
+          LeagueID: number | null
           LeagueName: string | null
           MinutesPlayed: number | null
+          PlayerID: number | null
           PlayerName: string | null
           SeasonID: number | null
+          TeamID: number | null
         }
         Relationships: []
       }
@@ -736,6 +739,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      refresh_player_views: { Args: never; Returns: undefined }
     }
     Enums: {
       app_role: "admin" | "moderator" | "user"
