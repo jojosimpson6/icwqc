@@ -622,51 +622,79 @@ export default function TeamPage() {
             {rows.map((row, i) => {
               const gd = (row.GoalsFor || 0) - (row.GoalsAgainst || 0);
               const posClass = row.isChampion ? "font-bold text-yellow-500" : "";
-              // Compute stage reached using matchDayCompositeMap (exact round names from matchdays table)
-              // This is accurate: same source the KnockoutDisplay uses.
+              // Compute stage reached using the same match-count logic as the KnockoutDisplay.
+              // Group ALL tournament matches by week, name each group by match count,
+              // then find the team's last week and return that round's name.
               const stageReached = !isDomestic ? (() => {
                 const tid = team?.TeamID;
                 if (!tid) return "—";
 
-                // Get all matches this team played in this tournament
-                const teamMatches = matchResults.filter(
-                  r => r.LeagueID === row.LeagueID && r.SeasonID === row.SeasonID &&
-                    (r.HomeTeamID === tid || r.AwayTeamID === tid)
-                );
-                if (teamMatches.length === 0) {
-                  // Fall back to allTournamentMatches if matchResults doesn't have them loaded
-                  const allMatches = allTournamentMatches.get(`${row.LeagueID}|${row.SeasonID}`);
-                  if (allMatches && allMatches.length > 0) return getCupStage(allMatches, tid, !!isCL);
-                  return "—";
+                const allMatches = allTournamentMatches.get(`${row.LeagueID}|${row.SeasonID}`);
+                if (!allMatches || allMatches.length === 0) return "—";
+
+                // For CL: knockout starts at week 7; for cups: all weeks are knockout
+                const knockoutMatches = isCL ? allMatches.filter(m => m.weekId > 6) : allMatches;
+                if (knockoutMatches.length === 0) {
+                  return isCL ? "Group Stage" : "—";
                 }
 
-                // Find the team's last match (highest WeekID) in this tournament
-                const lastWeekId = Math.max(...teamMatches.map(r => r.WeekID || 0));
-                // Look up the round name from matchdays table (already fetched)
-                const roundName = matchDayCompositeMap.get(`${row.SeasonID}|${row.LeagueID}|${lastWeekId}`);
+                // Group matches by week
+                const weekMap = new Map<number, typeof knockoutMatches>();
+                knockoutMatches.forEach(m => {
+                  if (!weekMap.has(m.weekId)) weekMap.set(m.weekId, []);
+                  weekMap.get(m.weekId)!.push(m);
+                });
+                const sortedWeeks = [...weekMap.keys()].sort((a, b) => a - b);
 
-                if (!roundName) {
-                  // Fallback to getCupStage with all matches if matchdays don't have this week
-                  const allMatches = allTournamentMatches.get(`${row.LeagueID}|${row.SeasonID}`);
-                  if (allMatches && allMatches.length > 0) return getCupStage(allMatches, tid, !!isCL);
-                  return "—";
+                // Name each round by match count (same as buildKnockoutRounds in LeaguePage)
+                const roundName = (matchCount: number): string => {
+                  if (matchCount === 1) return isCL ? "CL Final" : "Final";
+                  if (matchCount === 2) return "Semifinals";
+                  if (matchCount === 4) return "Quarterfinals";
+                  if (matchCount === 8) return "Round of 16";
+                  if (matchCount === 16) return "Round of 32";
+                  if (matchCount === 32) return "Round of 64";
+                  return `Round of ${matchCount * 2}`;
+                };
+
+                // Build week → round name map, collapsing two-leg rounds (same match count, consecutive)
+                const weekToRound = new Map<number, string>();
+                let i = 0;
+                while (i < sortedWeeks.length) {
+                  const w = sortedWeeks[i];
+                  const cnt = weekMap.get(w)!.length;
+                  const name = roundName(cnt);
+                  weekToRound.set(w, name);
+                  // If next week has same count, it's a second leg — same round name
+                  if (i + 1 < sortedWeeks.length && weekMap.get(sortedWeeks[i + 1])!.length === cnt && cnt > 1) {
+                    weekToRound.set(sortedWeeks[i + 1], name);
+                    i += 2;
+                  } else {
+                    i++;
+                  }
                 }
 
-                // Determine if team WON their last match to know if they advanced
-                const lastMatch = teamMatches.find(r => r.WeekID === lastWeekId);
-                if (!lastMatch) return roundName;
-                const isHome = lastMatch.HomeTeamID === tid;
-                const teamScore = isHome ? (lastMatch.HomeTeamScore || 0) : (lastMatch.AwayTeamScore || 0);
-                const oppScore  = isHome ? (lastMatch.AwayTeamScore || 0) : (lastMatch.HomeTeamScore || 0);
-                const wonLastMatch = teamScore > oppScore;
+                // Find this team's last knockout match
+                const teamKOMMatches = knockoutMatches.filter(m => m.homeId === tid || m.awayId === tid);
+                if (teamKOMMatches.length === 0) return isCL ? "Group Stage" : "—";
+                const lastWeek = Math.max(...teamKOMMatches.map(m => m.weekId));
+                const stageName = weekToRound.get(lastWeek) || "—";
 
-                const rn = roundName.toLowerCase();
-                // If they won the Final, they're champion
-                if ((rn === "final" || rn === "grand final") && wonLastMatch) return "🏆 Champion";
-                // If they lost the Final, runner-up
-                if ((rn === "final" || rn === "grand final") && !wonLastMatch) return "Runner-Up";
-                // Otherwise the round name is the stage they reached
-                return roundName;
+                // Did the team win their last match(es)?
+                const lastRoundMatches = teamKOMMatches.filter(m => m.weekId === lastWeek
+                  // also include second leg if it was same round
+                  || weekToRound.get(m.weekId) === stageName);
+                let teamAgg = 0, oppAgg = 0;
+                lastRoundMatches.forEach(m => {
+                  const isHome = m.homeId === tid;
+                  teamAgg += isHome ? m.homeScore : m.awayScore;
+                  oppAgg  += isHome ? m.awayScore : m.homeScore;
+                });
+                const won = teamAgg > oppAgg;
+
+                if ((stageName === "Final" || stageName === "CL Final") && won) return "🏆 Champion";
+                if ((stageName === "Final" || stageName === "CL Final") && !won) return "Runner-Up";
+                return stageName;
               })() : null;
               return (
                 <tr key={`${row.SeasonID}-${row.LeagueID}`} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
