@@ -622,22 +622,51 @@ export default function TeamPage() {
             {rows.map((row, i) => {
               const gd = (row.GoalsFor || 0) - (row.GoalsAgainst || 0);
               const posClass = row.isChampion ? "font-bold text-yellow-500" : "";
-              // Compute stage reached using ALL tournament matches for accurate round sizing
+              // Compute stage reached using matchDayCompositeMap (exact round names from matchdays table)
+              // This is accurate: same source the KnockoutDisplay uses.
               const stageReached = !isDomestic ? (() => {
                 const tid = team?.TeamID;
                 if (!tid) return "—";
-                const tournamentKey = `${row.LeagueID}|${row.SeasonID}`;
-                const allMatches = allTournamentMatches.get(tournamentKey);
-                if (allMatches && allMatches.length > 0) {
-                  return getCupStage(allMatches, tid, !!isCL);
+
+                // Get all matches this team played in this tournament
+                const teamMatches = matchResults.filter(
+                  r => r.LeagueID === row.LeagueID && r.SeasonID === row.SeasonID &&
+                    (r.HomeTeamID === tid || r.AwayTeamID === tid)
+                );
+                if (teamMatches.length === 0) {
+                  // Fall back to allTournamentMatches if matchResults doesn't have them loaded
+                  const allMatches = allTournamentMatches.get(`${row.LeagueID}|${row.SeasonID}`);
+                  if (allMatches && allMatches.length > 0) return getCupStage(allMatches, tid, !!isCL);
+                  return "—";
                 }
-                // Fallback: use team-only matches from matchResults
-                const teamMatches = matchResults.filter(r => r.LeagueID === row.LeagueID && r.SeasonID === row.SeasonID);
-                const matchData = teamMatches.map(r => ({
-                  homeId: r.HomeTeamID || 0, awayId: r.AwayTeamID || 0,
-                  homeScore: r.HomeTeamScore || 0, awayScore: r.AwayTeamScore || 0, weekId: r.WeekID || 0,
-                }));
-                return getCupStage(matchData, tid, !!isCL);
+
+                // Find the team's last match (highest WeekID) in this tournament
+                const lastWeekId = Math.max(...teamMatches.map(r => r.WeekID || 0));
+                // Look up the round name from matchdays table (already fetched)
+                const roundName = matchDayCompositeMap.get(`${row.SeasonID}|${row.LeagueID}|${lastWeekId}`);
+
+                if (!roundName) {
+                  // Fallback to getCupStage with all matches if matchdays don't have this week
+                  const allMatches = allTournamentMatches.get(`${row.LeagueID}|${row.SeasonID}`);
+                  if (allMatches && allMatches.length > 0) return getCupStage(allMatches, tid, !!isCL);
+                  return "—";
+                }
+
+                // Determine if team WON their last match to know if they advanced
+                const lastMatch = teamMatches.find(r => r.WeekID === lastWeekId);
+                if (!lastMatch) return roundName;
+                const isHome = lastMatch.HomeTeamID === tid;
+                const teamScore = isHome ? (lastMatch.HomeTeamScore || 0) : (lastMatch.AwayTeamScore || 0);
+                const oppScore  = isHome ? (lastMatch.AwayTeamScore || 0) : (lastMatch.HomeTeamScore || 0);
+                const wonLastMatch = teamScore > oppScore;
+
+                const rn = roundName.toLowerCase();
+                // If they won the Final, they're champion
+                if ((rn === "final" || rn === "grand final") && wonLastMatch) return "🏆 Champion";
+                // If they lost the Final, runner-up
+                if ((rn === "final" || rn === "grand final") && !wonLastMatch) return "Runner-Up";
+                // Otherwise the round name is the stage they reached
+                return roundName;
               })() : null;
               return (
                 <tr key={`${row.SeasonID}-${row.LeagueID}`} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
