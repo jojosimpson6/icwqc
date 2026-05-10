@@ -220,7 +220,7 @@ export default function TeamPage() {
 
     Promise.all([
       supabase.from("teams").select("*").eq("FullName", teamName).single(),
-      fetchAllRows("stats", { select: "*", filters: [{ method: "eq", args: ["FullName", teamName] }] }),
+      fetchAllRows("player_season_stats", { select: "*", filters: [{ method: "eq", args: ["TeamFullName", teamName] }] }),
       fetchAllRows("standings", { select: "*", filters: [{ method: "eq", args: ["FullName", teamName] }], order: { column: "SeasonID", ascending: false } }),
       fetchAllRows("players", { select: "PlayerID, PlayerName, DOB, NationalityID, Height, Weight, Handedness" }),
       fetchAllRows("teams", { select: "TeamID, FullName" }),
@@ -283,7 +283,7 @@ export default function TeamPage() {
         // Fetch all-player stats to get overall debut (not team debut)
         const playerNames = [...new Set((statsData as StatLine[]).map((s: any) => s.PlayerName).filter(Boolean))];
         if (playerNames.length > 0) {
-          fetchAllRows("stats", {
+          fetchAllRows("player_season_stats", {
             select: "PlayerName, SeasonID",
             filters: [{ method: "in", args: ["PlayerName", playerNames] }],
           }).then((allPlayerStats: any) => {

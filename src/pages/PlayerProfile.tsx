@@ -29,7 +29,7 @@ interface StatLine {
   PlayerName: string | null;
   SeasonID: number | null;
   LeagueName: string | null;
-  FullName: string | null;
+  TeamFullName: string | null;
   Position: string | null;
   Nation: string | null;
   GamesPlayed: number | null;
@@ -211,7 +211,7 @@ export default function PlayerProfile() {
     }).then(async (sData) => {
       if (!sData || sData.length === 0) return;
       setStats(sData as StatLine[]);
-      setMostRecentTeam((sData[sData.length - 1] as any).FullName || "");
+      setMostRecentTeam((sData[sData.length - 1] as any).TeamFullName || "");
 
       const positions = [...new Set(sData.map((s: any) => s.Position).filter(Boolean))] as string[];
       setDetectedPositions(positions);
@@ -395,7 +395,7 @@ export default function PlayerProfile() {
   const isBeater = positionsPlayed.includes("Beater");
   const positionDisplay = positionsPlayed.join("/");
 
-  // Deduplicate stats: group by SeasonID+LeagueName+FullName, show each unique row
+  // Deduplicate stats: group by SeasonID+LeagueName+TeamFullName, show each unique row
   // (multi-position players have separate rows per position which is fine for the table)
 
   // Career totals
@@ -765,8 +765,8 @@ export default function PlayerProfile() {
                         <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{ageAtSeason(player.DOB, s.SeasonID)}</td>
                         <td className={`${tdClass} font-mono text-xs`} title={s.LeagueName || ""}>{abbrevLeague(s.LeagueName)}</td>
                         <td className={`${tdClass}`}>
-                          {s.FullName ? (
-                            <Link to={`/team/${encodeURIComponent(s.FullName)}`} className="text-accent hover:underline">{s.FullName}</Link>
+                          {s.TeamFullName ? (
+                            <Link to={`/team/${encodeURIComponent(s.TeamFullName)}`} className="text-accent hover:underline">{s.TeamFullName}</Link>
                           ) : "—"}
                         </td>
                         {positionsPlayed.length > 1 && <td className={`${tdClass} text-xs text-muted-foreground`}>{s.Position}</td>}

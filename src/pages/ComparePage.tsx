@@ -11,7 +11,7 @@ interface StatRow {
   SeasonID: number; LeagueName: string; GamesPlayed: number;
   Goals: number; GoldenSnitchCatches: number; KeeperSaves: number;
   KeeperShotsFaced: number; ShotAtt: number; ShotScored: number;
-  Position: string; FullName: string;
+  Position: string; TeamFullName?: string; FullName?: string;
 }
 interface PlayerStats { info: PlayerOption; rows: StatRow[]; }
 
@@ -106,7 +106,7 @@ export default function ComparePage() {
     if (stats.has(player.PlayerID)) return;
     setLoading(prev => new Set(prev).add(player.PlayerID));
     const data = await fetchAllRows("player_season_stats", {
-      select: "SeasonID,LeagueName,GamesPlayed,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,ShotAtt,ShotScored,Position,FullName",
+      select: "SeasonID,LeagueName,GamesPlayed,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,ShotAtt,ShotScored,Position,TeamFullName",
       filters: [{ method: "eq", args: ["PlayerID", player.PlayerID] }],
       order: { column: "SeasonID", ascending: true },
     });

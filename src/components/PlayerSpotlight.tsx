@@ -1,15 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchAllRows } from "@/lib/fetchAll";
-import { formatHeight, getNationFlag } from "@/lib/helpers";
+import { getNationFlag } from "@/lib/helpers";
 
 interface SpotlightPlayer {
   PlayerID: number;
   PlayerName: string;
   Position: string;
-  FullName: string;
-  GamesPlayed: number;
+  TeamFullName: string;
   NationName?: string;
   NationFlag?: string;
 }
@@ -21,70 +19,60 @@ export function PlayerSpotlight() {
   useEffect(() => {
     (async () => {
       try {
-        // 1. Get latest season — small query, no count needed
-        const { data: mdData } = await supabase
-          .from("matchdays")
-          .select("SeasonID")
-          .order("SeasonID", { ascending: false })
-          .limit(1);
-        const latestSeason = mdData?.[0]?.SeasonID || 1998;
+        // Fetch directly from players table — always works, no view dependency
+        const { data: playerData, error: playerError } = await supabase
+          .from("players")
+          .select("PlayerID, PlayerName, Position, NationalityID")
+          .not("PlayerName", "is", null)
+          .order("PlayerID", { ascending: true })
+          .range(0, 999);
 
-        // 2. Fetch a page of players from the latest season — no count:exact on view
-        //    Order by PlayerName so we get a stable, varied set; take first 200 rows
-        const { data: statsData, error: statsError } = await supabase
-          .from("player_season_stats")
-          .select("PlayerID, PlayerName, FullName, Position, GamesPlayed")
-          .eq("SeasonID", latestSeason)
-          .gt("GamesPlayed", 0)
-          .order("PlayerName", { ascending: true })
-          .limit(200);
-
-        if (statsError || !statsData?.length) {
+        if (playerError || !playerData?.length) {
           setLoading(false);
           return;
         }
 
-        // 3. Pick 6 random players from the 200 fetched
-        const shuffled = [...statsData].sort(() => Math.random() - 0.5);
+        // Shuffle and pick 6 from across the full range
+        const shuffled = [...playerData].sort(() => Math.random() - 0.5);
         const chosen = shuffled.slice(0, 6);
 
-        // 4. Enrich with nation info
-        const playerIds = chosen.map((p: any) => p.PlayerID).filter(Boolean);
-        const [playerRows, { data: nations }] = await Promise.all([
-          fetchAllRows("players", {
-            select: "PlayerID, NationalityID, headshot_url",
-            filters: [{ method: "in", args: ["PlayerID", playerIds] }],
-          }),
-          supabase.from("nations").select("NationID, Nation").in("NationID",
-            chosen.map(() => 0) // placeholder - will fix below
-          ).then(() => ({ data: [] })), // skip - get from playerRows join
-        ]);
-
-        // Build nation map from separate nations fetch
-        const natIds = (playerRows as any[]).map(p => p.NationalityID).filter(Boolean);
-        let nationMap = new Map<number, string>();
+        // Get nation names
+        const natIds = [...new Set(chosen.map(p => p.NationalityID).filter(Boolean))] as number[];
+        const nationMap = new Map<number, string>();
         if (natIds.length > 0) {
           const { data: natData } = await supabase
             .from("nations")
             .select("NationID, Nation")
-            .in("NationID", [...new Set(natIds)]);
-          (natData || []).forEach((n: any) => { if (n.NationID) nationMap.set(n.NationID, n.Nation); });
+            .in("NationID", natIds);
+          (natData || []).forEach((n: any) => {
+            if (n.NationID && n.Nation) nationMap.set(n.NationID, n.Nation);
+          });
         }
 
-        const playerExtraMap = new Map<number, { natId: number | null; headshot: string | null }>();
-        (playerRows as any[]).forEach((p: any) => {
-          playerExtraMap.set(p.PlayerID, { natId: p.NationalityID, headshot: p.headshot_url });
-        });
+        // Get most recent team for each player from player_season_stats
+        const pids = chosen.map(p => p.PlayerID).filter(Boolean) as number[];
+        const teamMap = new Map<number, string>();
+        if (pids.length > 0) {
+          const { data: teamData } = await supabase
+            .from("player_season_stats")
+            .select("PlayerID, TeamFullName, SeasonID")
+            .in("PlayerID", pids)
+            .order("SeasonID", { ascending: false });
+          // Take most recent team per player
+          (teamData || []).forEach((r: any) => {
+            if (r.PlayerID && r.TeamFullName && !teamMap.has(r.PlayerID)) {
+              teamMap.set(r.PlayerID, r.TeamFullName);
+            }
+          });
+        }
 
-        const enriched: SpotlightPlayer[] = chosen.map((p: any) => {
-          const extra = playerExtraMap.get(p.PlayerID);
-          const natName = extra?.natId ? nationMap.get(extra.natId) : undefined;
+        const enriched: SpotlightPlayer[] = chosen.map(p => {
+          const natName = p.NationalityID ? nationMap.get(p.NationalityID) : undefined;
           return {
             PlayerID: p.PlayerID,
-            PlayerName: p.PlayerName,
-            Position: p.Position,
-            FullName: p.FullName,
-            GamesPlayed: p.GamesPlayed,
+            PlayerName: p.PlayerName || "",
+            Position: p.Position || "",
+            TeamFullName: teamMap.get(p.PlayerID) || "",
             NationName: natName,
             NationFlag: natName ? getNationFlag(natName) : undefined,
           };
@@ -106,7 +94,7 @@ export function PlayerSpotlight() {
           <h3 className="font-display text-sm font-bold text-table-header-foreground">Player Spotlight</h3>
         </div>
         <div className="bg-card divide-y divide-border">
-          {[...Array(5)].map((_, i) => (
+          {[...Array(6)].map((_, i) => (
             <div key={i} className="px-3 py-2.5 flex items-center gap-3 animate-pulse">
               <div className="w-8 h-8 rounded-full bg-secondary shrink-0" />
               <div className="flex-1 space-y-1.5">
@@ -126,20 +114,25 @@ export function PlayerSpotlight() {
     <div className="border border-border rounded overflow-hidden">
       <div className="bg-table-header px-3 py-2 flex items-center justify-between">
         <h3 className="font-display text-sm font-bold text-table-header-foreground">Player Spotlight</h3>
-        <Link to="/players" className="text-xs text-table-header-foreground/70 hover:text-table-header-foreground font-sans">All players →</Link>
+        <Link to="/players" className="text-xs text-table-header-foreground/70 hover:text-table-header-foreground font-sans">
+          All players →
+        </Link>
       </div>
       <div className="bg-card divide-y divide-border">
         {players.map(p => (
-          <Link key={p.PlayerID} to={`/player/${p.PlayerID}`}
-            className="px-3 py-2.5 flex items-center gap-3 hover:bg-highlight/20 transition-colors block">
+          <Link
+            key={p.PlayerID}
+            to={`/player/${p.PlayerID}`}
+            className="px-3 py-2.5 flex items-center gap-3 hover:bg-highlight/20 transition-colors"
+          >
             <div className="w-8 h-8 rounded-full bg-secondary flex items-center justify-center shrink-0 text-sm font-medium text-muted-foreground">
               {(p.PlayerName || "?")[0]}
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-sm font-medium font-sans text-foreground truncate">{p.PlayerName}</p>
-              <p className="text-xs text-muted-foreground font-sans">
+              <p className="text-xs text-muted-foreground font-sans truncate">
                 {p.Position}
-                {p.FullName && <> · <span className="truncate">{p.FullName}</span></>}
+                {p.TeamFullName && <> · {p.TeamFullName}</>}
               </p>
             </div>
             {p.NationFlag && <span className="text-sm shrink-0">{p.NationFlag}</span>}

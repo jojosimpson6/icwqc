@@ -49,7 +49,7 @@ const MEDAL = {
 // LeagueIDs that are cup/knockout competitions (not round-robin)
 const CUP_IDS = new Set([15,16,17,18,19,20,21]);
 
-type TabType = "timeline" | "awards" | "stats";
+type TabType = "timeline" | "awards" | "player_season_stats";
 
 export default function LeagueHistory() {
   const { id } = useParams();
@@ -104,7 +104,7 @@ export default function LeagueHistory() {
             champion: sorted[0]?.FullName??null,
             runnerUp: sorted[1]?.FullName??null,
             third: sorted[2]?.FullName??null,
-            teams: sorted.map((r:any) => ({name:r.FullName||"",pts:r.totalpoints||0,gp:r.totalgamesplayed||0,gf:r.GoalsFor||0,ga:r.GoalsAgainst||0,gsc:r.totalgsc||0})),
+            teams: sorted.map((r:any) => ({name:r.TeamFullName||"",pts:r.totalpoints||0,gp:r.totalgamesplayed||0,gf:r.GoalsFor||0,ga:r.GoalsAgainst||0,gsc:r.totalgsc||0})),
           });
         });
         setSeasons(summaries.sort((a,b)=>b.seasonId-a.seasonId));
@@ -159,10 +159,10 @@ export default function LeagueHistory() {
 
   // Load stats when tab opened
   useEffect(() => {
-    if (activeTab!=="stats"||!league?.LeagueName||leagueStats.length>0) return;
+    if (activeTab!=="player_season_stats"||!league?.LeagueName||leagueStats.length>0) return;
     setStatsLoading(true);
     fetchAllRows("player_season_stats", {
-      select:"PlayerID,PlayerName,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,GamesPlayed,Position,SeasonID,FullName",
+      select:"PlayerID,PlayerName,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,GamesPlayed,Position,SeasonID,TeamFullName",
       filters:[{method:"eq",args:["LeagueName",league.LeagueName]}],
     }).then(data=>{ setLeagueStats(data||[]); setStatsLoading(false); });
   },[activeTab,league]);
@@ -213,8 +213,8 @@ export default function LeagueHistory() {
     const byPlayer = new Map<string,{PlayerID:number|null;Goals:number;GSC:number;KS:number;GP:number;team:string;seasons:number}>();
     leagueStats.forEach((r:any)=>{
       const name=r.PlayerName; if(!name) return;
-      const cur=byPlayer.get(name)||{PlayerID:r.PlayerID,Goals:0,GSC:0,KS:0,GP:0,team:r.FullName||"",seasons:0};
-      cur.Goals+=(r.Goals||0); cur.GSC+=(r.GoldenSnitchCatches||0); cur.KS+=(r.KeeperSaves||0); cur.GP+=(r.GamesPlayed||0); cur.seasons+=1; cur.team=r.FullName||cur.team;
+      const cur=byPlayer.get(name)||{PlayerID:r.PlayerID,Goals:0,GSC:0,KS:0,GP:0,team:r.TeamFullName||"",seasons:0};
+      cur.Goals+=(r.Goals||0); cur.GSC+=(r.GoldenSnitchCatches||0); cur.KS+=(r.KeeperSaves||0); cur.GP+=(r.GamesPlayed||0); cur.seasons+=1; cur.team=r.TeamFullName||cur.team;
       byPlayer.set(name,cur);
     });
     return [...byPlayer.entries()]
@@ -229,7 +229,7 @@ export default function LeagueHistory() {
   const tabs: {key:TabType;label:string}[] = [
     {key:"timeline",label:"Season Timeline"},
     ...(allAwardNames.length>0?[{key:"awards" as TabType,label:"Award History"}]:[]),
-    {key:"stats",label:"All-Time Stats"},
+    {key:"player_season_stats",label:"All-Time Stats"},
   ];
 
   if (!league) return (
@@ -575,7 +575,7 @@ export default function LeagueHistory() {
         )}
 
         {/* ═══ ALL-TIME STATS TAB ═══ */}
-        {activeTab==="stats"&&(
+        {activeTab==="player_season_stats"&&(
           <div className="space-y-4">
             <div className="flex items-center gap-3 flex-wrap">
               <span className="text-sm font-sans font-medium text-muted-foreground">Statistic:</span>

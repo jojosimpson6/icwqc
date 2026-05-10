@@ -150,7 +150,7 @@ export default function NationPage() {
 
       if (playerData && playerData.length > 0) {
         const playerNames = playerData.map((p: any) => p.PlayerName).filter(Boolean);
-        fetchAllRows("stats", { select: "*", filters: [{ method: "in", args: ["PlayerName", playerNames] }] }).then((statsData) => {
+        fetchAllRows("player_season_stats", { select: "*", filters: [{ method: "in", args: ["PlayerName", playerNames] }] }).then((statsData) => {
           if (!statsData) return;
 
           const recordMap = new Map<number, CareerRecord>();

@@ -35,7 +35,7 @@ export default function PlayersIndex() {
     Promise.all([
       fetchAllRows<Player>("players", { select: "PlayerID, PlayerName, Position, Height, DOB, NationalityID", order: { column: "PlayerName" } }),
       supabase.from("nations").select("NationID, Nation, ValidToDt").order("ValidToDt", { ascending: false }),
-      fetchAllRows("stats", { select: "PlayerName, FullName, SeasonID", order: { column: "SeasonID", ascending: false } }),
+      fetchAllRows("player_season_stats", { select: "PlayerName, TeamFullName, SeasonID", order: { column: "SeasonID", ascending: false } }),
     ]).then(([playerData, { data: nationData }, statsData]) => {
       setPlayers(playerData);
 
@@ -47,7 +47,7 @@ export default function PlayersIndex() {
 
       const rt = new Map<string, string>();
       (statsData || []).forEach((s: any) => {
-        if (s.PlayerName && s.FullName && !rt.has(s.PlayerName)) rt.set(s.PlayerName, s.FullName);
+        if (s.PlayerName && s.FullName && !rt.has(s.PlayerName)) rt.set(s.PlayerName, s.TeamFullName);
       });
       setRecentTeams(rt);
       setLoading(false);

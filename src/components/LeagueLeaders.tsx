@@ -43,13 +43,14 @@ export function LeagueLeaders() {
   // Load metadata: latest season and leagues — small targeted queries
   useEffect(() => {
     (async () => {
-      const [{ data: mdData }, { data: leagueData }] = await Promise.all([
-        supabase.from("matchdays").select("SeasonID").order("SeasonID", { ascending: false }).limit(200),
+      const [{ data: psData }, { data: leagueData }] = await Promise.all([
+        // Get seasons from the materialized view itself — ensures season/data alignment
+        supabase.from("player_season_stats").select("SeasonID").order("SeasonID", { ascending: false }).limit(2000),
         supabase.from("leagues").select("LeagueID, LeagueName").order("LeagueTier").order("LeagueName"),
       ]);
       if (leagueData) setLeagues(leagueData as LeagueOption[]);
-      if (mdData) {
-        const seasons = [...new Set(mdData.map((m: any) => m.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number)) as number[];
+      if (psData) {
+        const seasons = [...new Set(psData.map((m: any) => m.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number)) as number[];
         setAvailableSeasons(seasons);
         if (seasons.length > 0) setSelectedSeason(seasons[0]);
       }
@@ -72,7 +73,7 @@ export function LeagueLeaders() {
     // Build query: order by the stat column descending, limit 15 (to allow for position filtering)
     let q = supabase
       .from("player_season_stats")
-      .select(`PlayerName,FullName,Position,${col},PlayerID`)
+      .select(`PlayerName,TeamFullName,Position,${col},PlayerID`)
       .eq("SeasonID", selectedSeason)
       .gt(col, 0)
       .order(col, { ascending: false })
@@ -95,7 +96,7 @@ export function LeagueLeaders() {
     const rows: LeaderRow[] = (data || [])
       .map((r: any) => ({
         PlayerName: r.PlayerName || "",
-        FullName: r.FullName || "",
+        FullName: r.TeamFullName || "",
         Position: r.Position || "",
         value: r[col] || 0,
         pid: r.PlayerID || null,
