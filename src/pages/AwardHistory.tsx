@@ -205,58 +205,71 @@ export default function AwardHistory() {
                   </table>
                 </div>
               ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm font-sans">
-                  <thead>
-                    <tr className="bg-secondary">
-                      <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
-                      <th className={`px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground`}>🥇 Winner</th>
-                      <th className={`px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground`}>🥈 Runner-up</th>
-                      <th className={`px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground`}>🥉 3rd Place</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {seasons.map((sid, i) => {
-                      const entries = (bySeason.get(sid) || []).sort((a, b) => a.placement - b.placement);
-                      const byP = (p: number) => entries.find(e => e.placement === p);
-                      const first = byP(1);
-                      const second = byP(2);
-                      const third = byP(3);
+              {(() => {
+                // Dynamically determine which placement columns have any data
+                const allPlacements = [...new Set(awards.filter(a => !isTOTY).flatMap(a => [a.placement]))].sort((a,b)=>a-b);
+                const maxPlacement = Math.min(Math.max(...allPlacements, 1), 5);
+                const showPlacements = Array.from({length: maxPlacement}, (_, i) => i + 1)
+                  .filter(p => allPlacements.includes(p));
 
-                      const cell = (entry: AwardEntry | undefined, placement: 1 | 2 | 3) => {
-                        const m = MEDAL[placement];
-                        return (
-                          <td className={`px-3 py-2 ${m.rowBg}`}>
-                            {entry ? (
-                              <div>
-                                <Link to={`/player/${entry.playerid}`} className={`hover:underline font-medium ${placement === 1 ? "text-accent font-bold" : "text-accent"}`}>
-                                  {playerMap.get(entry.playerid) || `#${entry.playerid}`}
-                                </Link>
-                              </div>
-                            ) : (
-                              <span className="text-muted-foreground text-xs">—</span>
-                            )}
-                          </td>
-                        );
-                      };
+                const PLACE_LABELS: Record<number, string> = {
+                  1: "🥇 Winner", 2: "🥈 Runner-up", 3: "🥉 3rd Place",
+                  4: "4th Place", 5: "5th Place",
+                };
+                const PLACE_BG: Record<number, string> = {
+                  1: "bg-yellow-500/10", 2: "bg-slate-400/10", 3: "bg-amber-700/10",
+                  4: "", 5: "",
+                };
 
-                      return (
-                        <tr key={sid} className={`border-t border-border hover:bg-highlight/10`}>
-                          <td className="px-3 py-2 font-mono font-medium text-sm">
-                            <Link to={`/league/${id}/history`} className="text-accent hover:underline">
-                              {seasonLabel(sid)}
-                            </Link>
-                          </td>
-                          {cell(first, 1)}
-                          {cell(second, 2)}
-                          {cell(third, 3)}
+                return (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm font-sans">
+                      <thead>
+                        <tr className="bg-secondary">
+                          <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
+                          {showPlacements.map(p => (
+                            <th key={p} className={`px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground ${PLACE_BG[p] || ""}`}>
+                              {PLACE_LABELS[p] || `${p}th`}
+                            </th>
+                          ))}
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-              )}
+                      </thead>
+                      <tbody>
+                        {seasons.map((sid, i) => {
+                          const entries = (bySeason.get(sid) || []).sort((a, b) => a.placement - b.placement);
+                          const byP = (p: number) => entries.find(e => e.placement === p);
+                          return (
+                            <tr key={sid} className={`border-t border-border hover:bg-highlight/10`}>
+                              <td className="px-3 py-2 font-mono font-medium text-sm">
+                                <Link to={`/league/${id}/history`} className="text-accent hover:underline">
+                                  {seasonLabel(sid)}
+                                </Link>
+                              </td>
+                              {showPlacements.map(p => {
+                                const entry = byP(p);
+                                return (
+                                  <td key={p} className={`px-3 py-2 ${PLACE_BG[p] || ""}`}>
+                                    {entry ? (
+                                      <Link to={`/player/${entry.playerid}`}
+                                        className={`hover:underline font-medium ${p === 1 ? "font-bold text-accent" : "text-accent"}`}>
+                                        {playerMap.get(entry.playerid) || `#${entry.playerid}`}
+                                      </Link>
+                                    ) : (
+                                      showPlacements.length === 1
+                                        ? null  // only 1 column → no dash needed
+                                        : <span className="text-muted-foreground text-xs">—</span>
+                                    )}
+                                  </td>
+                                );
+                              })}
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              })()}
             </div>
           </div>
 

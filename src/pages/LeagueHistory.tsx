@@ -74,7 +74,11 @@ export default function LeagueHistory() {
 
     Promise.all([
       supabase.from("leagues").select("*").eq("LeagueID", lid).single(),
-      fetchAllRows("teams", { select:"TeamID,FullName", filters:[{method:"eq",args:["LeagueID",lid]}] }),
+      // For cups: teams play under their domestic league IDs, not the cup's LeagueID.
+      // Fetch all teams; we'll filter to those appearing in results.
+      cup
+        ? fetchAllRows("teams", { select:"TeamID,FullName" })
+        : fetchAllRows("teams", { select:"TeamID,FullName", filters:[{method:"eq",args:["LeagueID",lid]}] }),
       cup ? Promise.resolve([]) : fetchAllRows("standings", { select:"*", filters:[{method:"eq",args:["LeagueID",lid]}], order:{column:"totalpoints",ascending:false} }),
       fetchAllRows("awards", { select:"*", filters:[{method:"eq",args:["leagueid",lid]}], order:{column:"seasonid",ascending:true} }),
       fetchAllRows("players", { select:"PlayerID,PlayerName" }),
@@ -545,28 +549,42 @@ export default function LeagueHistory() {
                       </tbody>
                     </table></div>
                   ):(
-                    <div className="overflow-x-auto"><table className="w-full text-sm font-sans">
-                      <thead><tr className="bg-secondary">
-                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
-                        <th className={`px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground ${MEDAL.gold.rowBg}`}>🥇 Winner</th>
-                        <th className={`px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground ${MEDAL.silver.rowBg}`}>🥈 Runner-up</th>
-                        <th className={`px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground ${MEDAL.bronze.rowBg}`}>🥉 3rd Place</th>
-                      </tr></thead>
-                      <tbody>
-                        {allWinners.map((w,i)=>{
-                          const se=awards.filter(a=>a.awardname===awardName&&a.seasonid===w.seasonid);
-                          const p2=se.find(e=>e.placement===2); const p3=se.find(e=>e.placement===3);
-                          return (
-                            <tr key={w.seasonid} className={`border-t border-border ${i%2===1?"bg-table-stripe":"bg-card"} hover:bg-highlight/20`}>
-                              <td className="px-3 py-1.5 font-medium text-accent font-mono">{seasonLabel(w.seasonid)}</td>
-                              <td className={`px-3 py-1.5 ${MEDAL.gold.rowBg}`}><Link to={`/player/${w.playerid}`} className="text-accent hover:underline font-semibold">{playerMap.get(w.playerid)||`#${w.playerid}`}</Link></td>
-                              <td className={`px-3 py-1.5 ${MEDAL.silver.rowBg}`}>{p2?<Link to={`/player/${p2.playerid}`} className="text-accent hover:underline">{playerMap.get(p2.playerid)||`#${p2.playerid}`}</Link>:<span className="text-muted-foreground">—</span>}</td>
-                              <td className={`px-3 py-1.5 ${MEDAL.bronze.rowBg}`}>{p3?<Link to={`/player/${p3.playerid}`} className="text-accent hover:underline">{playerMap.get(p3.playerid)||`#${p3.playerid}`}</Link>:<span className="text-muted-foreground">—</span>}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table></div>
+                    {(()=>{
+                      const awardEntries = awards.filter(a=>a.awardname===awardName);
+                      const allPl = [...new Set(awardEntries.map(e=>e.placement))].sort((a,b)=>a-b);
+                      const maxPl = Math.min(Math.max(...allPl,1),5);
+                      const showPl = Array.from({length:maxPl},(_,i)=>i+1).filter(p=>allPl.includes(p));
+                      const PLABEL: Record<number,string> = {1:"🥇 Winner",2:"🥈 Runner-up",3:"🥉 3rd Place",4:"4th Place",5:"5th Place"};
+                      const PBG: Record<number,string> = {1:MEDAL.gold.rowBg,2:MEDAL.silver.rowBg,3:MEDAL.bronze.rowBg,4:"",5:""};
+                      return (
+                        <div className="overflow-x-auto"><table className="w-full text-sm font-sans">
+                          <thead><tr className="bg-secondary">
+                            <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
+                            {showPl.map(p=><th key={p} className={`px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground ${PBG[p]||""}`}>{PLABEL[p]||`${p}th`}</th>)}
+                          </tr></thead>
+                          <tbody>
+                            {allWinners.map((w,i)=>{
+                              const se=awardEntries.filter(e=>e.seasonid===w.seasonid);
+                              return (
+                                <tr key={w.seasonid} className={`border-t border-border ${i%2===1?"bg-table-stripe":"bg-card"} hover:bg-highlight/20`}>
+                                  <td className="px-3 py-1.5 font-medium text-accent font-mono">{seasonLabel(w.seasonid)}</td>
+                                  {showPl.map(p=>{
+                                    const e=se.find(x=>x.placement===p);
+                                    return (
+                                      <td key={p} className={`px-3 py-1.5 ${PBG[p]||""}`}>
+                                        {e
+                                          ?<Link to={`/player/${e.playerid}`} className={`text-accent hover:underline ${p===1?"font-semibold":""}`}>{playerMap.get(e.playerid)||`#${e.playerid}`}</Link>
+                                          :showPl.length>1?<span className="text-muted-foreground">—</span>:null}
+                                      </td>
+                                    );
+                                  })}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table></div>
+                      );
+                    })()}
                   )}
                 </div>
               );

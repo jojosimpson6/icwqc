@@ -146,12 +146,12 @@ function getCupStage(
     // Teams at this round = startingTeams / 2^roundIdx
     const teamsAtRound = Math.round(startingTeams / Math.pow(2, roundIdx));
     if (teamsAtRound <= 2) return isCL ? "CL Final" : "Final";
-    if (teamsAtRound <= 4) return "Semi-finals";
-    if (teamsAtRound <= 8) return "Quarter-finals";
-    if (teamsAtRound <= 16) return "Round of 16";
-    if (teamsAtRound <= 32) return "Round of 32";
-    if (teamsAtRound <= 64) return "Round of 64";
-    return `Round of ${teamsAtRound}`;
+    if (teamsAtRound <= 4)  return "Semifinals";
+    if (teamsAtRound <= 8)  return "Quarterfinals";
+    if (teamsAtRound <= 16) return "Fourth Round";
+    if (teamsAtRound <= 32) return "Third Round";
+    if (teamsAtRound <= 64) return "Second Round";
+    return "First Round";
   };
 
   // Find the last round this team played in
@@ -647,14 +647,17 @@ export default function TeamPage() {
                 const sortedWeeks = [...weekMap.keys()].sort((a, b) => a - b);
 
                 // Name each round by match count (same as buildKnockoutRounds in LeaguePage)
+                // Rounds are named by position from the end, not by team count,
+                // so variable-draw competitions (Africa/Americas/Pacific Cup) display correctly.
                 const roundName = (matchCount: number): string => {
-                  if (matchCount === 1) return isCL ? "CL Final" : "Final";
-                  if (matchCount === 2) return "Semifinals";
-                  if (matchCount === 4) return "Quarterfinals";
-                  if (matchCount === 8) return "Round of 16";
-                  if (matchCount === 16) return "Round of 32";
-                  if (matchCount === 32) return "Round of 64";
-                  return `Round of ${matchCount * 2}`;
+                  if (matchCount === 1)  return isCL ? "CL Final" : "Final";
+                  if (matchCount === 2)  return "Semifinals";
+                  if (matchCount === 4)  return "Quarterfinals";
+                  if (matchCount === 8)  return "Fourth Round";
+                  if (matchCount === 16) return "Third Round";
+                  if (matchCount === 32) return "Second Round";
+                  // Anything larger (e.g. 15 matches = 30 teams, or more) = First Round
+                  return "First Round";
                 };
 
                 // Build week → round name map, collapsing two-leg rounds (same match count, consecutive)

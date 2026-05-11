@@ -219,12 +219,13 @@ export default function LeaguePage() {
 
     // Determine round names based on match count
     const roundNames = (count: number): string => {
-      if (count === 1) return "Final";
-      if (count === 2) return "Semifinals";
-      if (count === 4) return "Quarterfinals";
-      if (count === 8) return "Round of 16";
-      if (count === 16) return "Round of 32";
-      return `Round (${count} matches)`;
+      if (count === 1)  return "Final";
+      if (count === 2)  return "Semifinals";
+      if (count === 4)  return "Quarterfinals";
+      if (count === 8)  return "Fourth Round";
+      if (count === 16) return "Third Round";
+      if (count === 32) return "Second Round";
+      return "First Round";
     };
 
     // For two-leg rounds, group pairs of weeks
