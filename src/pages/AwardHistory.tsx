@@ -204,10 +204,9 @@ export default function AwardHistory() {
                     </tbody>
                   </table>
                 </div>
-              ) : (
-              {(() => {
+              ) : (() => {
                 // Dynamically determine which placement columns have any data
-                const allPlacements = [...new Set(awards.filter(a => !isTOTY).flatMap(a => [a.placement]))].sort((a,b)=>a-b);
+                const allPlacements = [...new Set(awards.map(a => a.placement))].sort((a,b)=>a-b);
                 const maxPlacement = Math.min(Math.max(...allPlacements, 1), 5);
                 const showPlacements = Array.from({length: maxPlacement}, (_, i) => i + 1)
                   .filter(p => allPlacements.includes(p));
@@ -269,7 +268,7 @@ export default function AwardHistory() {
                     </table>
                   </div>
                 );
-              })()}
+              })()
             </div>
           </div>
 

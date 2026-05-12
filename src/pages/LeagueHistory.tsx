@@ -84,12 +84,35 @@ export default function LeagueHistory() {
       fetchAllRows("players", { select:"PlayerID,PlayerName" }),
       cup ? fetchAllRows("results", { select:"MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID,SeasonID", filters:[{method:"eq",args:["LeagueID",lid]}], order:{column:"WeekID",ascending:true} }) : Promise.resolve([]),
       cup ? fetchAllRows("matchdays", { select:"Matchday,MatchdayWeek,SeasonID,LeagueID", filters:[{method:"eq",args:["LeagueID",lid]}] }) : Promise.resolve([]),
-    ]).then(([{data:leagueData}, teamData, standingsData, awardsData, playerData, resultsData, matchdaysData]) => {
+    ]).then(async ([{data:leagueData}, teamData, standingsData, awardsData, playerData, resultsData, matchdaysData]) => {
       if (leagueData) setLeague(leagueData);
 
       const tMap: Record<number,string> = {};
       const teamNames = new Set<string>();
-      if (teamData) { (teamData as any[]).forEach(t => { tMap[t.TeamID]=t.FullName; teamNames.add(t.FullName); }); }
+      if (teamData) { (teamData as any[]).forEach(t => { if(t.TeamID && t.FullName) { tMap[t.TeamID]=t.FullName; teamNames.add(t.FullName); } }); }
+
+      // For cups: if tMap is still sparse (e.g. teams table filtered), 
+      // supplement from resultsData TeamIDs via a targeted fetch
+      if (cup && Array.isArray(resultsData) && resultsData.length > 0) {
+        const teamIdsInResults = new Set<number>();
+        (resultsData as any[]).forEach((r:any) => {
+          if (r.HomeTeamID) teamIdsInResults.add(r.HomeTeamID);
+          if (r.AwayTeamID) teamIdsInResults.add(r.AwayTeamID);
+        });
+        const missing = [...teamIdsInResults].filter(id => !tMap[id]);
+        if (missing.length > 0) {
+          // Fetch only the specific teams we need
+          await Promise.all(
+            // Split into chunks of 50 to avoid URL length limits
+            Array.from({length: Math.ceil(missing.length/50)}, (_,i) => missing.slice(i*50,(i+1)*50))
+              .map(chunk =>
+                supabase.from("teams").select("TeamID,FullName").in("TeamID",chunk)
+                  .then(({data}) => { (data||[]).forEach((t:any) => { if(t.TeamID&&t.FullName) tMap[t.TeamID]=t.FullName; }); })
+              )
+          );
+        }
+      }
+
       setTeamMap(tMap);
 
       if (!cup && Array.isArray(standingsData) && standingsData.length > 0) {
@@ -114,39 +137,82 @@ export default function LeagueHistory() {
         setSeasons(summaries.sort((a,b)=>b.seasonId-a.seasonId));
 
       } else if (cup && Array.isArray(resultsData) && resultsData.length > 0) {
-        // Build week→roundName map
-        const mdMap = new Map<number,string>();
-        if (Array.isArray(matchdaysData)) {
-          (matchdaysData as any[]).forEach(md => { if (md.MatchdayWeek!=null && md.Matchday) mdMap.set(md.MatchdayWeek, md.Matchday); });
-        }
+        // Group by season
         const bySeason = new Map<number,any[]>();
         (resultsData as any[]).forEach(r => {
           if (r.SeasonID==null) return;
           if (!bySeason.has(r.SeasonID)) bySeason.set(r.SeasonID,[]);
           bySeason.get(r.SeasonID)!.push(r);
         });
+
+        // Derive round labels from match count per week — same logic as LeaguePage
+        const roundLabel = (cnt: number): string => {
+          if (cnt === 1)  return "Final";
+          if (cnt === 2)  return "Semifinals";
+          if (cnt === 4)  return "Quarterfinals";
+          if (cnt === 8)  return "Fourth Round";
+          if (cnt === 16) return "Third Round";
+          if (cnt === 32) return "Second Round";
+          return "First Round";
+        };
+
         const summaries: SeasonSummary[] = [];
         bySeason.forEach((matches, sid) => {
-          const byWeekDesc = [...matches].sort((a:any,b:any)=>(b.WeekID||0)-(a.WeekID||0));
-          // Find the final match
-          let finalMatch = byWeekDesc.find((m:any)=>{
-            const rn=(mdMap.get(m.WeekID)||"").toLowerCase();
-            return rn==="final"||rn==="grand final";
-          }) || byWeekDesc[0];
-          // Find 3rd place match
-          const thirdMatch = byWeekDesc.find((m:any)=>{
-            const rn=(mdMap.get(m.WeekID)||"").toLowerCase();
-            return rn.includes("3rd")||rn.includes("third")||rn.includes("bronze");
+          // Group by week
+          const weekGroups = new Map<number,any[]>();
+          matches.forEach((m:any) => {
+            const w = m.WeekID||0;
+            if (!weekGroups.has(w)) weekGroups.set(w,[]);
+            weekGroups.get(w)!.push(m);
           });
-          if (!finalMatch) return;
-          const homeWon = (finalMatch.HomeTeamScore||0)>=(finalMatch.AwayTeamScore||0);
-          const champion = tMap[homeWon?finalMatch.HomeTeamID:finalMatch.AwayTeamID]||null;
-          const runnerUp = tMap[homeWon?finalMatch.AwayTeamID:finalMatch.HomeTeamID]||null;
-          let third:string|null=null;
-          if (thirdMatch) {
-            const tw=(thirdMatch.HomeTeamScore||0)>=(thirdMatch.AwayTeamScore||0);
-            third=tMap[tw?thirdMatch.HomeTeamID:thirdMatch.AwayTeamID]||null;
+          const sortedWeeks = [...weekGroups.keys()].sort((a,b)=>a-b);
+
+          // Map each week to its round label, collapsing consecutive two-leg rounds
+          const weekToRound = new Map<number,string>();
+          let wi = 0;
+          while (wi < sortedWeeks.length) {
+            const w = sortedWeeks[wi];
+            const cnt = weekGroups.get(w)!.length;
+            const lbl = roundLabel(cnt);
+            weekToRound.set(w, lbl);
+            if (wi+1 < sortedWeeks.length && weekGroups.get(sortedWeeks[wi+1])!.length === cnt && cnt > 1) {
+              weekToRound.set(sortedWeeks[wi+1], lbl);
+              wi += 2;
+            } else { wi++; }
           }
+
+          // Find Final week(s)
+          const finalWeeks = sortedWeeks.filter(w => weekToRound.get(w) === "Final");
+          if (!finalWeeks.length) return;
+          const lastFinalWeek = Math.max(...finalWeeks);
+
+          // Aggregate goals in final to find winner
+          const teamGoals = new Map<number,number>();
+          finalWeeks.forEach(fw => {
+            (weekGroups.get(fw)||[]).forEach((m:any) => {
+              if (m.HomeTeamID) teamGoals.set(m.HomeTeamID,(teamGoals.get(m.HomeTeamID)||0)+(m.HomeTeamScore||0));
+              if (m.AwayTeamID) teamGoals.set(m.AwayTeamID,(teamGoals.get(m.AwayTeamID)||0)+(m.AwayTeamScore||0));
+            });
+          });
+          const sortedTeams = [...teamGoals.entries()].sort((a,b)=>b[1]-a[1]);
+          const champion = sortedTeams[0] ? (tMap[sortedTeams[0][0]]||null) : null;
+          const runnerUp  = sortedTeams[1] ? (tMap[sortedTeams[1][0]]||null) : null;
+
+          // Find 3rd place: a 1-match week that falls between the Semifinals and Final
+          let third: string|null = null;
+          const semiWeeks = sortedWeeks.filter(w => weekToRound.get(w)==="Semifinals");
+          if (semiWeeks.length) {
+            const lastSemi = Math.max(...semiWeeks);
+            for (const w of sortedWeeks) {
+              if (w > lastSemi && w < lastFinalWeek && (weekGroups.get(w)||[]).length === 1) {
+                const m = weekGroups.get(w)![0];
+                const hw = (m.HomeTeamScore||0) >= (m.AwayTeamScore||0);
+                third = tMap[hw ? m.HomeTeamID : m.AwayTeamID]||null;
+                break;
+              }
+            }
+          }
+
           summaries.push({ seasonId:sid, champion, runnerUp, third, isCupFinal:true, teams:[] });
         });
         setSeasons(summaries.sort((a,b)=>b.seasonId-a.seasonId));
