@@ -41,7 +41,7 @@ export default function EloPage() {
   useEffect(() => {
     Promise.all([
       supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier").order("LeagueTier").order("LeagueName"),
-      fetchAllRows("elo_new", { select: "*", order: { column: "Matchday", ascending: true } }),
+      fetchAllRows("elo_ratings", { select: "*", order: { column: "Matchday", ascending: true } }),
       supabase.from("teams").select("TeamID, FullName, LeagueID"),
     ]).then(([{ data: lgData }, eData, { data: teamsData }]) => {
       if (lgData) setLeagues(lgData as any[]);
