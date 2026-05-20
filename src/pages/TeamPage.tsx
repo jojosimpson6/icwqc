@@ -95,94 +95,74 @@ function ordinal(n: number): string {
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
-// Determine what stage a team reached in a knockout tournament
-// Round names come from the NUMBER OF TEAMS in the first knockout round,
-// not from working backwards from the final.
-function getCupStage(
-  matches: { homeId: number; awayId: number; homeScore: number; awayScore: number; weekId: number }[],
-  teamId: number,
+// Map match count per week → round label (ordinal for cups, descriptive for CL)
+// Uses match count (not team count) so variable-draw tournaments work correctly.
+function cupRoundName(matchCount: number, isCL: boolean): string {
+  if (matchCount === 1) return isCL ? "CL Final" : "Final";
+  if (matchCount === 2) return "Semifinals";
+  if (matchCount === 4) return "Quarterfinals";
+  // For cups: use ordinal labels counting from the start of the tournament
+  // We'll assign these after building the full week list (see buildCupStageMap).
+  // This function only handles the end-of-tournament rounds.
+  return `__ordinal__${matchCount}`;
+}
+
+// Build a map of weekId → round label for a cup/CL tournament.
+// For the final/semis/quarters we use descriptive names; earlier rounds get
+// ordinal labels (1st Round, 2nd Round, …) counted from the start.
+function buildCupStageMap(
+  knockoutMatches: { homeId: number; awayId: number; homeScore: number; awayScore: number; weekId: number }[],
   isCL: boolean
-): string {
-  if (matches.length === 0) return "—";
-
-  const groupMatches = isCL ? matches.filter(m => m.weekId <= 6) : [];
-  const knockoutMatches = isCL ? matches.filter(m => m.weekId > 6) : matches;
-
-  // CL: group stage only (no knockout matches for this team)
-  if (isCL && knockoutMatches.length === 0) {
-    return groupMatches.length > 0 ? "Group Stage" : "—";
-  }
-  if (knockoutMatches.length === 0) return "—";
-
-  // Get all unique knockout weeks (sorted ascending)
-  const allKnockoutWeeks = [...new Set(knockoutMatches.map(m => m.weekId))].sort((a, b) => a - b);
-
-  // For CL: consecutive pairs of weeks = one round (two legs)
-  // For cups: each week = one round
-  const rounds: number[][] = isCL
-    ? (() => {
-        const r: number[][] = [];
-        for (let i = 0; i < allKnockoutWeeks.length; i += 2) {
-          if (i + 1 < allKnockoutWeeks.length) r.push([allKnockoutWeeks[i], allKnockoutWeeks[i + 1]]);
-          else r.push([allKnockoutWeeks[i]]);
-        }
-        return r;
-      })()
-    : allKnockoutWeeks.map(w => [w]);
-
-  const totalRounds = rounds.length;
-
-  // Count teams in first knockout round to determine tournament size
-  const firstRoundWeeks = rounds[0];
-  const firstRoundMatches = knockoutMatches.filter(m => firstRoundWeeks.includes(m.weekId));
-  // Each match has 2 teams; count distinct teams
-  const teamsInFirstRound = new Set<number>();
-  firstRoundMatches.forEach(m => { teamsInFirstRound.add(m.homeId); teamsInFirstRound.add(m.awayId); });
-  const startingTeams = teamsInFirstRound.size; // e.g. 32, 16, 8, 4, 2
-
-  // Round name based on how many teams started THAT round
-  // roundIdx 0 = first round, 1 = second round, etc.
-  const roundName = (roundIdx: number): string => {
-    // Teams at this round = startingTeams / 2^roundIdx
-    const teamsAtRound = Math.round(startingTeams / Math.pow(2, roundIdx));
-    if (teamsAtRound <= 2) return isCL ? "CL Final" : "Final";
-    if (teamsAtRound <= 4)  return "Semifinals";
-    if (teamsAtRound <= 8)  return "Quarterfinals";
-    if (teamsAtRound <= 16) return "Fourth Round";
-    if (teamsAtRound <= 32) return "Third Round";
-    if (teamsAtRound <= 64) return "Second Round";
-    return "First Round";
-  };
-
-  // Find the last round this team played in
-  const teamKnockoutMatches = knockoutMatches.filter(m => m.homeId === teamId || m.awayId === teamId);
-  if (teamKnockoutMatches.length === 0) {
-    return isCL && groupMatches.length > 0 ? "Group Stage" : "—";
-  }
-
-  const lastWeekPlayed = Math.max(...teamKnockoutMatches.map(m => m.weekId));
-  const lastRoundIdx = rounds.findIndex(r => r.includes(lastWeekPlayed));
-  if (lastRoundIdx < 0) return "—";
-
-  // Did they WIN their last round? (aggregate over both legs for CL)
-  const lastRoundWeeks = rounds[lastRoundIdx];
-  const lastRoundTeamMatches = teamKnockoutMatches.filter(m => lastRoundWeeks.includes(m.weekId));
-  let teamAgg = 0, oppAgg = 0;
-  lastRoundTeamMatches.forEach(m => {
-    const isHome = m.homeId === teamId;
-    teamAgg += isHome ? m.homeScore : m.awayScore;
-    oppAgg += isHome ? m.awayScore : m.homeScore;
+): Map<number, string> {
+  const weekMap = new Map<number, typeof knockoutMatches>();
+  knockoutMatches.forEach(m => {
+    if (!weekMap.has(m.weekId)) weekMap.set(m.weekId, []);
+    weekMap.get(m.weekId)!.push(m);
   });
-  const wonLastRound = teamAgg > oppAgg;
+  const sortedWeeks = [...weekMap.keys()].sort((a, b) => a - b);
 
-  // If they won the final round, they're champion
-  if (lastRoundIdx === totalRounds - 1 && wonLastRound) return "🏆 Champion";
-  // If they lost the final round, runner-up
-  if (lastRoundIdx === totalRounds - 1 && !wonLastRound) return "Runner-Up";
+  // First pass: assign descriptive names, collapsing two-leg rounds
+  const weekToRound = new Map<number, string>();
+  let wi = 0;
+  while (wi < sortedWeeks.length) {
+    const w = sortedWeeks[wi];
+    const cnt = weekMap.get(w)!.length;
+    const lbl = cupRoundName(cnt, isCL);
+    weekToRound.set(w, lbl);
+    if (wi + 1 < sortedWeeks.length && weekMap.get(sortedWeeks[wi + 1])!.length === cnt && cnt > 1) {
+      weekToRound.set(sortedWeeks[wi + 1], lbl);
+      wi += 2;
+    } else {
+      wi++;
+    }
+  }
 
-  // Otherwise: they were eliminated in lastRoundIdx, so they reached that round
-  // but didn't advance. Show which round they exited at.
-  return roundName(lastRoundIdx);
+  // Second pass: replace __ordinal__ placeholders with 1st Round, 2nd Round, etc.
+  // Count distinct round labels in chronological order, numbering the ordinal ones.
+  const ordinalRounds: number[] = []; // unique weeks for ordinal rounds, in order
+  const seenRounds = new Set<string>();
+  sortedWeeks.forEach(w => {
+    const lbl = weekToRound.get(w)!;
+    if (lbl.startsWith("__ordinal__") && !seenRounds.has(lbl)) {
+      seenRounds.add(lbl);
+      ordinalRounds.push(w);
+    }
+  });
+
+  // Assign ordinal names: first occurrence = "1st Round", next = "2nd Round", etc.
+  const ordinals = ["1st Round", "2nd Round", "3rd Round", "4th Round", "5th Round", "6th Round"];
+  const ordinalMap = new Map<string, string>();
+  ordinalRounds.forEach((w, i) => {
+    ordinalMap.set(weekToRound.get(w)!, ordinals[i] || `${i + 1}th Round`);
+  });
+
+  // Final map
+  const result = new Map<number, string>();
+  sortedWeeks.forEach(w => {
+    const lbl = weekToRound.get(w)!;
+    result.set(w, lbl.startsWith("__ordinal__") ? (ordinalMap.get(lbl) || lbl) : lbl);
+  });
+  return result;
 }
 
 export default function TeamPage() {
@@ -622,9 +602,7 @@ export default function TeamPage() {
             {rows.map((row, i) => {
               const gd = (row.GoalsFor || 0) - (row.GoalsAgainst || 0);
               const posClass = row.isChampion ? "font-bold text-yellow-500" : "";
-              // Compute stage reached using the same match-count logic as the KnockoutDisplay.
-              // Group ALL tournament matches by week, name each group by match count,
-              // then find the team's last week and return that round's name.
+              // Compute stage reached for cup/CL competitions
               const stageReached = !isDomestic ? (() => {
                 const tid = team?.TeamID;
                 if (!tid) return "—";
@@ -638,44 +616,7 @@ export default function TeamPage() {
                   return isCL ? "Group Stage" : "—";
                 }
 
-                // Group matches by week
-                const weekMap = new Map<number, typeof knockoutMatches>();
-                knockoutMatches.forEach(m => {
-                  if (!weekMap.has(m.weekId)) weekMap.set(m.weekId, []);
-                  weekMap.get(m.weekId)!.push(m);
-                });
-                const sortedWeeks = [...weekMap.keys()].sort((a, b) => a - b);
-
-                // Name each round by match count (same as buildKnockoutRounds in LeaguePage)
-                // Rounds are named by position from the end, not by team count,
-                // so variable-draw competitions (Africa/Americas/Pacific Cup) display correctly.
-                const roundName = (matchCount: number): string => {
-                  if (matchCount === 1)  return isCL ? "CL Final" : "Final";
-                  if (matchCount === 2)  return "Semifinals";
-                  if (matchCount === 4)  return "Quarterfinals";
-                  if (matchCount === 8)  return "Fourth Round";
-                  if (matchCount === 16) return "Third Round";
-                  if (matchCount === 32) return "Second Round";
-                  // Anything larger (e.g. 15 matches = 30 teams, or more) = First Round
-                  return "First Round";
-                };
-
-                // Build week → round name map, collapsing two-leg rounds (same match count, consecutive)
-                const weekToRound = new Map<number, string>();
-                let i = 0;
-                while (i < sortedWeeks.length) {
-                  const w = sortedWeeks[i];
-                  const cnt = weekMap.get(w)!.length;
-                  const name = roundName(cnt);
-                  weekToRound.set(w, name);
-                  // If next week has same count, it's a second leg — same round name
-                  if (i + 1 < sortedWeeks.length && weekMap.get(sortedWeeks[i + 1])!.length === cnt && cnt > 1) {
-                    weekToRound.set(sortedWeeks[i + 1], name);
-                    i += 2;
-                  } else {
-                    i++;
-                  }
-                }
+                const weekToRound = buildCupStageMap(knockoutMatches, isCL ?? false);
 
                 // Find this team's last knockout match
                 const teamKOMMatches = knockoutMatches.filter(m => m.homeId === tid || m.awayId === tid);
@@ -683,10 +624,8 @@ export default function TeamPage() {
                 const lastWeek = Math.max(...teamKOMMatches.map(m => m.weekId));
                 const stageName = weekToRound.get(lastWeek) || "—";
 
-                // Did the team win their last match(es)?
-                const lastRoundMatches = teamKOMMatches.filter(m => m.weekId === lastWeek
-                  // also include second leg if it was same round
-                  || weekToRound.get(m.weekId) === stageName);
+                // Did the team win their last match(es) in that round?
+                const lastRoundMatches = teamKOMMatches.filter(m => weekToRound.get(m.weekId) === stageName);
                 let teamAgg = 0, oppAgg = 0;
                 lastRoundMatches.forEach(m => {
                   const isHome = m.homeId === tid;

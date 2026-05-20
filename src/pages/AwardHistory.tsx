@@ -90,10 +90,14 @@ export default function AwardHistory() {
     s.seasons.push(a.seasonid);
   });
   const isTOTY = awardName === "Team of the Year";
-  // TOTY: detect if placement = team number or sequential slot
+  // For TOTY: placement 1 = 1st Team, placement 2 = 2nd Team (multiple players per placement)
   const totyPlacementCounts = new Map<number, number>();
   awards.forEach(e => totyPlacementCounts.set(e.placement, (totyPlacementCounts.get(e.placement) || 0) + 1));
   const totyIsTeamNumber = [...totyPlacementCounts.values()].some(c => c > 1);
+
+  // TOTY position labels for display
+  const TOTY_POSITIONS = ["Chaser", "Chaser", "Chaser", "Beater", "Beater", "Keeper", "Seeker"] as const;
+  const TOTY_TEAM_LABELS: Record<number, string> = { 1: "1st Team", 2: "2nd Team", 3: "3rd Team" };
 
   const leaderboard = [...winnerStats.entries()]
     .sort((a, b) => b[1].wins - a[1].wins)
@@ -152,57 +156,57 @@ export default function AwardHistory() {
                 <h3 className="font-display text-sm font-bold text-table-header-foreground">Season-by-Season Results</h3>
               </div>
               {isTOTY ? (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm font-sans">
-                    <thead>
-                      <tr className="bg-secondary">
-                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
-                        {totyIsTeamNumber && <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</th>}
-                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Players</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {seasons.flatMap((sid, i) => {
-                        const entries = (bySeason.get(sid) || []);
-                        if (totyIsTeamNumber) {
-                          return [...new Set(entries.map(e => e.placement))].sort().map(pl => {
-                            const MEDAL_MAP: Record<number, {text: string, bg: string}> = {
-                              1: {text: "text-yellow-600 dark:text-yellow-400", bg: "bg-yellow-500/10"},
-                              2: {text: "text-slate-600 dark:text-slate-300", bg: "bg-slate-400/10"},
-                              3: {text: "text-amber-700 dark:text-amber-500", bg: "bg-amber-700/10"},
-                            };
-                            const m = MEDAL_MAP[pl] || {text: "text-muted-foreground", bg: ""};
+                <div className="space-y-0">
+                  {seasons.map((sid, i) => {
+                    const entries = (bySeason.get(sid) || []);
+                    const teams = totyIsTeamNumber
+                      ? [...new Set(entries.map(e => e.placement))].sort()
+                      : [1];
+
+                    return (
+                      <div key={sid} className={`border-t border-border ${i % 2 === 0 ? "bg-card" : "bg-table-stripe"}`}>
+                        <div className="px-4 pt-3 pb-1">
+                          <span className="font-mono font-bold text-accent text-sm">{seasonLabel(sid)}</span>
+                        </div>
+                        <div className={`px-4 pb-3 grid gap-3 ${teams.length > 1 ? "md:grid-cols-2" : "grid-cols-1"}`}>
+                          {teams.map(pl => {
+                            const teamEntries = totyIsTeamNumber
+                              ? entries.filter(e => e.placement === pl)
+                              : entries.sort((a, b) => a.placement - b.placement);
+                            const m = pl === 1 ? MEDAL[1] : pl === 2 ? MEDAL[2] : MEDAL[3];
+                            const teamLabel = TOTY_TEAM_LABELS[pl] || `${pl}th Team`;
+                            // Group by inferred position (by slot order: 3 Chasers, 2 Beaters, 1 Keeper, 1 Seeker)
+                            const slots: { label: string; players: AwardEntry[] }[] = [
+                              { label: "Chasers", players: teamEntries.slice(0, 3) },
+                              { label: "Beaters", players: teamEntries.slice(3, 5) },
+                              { label: "Keeper", players: teamEntries.slice(5, 6) },
+                              { label: "Seeker", players: teamEntries.slice(6, 7) },
+                            ].filter(s => s.players.length > 0);
+
                             return (
-                              <tr key={`${sid}-${pl}`} className={`border-t border-border ${(i+pl)%2===1?"bg-table-stripe":"bg-card"}`}>
-                                <td className="px-3 py-2 font-mono text-accent font-medium">{seasonLabel(sid)}</td>
-                                <td className={`px-3 py-2 text-xs font-bold ${m.text}`}>{pl===1?"1st":pl===2?"2nd":"3rd"} Team</td>
-                                <td className="px-3 py-2">
-                                  <div className="flex flex-wrap gap-x-3 gap-y-1">
-                                    {entries.filter(e => e.placement === pl).map(e => (
-                                      <Link key={e.playerid} to={`/player/${e.playerid}`} className="text-accent hover:underline text-sm">{playerMap.get(e.playerid) || `#${e.playerid}`}</Link>
-                                    ))}
-                                  </div>
-                                </td>
-                              </tr>
-                            );
-                          });
-                        } else {
-                          return [(
-                            <tr key={sid} className={`border-t border-border ${i%2===1?"bg-table-stripe":"bg-card"}`}>
-                              <td className="px-3 py-2 font-mono text-accent font-medium">{seasonLabel(sid)}</td>
-                              <td className="px-3 py-2">
-                                <div className="flex flex-wrap gap-x-3 gap-y-1">
-                                  {entries.sort((a,b)=>a.placement-b.placement).map(e => (
-                                    <Link key={e.playerid} to={`/player/${e.playerid}`} className="text-accent hover:underline text-sm">{playerMap.get(e.playerid) || `#${e.playerid}`}</Link>
+                              <div key={pl} className={`rounded border ${m.border} ${m.bg} p-3`}>
+                                <p className={`text-xs font-bold mb-2 ${m.text}`}>{totyIsTeamNumber ? teamLabel : "Team of the Year"}</p>
+                                <div className="space-y-1.5">
+                                  {slots.map(slot => (
+                                    <div key={slot.label} className="flex items-start gap-2">
+                                      <span className="text-xs text-muted-foreground w-16 shrink-0 pt-0.5">{slot.label}</span>
+                                      <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                                        {slot.players.map(e => (
+                                          <Link key={e.playerid} to={`/player/${e.playerid}`} className="text-accent hover:underline text-sm font-medium">
+                                            {playerMap.get(e.playerid) || `#${e.playerid}`}
+                                          </Link>
+                                        ))}
+                                      </div>
+                                    </div>
                                   ))}
                                 </div>
-                              </td>
-                            </tr>
-                          )];
-                        }
-                      })}
-                    </tbody>
-                  </table>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               ) : (() => {
                 // Dynamically determine which placement columns have any data

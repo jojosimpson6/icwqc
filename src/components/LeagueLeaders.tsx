@@ -43,14 +43,13 @@ export function LeagueLeaders() {
   // Load metadata: latest season and leagues — small targeted queries
   useEffect(() => {
     (async () => {
-      const [{ data: psData }, { data: leagueData }] = await Promise.all([
-        // Get seasons from the materialized view itself — ensures season/data alignment
-        supabase.from("player_season_stats").select("SeasonID").order("SeasonID", { ascending: false }).limit(2000),
+      const [{ data: mdData }, { data: leagueData }] = await Promise.all([
+        supabase.from("matchdays").select("SeasonID").order("SeasonID", { ascending: false }).limit(200),
         supabase.from("leagues").select("LeagueID, LeagueName").order("LeagueTier").order("LeagueName"),
       ]);
       if (leagueData) setLeagues(leagueData as LeagueOption[]);
-      if (psData) {
-        const seasons = [...new Set(psData.map((m: any) => m.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number)) as number[];
+      if (mdData) {
+        const seasons = [...new Set(mdData.map((m: any) => m.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number)) as number[];
         setAvailableSeasons(seasons);
         if (seasons.length > 0) setSelectedSeason(seasons[0]);
       }

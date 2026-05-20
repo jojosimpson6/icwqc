@@ -41,24 +41,44 @@ export default function EloPage() {
   useEffect(() => {
     Promise.all([
       supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier").order("LeagueTier").order("LeagueName"),
-      fetchAllRows("elo_ratings", { select: "*", order: { column: "Matchday", ascending: true } }),
+      fetchAllRows("elo_history", { select: "TeamID,PostElo,Matchday,MatchID", order: { column: "Matchday", ascending: true } }),
       supabase.from("teams").select("TeamID, FullName, LeagueID"),
     ]).then(([{ data: lgData }, eData, { data: teamsData }]) => {
       if (lgData) setLeagues(lgData as any[]);
 
-      const elo = (eData || []).filter((d: any) => d.FullName && d.Matchday && d.elo_rating != null) as EloPoint[];
-      setEloData(elo);
-
+      const lgMap = new Map<number, string>();
       const tlm = new Map<string, { id: number; name: string }>();
       const tlidMap = new Map<string, number>();
-      const lgMap = new Map<number, string>();
+      const teamIdToName = new Map<number, string>();
+      const teamIdToLeagueId = new Map<number, number>();
       (lgData || []).forEach((l: any) => lgMap.set(l.LeagueID, l.LeagueName));
       (teamsData || []).forEach((t: any) => {
-        if (t.FullName && t.LeagueID) {
-          tlm.set(t.FullName, { id: t.LeagueID, name: lgMap.get(t.LeagueID) || "" });
-          tlidMap.set(t.FullName, t.TeamID);
+        if (t.TeamID && t.FullName) {
+          teamIdToName.set(t.TeamID, t.FullName);
+          if (t.LeagueID) {
+            teamIdToLeagueId.set(t.TeamID, t.LeagueID);
+            tlm.set(t.FullName, { id: t.LeagueID, name: lgMap.get(t.LeagueID) || "" });
+            tlidMap.set(t.FullName, t.TeamID);
+          }
         }
       });
+
+      // Convert elo_history (TeamID-based) to EloPoint (FullName-based)
+      // Track game number per team
+      const teamGameCounts = new Map<number, number>();
+      const elo: EloPoint[] = (eData || [])
+        .filter((d: any) => d.TeamID && d.Matchday && d.PostElo != null)
+        .map((d: any) => {
+          const gn = (teamGameCounts.get(d.TeamID) || 0) + 1;
+          teamGameCounts.set(d.TeamID, gn);
+          return {
+            FullName: teamIdToName.get(d.TeamID) || `Team#${d.TeamID}`,
+            Matchday: d.Matchday,
+            elo_rating: d.PostElo,
+            current_game_number: gn,
+          };
+        });
+      setEloData(elo);
       setTeamLeagueMap(tlm);
       setTeamLinkMap(tlidMap);
     }).catch(err => {

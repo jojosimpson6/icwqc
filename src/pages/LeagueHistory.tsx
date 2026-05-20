@@ -113,7 +113,7 @@ export default function LeagueHistory() {
         }
       }
 
-      setTeamMap(tMap);
+      setTeamMap({...tMap});  // spread to trigger re-render after async supplement
 
       if (!cup && Array.isArray(standingsData) && standingsData.length > 0) {
         const leagueStandings = (standingsData as any[]).filter(s => teamNames.has(s.FullName||""));
@@ -145,15 +145,42 @@ export default function LeagueHistory() {
           bySeason.get(r.SeasonID)!.push(r);
         });
 
-        // Derive round labels from match count per week — same logic as LeaguePage
-        const roundLabel = (cnt: number): string => {
-          if (cnt === 1)  return "Final";
-          if (cnt === 2)  return "Semifinals";
-          if (cnt === 4)  return "Quarterfinals";
-          if (cnt === 8)  return "Fourth Round";
-          if (cnt === 16) return "Third Round";
-          if (cnt === 32) return "Second Round";
-          return "First Round";
+        // Build round labels: Final/Semis/Quarters are descriptive; earlier rounds get ordinal names.
+        const buildRoundLabels = (weekGroups: Map<number, any[]>, sortedWeeks: number[]): Map<number, string> => {
+          // First pass: assign descriptive or placeholder labels
+          const weekToRaw = new Map<number, string>();
+          let wi = 0;
+          while (wi < sortedWeeks.length) {
+            const w = sortedWeeks[wi];
+            const cnt = weekGroups.get(w)!.length;
+            let lbl: string;
+            if (cnt === 1) lbl = "Final";
+            else if (cnt === 2) lbl = "Semifinals";
+            else if (cnt === 4) lbl = "Quarterfinals";
+            else lbl = `__ordinal__${cnt}_wi${wi}`;
+            weekToRaw.set(w, lbl);
+            if (wi + 1 < sortedWeeks.length && weekGroups.get(sortedWeeks[wi + 1])!.length === cnt && cnt > 1) {
+              weekToRaw.set(sortedWeeks[wi + 1], lbl);
+              wi += 2;
+            } else { wi++; }
+          }
+          // Second pass: replace ordinals with 1st Round, 2nd Round, etc.
+          const ordinals = ["1st Round", "2nd Round", "3rd Round", "4th Round", "5th Round"];
+          const seenOrdinals: string[] = [];
+          sortedWeeks.forEach(w => {
+            const lbl = weekToRaw.get(w)!;
+            if (lbl.startsWith("__ordinal__") && !seenOrdinals.includes(lbl)) seenOrdinals.push(lbl);
+          });
+          const result = new Map<number, string>();
+          sortedWeeks.forEach(w => {
+            const lbl = weekToRaw.get(w)!;
+            if (lbl.startsWith("__ordinal__")) {
+              result.set(w, ordinals[seenOrdinals.indexOf(lbl)] || lbl);
+            } else {
+              result.set(w, lbl);
+            }
+          });
+          return result;
         };
 
         const summaries: SeasonSummary[] = [];
@@ -168,18 +195,7 @@ export default function LeagueHistory() {
           const sortedWeeks = [...weekGroups.keys()].sort((a,b)=>a-b);
 
           // Map each week to its round label, collapsing consecutive two-leg rounds
-          const weekToRound = new Map<number,string>();
-          let wi = 0;
-          while (wi < sortedWeeks.length) {
-            const w = sortedWeeks[wi];
-            const cnt = weekGroups.get(w)!.length;
-            const lbl = roundLabel(cnt);
-            weekToRound.set(w, lbl);
-            if (wi+1 < sortedWeeks.length && weekGroups.get(sortedWeeks[wi+1])!.length === cnt && cnt > 1) {
-              weekToRound.set(sortedWeeks[wi+1], lbl);
-              wi += 2;
-            } else { wi++; }
-          }
+          const weekToRound = buildRoundLabels(weekGroups, sortedWeeks);
 
           // Find Final week(s)
           const finalWeeks = sortedWeeks.filter(w => weekToRound.get(w) === "Final");
@@ -491,26 +507,42 @@ export default function LeagueHistory() {
                               toty.forEach(e=>plCounts.set(e.placement,(plCounts.get(e.placement)||0)+1));
                               const isTeamNum=[...plCounts.values()].some(c=>c>1);
                               const pls=[...new Set(toty.map(e=>e.placement))].sort();
+                              const TEAM_LABELS: Record<number,string> = {1:"1st Team",2:"2nd Team",3:"3rd Team"};
+                              const slotGroups = (entries: AwardEntry[]) => [
+                                {label:"Chasers", players: entries.slice(0,3)},
+                                {label:"Beaters", players: entries.slice(3,5)},
+                                {label:"Keeper",  players: entries.slice(5,6)},
+                                {label:"Seeker",  players: entries.slice(6,7)},
+                              ].filter(s=>s.players.length>0);
                               return (
                                 <div className="pt-1">
-                                  <Link to={`/league/${id}/award/${encodeURIComponent("Team of the Year")}`} className="text-sm font-semibold text-accent hover:underline font-sans block mb-1.5">Team of the Year →</Link>
-                                  {isTeamNum?pls.map(pl=>{
-                                    const m=pl===1?MEDAL.gold:pl===2?MEDAL.silver:MEDAL.bronze;
-                                    return (
-                                      <div key={pl} className="mb-1 flex gap-2 flex-wrap items-center">
-                                        <span className={`text-xs font-bold ${m.text} w-24`}>{ordinal(pl)} Team:</span>
-                                        {toty.filter(e=>e.placement===pl).map((e,i,arr)=>(
-                                          <span key={e.playerid}><Link to={`/player/${e.playerid}`} className="text-accent hover:underline text-xs">{playerMap.get(e.playerid)||`#${e.playerid}`}</Link>{i<arr.length-1&&<span className="text-muted-foreground">, </span>}</span>
-                                        ))}
-                                      </div>
-                                    );
-                                  }):(
-                                    <div className="flex flex-wrap gap-1">
-                                      {[...toty].sort((a,b)=>a.placement-b.placement).map((e,i,arr)=>(
-                                        <span key={e.playerid}><Link to={`/player/${e.playerid}`} className="text-accent hover:underline text-xs">{playerMap.get(e.playerid)||`#${e.playerid}`}</Link>{i<arr.length-1&&<span className="text-muted-foreground">, </span>}</span>
-                                      ))}
-                                    </div>
-                                  )}
+                                  <Link to={`/league/${id}/award/${encodeURIComponent("Team of the Year")}`} className="text-sm font-semibold text-accent hover:underline font-sans block mb-2">Team of the Year →</Link>
+                                  <div className={`grid gap-3 ${isTeamNum && pls.length > 1 ? "md:grid-cols-2" : "grid-cols-1"}`}>
+                                    {(isTeamNum ? pls : [1]).map(pl => {
+                                      const teamEntries = isTeamNum
+                                        ? toty.filter(e=>e.placement===pl)
+                                        : [...toty].sort((a,b)=>a.placement-b.placement);
+                                      const m = pl===1?MEDAL.gold:pl===2?MEDAL.silver:MEDAL.bronze;
+                                      const slots = slotGroups(teamEntries);
+                                      return (
+                                        <div key={pl} className={`rounded border ${m.border} ${m.bg} p-2.5`}>
+                                          {isTeamNum && <p className={`text-xs font-bold mb-1.5 ${m.text}`}>{TEAM_LABELS[pl] || `${pl}th Team`}</p>}
+                                          <div className="space-y-1">
+                                            {slots.map(slot=>(
+                                              <div key={slot.label} className="flex items-start gap-2">
+                                                <span className="text-xs text-muted-foreground w-14 shrink-0 pt-0.5">{slot.label}</span>
+                                                <div className="flex flex-wrap gap-x-2 gap-y-0">
+                                                  {slot.players.map(e=>(
+                                                    <Link key={e.playerid} to={`/player/${e.playerid}`} className="text-accent hover:underline text-xs">{playerMap.get(e.playerid)||`#${e.playerid}`}</Link>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
                               );
                             })()}
@@ -522,21 +554,79 @@ export default function LeagueHistory() {
                       {seasonResults.length>0&&(
                         <div className="p-4 border-t border-border">
                           <h4 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">Results ({seasonResults.length} matches)</h4>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-[360px] overflow-y-auto pr-1">
-                            {seasonResults.map((r:any)=>(
-                              <Link key={r.MatchID} to={`/match/${r.MatchID}`} className="border border-border rounded bg-card hover:bg-highlight/20 p-2 text-sm font-sans block">
-                                <div className="text-xs text-muted-foreground mb-1">Week {r.WeekID}</div>
-                                <div className={`flex justify-between ${r.HomeTeamScore>r.AwayTeamScore?"font-bold":""}`}>
-                                  <span className="truncate mr-2">{teamMap[r.HomeTeamID]||"?"}</span>
-                                  <span className="font-mono">{r.HomeTeamScore}</span>
+                          {(() => {
+                            // Build round labels for cup results
+                            if (isCup && seasonResults.length > 0) {
+                              const weekGroups = new Map<number, any[]>();
+                              seasonResults.forEach((r: any) => {
+                                const w = r.WeekID || 0;
+                                if (!weekGroups.has(w)) weekGroups.set(w, []);
+                                weekGroups.get(w)!.push(r);
+                              });
+                              const sortedWeeks = [...weekGroups.keys()].sort((a, b) => a - b);
+                              const weekToRound = buildRoundLabels(weekGroups, sortedWeeks);
+
+                              // Group results by round
+                              const roundGroups = new Map<string, any[]>();
+                              seasonResults.forEach((r: any) => {
+                                const label = weekToRound.get(r.WeekID || 0) || `Week ${r.WeekID}`;
+                                if (!roundGroups.has(label)) roundGroups.set(label, []);
+                                roundGroups.get(label)!.push(r);
+                              });
+
+                              // Sort rounds chronologically (use first WeekID in each group)
+                              const roundOrder = new Map<string, number>();
+                              seasonResults.forEach((r: any) => {
+                                const label = weekToRound.get(r.WeekID || 0) || `Week ${r.WeekID}`;
+                                const cur = roundOrder.get(label) ?? Infinity;
+                                if ((r.WeekID || 0) < cur) roundOrder.set(label, r.WeekID || 0);
+                              });
+                              const sortedRounds = [...roundGroups.keys()].sort((a, b) => (roundOrder.get(a) ?? 0) - (roundOrder.get(b) ?? 0));
+
+                              return (
+                                <div className="space-y-3">
+                                  {sortedRounds.map(roundLabel => (
+                                    <div key={roundLabel}>
+                                      <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground mb-1.5">{roundLabel}</p>
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                        {roundGroups.get(roundLabel)!.map((r: any) => (
+                                          <Link key={r.MatchID} to={`/match/${r.MatchID}`} className="border border-border rounded bg-card hover:bg-highlight/20 p-2 text-sm font-sans block">
+                                            <div className={`flex justify-between ${r.HomeTeamScore>r.AwayTeamScore?"font-bold":""}`}>
+                                              <span className="truncate mr-2">{teamMap[r.HomeTeamID] || `Team #${r.HomeTeamID}`}</span>
+                                              <span className="font-mono">{r.HomeTeamScore}</span>
+                                            </div>
+                                            <div className={`flex justify-between ${r.AwayTeamScore>r.HomeTeamScore?"font-bold":""}`}>
+                                              <span className="truncate mr-2">{teamMap[r.AwayTeamID] || `Team #${r.AwayTeamID}`}</span>
+                                              <span className="font-mono">{r.AwayTeamScore}</span>
+                                            </div>
+                                          </Link>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  ))}
                                 </div>
-                                <div className={`flex justify-between ${r.AwayTeamScore>r.HomeTeamScore?"font-bold":""}`}>
-                                  <span className="truncate mr-2">{teamMap[r.AwayTeamID]||"?"}</span>
-                                  <span className="font-mono">{r.AwayTeamScore}</span>
-                                </div>
-                              </Link>
-                            ))}
-                          </div>
+                              );
+                            }
+
+                            // Non-cup: original grid layout
+                            return (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-[360px] overflow-y-auto pr-1">
+                                {seasonResults.map((r:any)=>(
+                                  <Link key={r.MatchID} to={`/match/${r.MatchID}`} className="border border-border rounded bg-card hover:bg-highlight/20 p-2 text-sm font-sans block">
+                                    <div className="text-xs text-muted-foreground mb-1">Week {r.WeekID}</div>
+                                    <div className={`flex justify-between ${r.HomeTeamScore>r.AwayTeamScore?"font-bold":""}`}>
+                                      <span className="truncate mr-2">{teamMap[r.HomeTeamID]||"?"}</span>
+                                      <span className="font-mono">{r.HomeTeamScore}</span>
+                                    </div>
+                                    <div className={`flex justify-between ${r.AwayTeamScore>r.HomeTeamScore?"font-bold":""}`}>
+                                      <span className="truncate mr-2">{teamMap[r.AwayTeamID]||"?"}</span>
+                                      <span className="font-mono">{r.AwayTeamScore}</span>
+                                    </div>
+                                  </Link>
+                                ))}
+                              </div>
+                            );
+                          })()}
                         </div>
                       )}
                     </div>
@@ -581,41 +671,51 @@ export default function LeagueHistory() {
                     </div>
                   )}
                   {isTOTY?(
-                    <div className="overflow-x-auto"><table className="w-full text-sm font-sans">
-                      <thead><tr className="bg-secondary">
-                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
-                        {totyIsTeamNum&&<th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</th>}
-                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Players</th>
-                      </tr></thead>
-                      <tbody>
-                        {[...new Set(totyEntries.map(e=>e.seasonid))].sort((a,b)=>a-b).flatMap((sid,i)=>{
-                          const entries=totyEntries.filter(e=>e.seasonid===sid);
-                          if (totyIsTeamNum) {
-                            return [...new Set(entries.map(e=>e.placement))].sort().map(pl=>{
-                              const m=pl===1?MEDAL.gold:pl===2?MEDAL.silver:MEDAL.bronze;
-                              return (
-                                <tr key={`${sid}-${pl}`} className={`border-t border-border ${(i+pl)%2===1?"bg-table-stripe":"bg-card"}`}>
-                                  <td className="px-3 py-1.5 font-mono font-medium text-accent">{seasonLabel(sid)}</td>
-                                  <td className={`px-3 py-1.5 text-xs font-bold ${m.text}`}>{pl===1?"1st":pl===2?"2nd":"3rd"} Team</td>
-                                  <td className="px-3 py-1.5"><div className="flex flex-wrap gap-2">
-                                    {entries.filter(e=>e.placement===pl).map(e=><Link key={e.playerid} to={`/player/${e.playerid}`} className="text-accent hover:underline text-xs">{playerMap.get(e.playerid)||`#${e.playerid}`}</Link>)}
-                                  </div></td>
-                                </tr>
-                              );
-                            });
-                          } else {
-                            return [(<tr key={sid} className={`border-t border-border ${i%2===1?"bg-table-stripe":"bg-card"}`}>
-                              <td className="px-3 py-1.5 font-mono font-medium text-accent">{seasonLabel(sid)}</td>
-                              <td className="px-3 py-1.5"><div className="flex flex-wrap gap-2">
-                                {entries.sort((a,b)=>a.placement-b.placement).map(e=><Link key={e.playerid} to={`/player/${e.playerid}`} className="text-accent hover:underline text-xs">{playerMap.get(e.playerid)||`#${e.playerid}`}</Link>)}
-                              </div></td>
-                            </tr>)];
-                          }
-                        })}
-                      </tbody>
-                    </table></div>
-                  ):(
-                    {(()=>{
+                    <div className="space-y-0">
+                      {[...new Set(totyEntries.map(e=>e.seasonid))].sort((a,b)=>a-b).map((sid,i)=>{
+                        const entries=totyEntries.filter(e=>e.seasonid===sid);
+                        const pls = totyIsTeamNum ? [...new Set(entries.map(e=>e.placement))].sort() : [1];
+                        const TEAM_LABELS: Record<number,string> = {1:"1st Team",2:"2nd Team",3:"3rd Team"};
+                        const slotGroups = (es: AwardEntry[]) => [
+                          {label:"Chasers", players: es.slice(0,3)},
+                          {label:"Beaters", players: es.slice(3,5)},
+                          {label:"Keeper",  players: es.slice(5,6)},
+                          {label:"Seeker",  players: es.slice(6,7)},
+                        ].filter(s=>s.players.length>0);
+                        return (
+                          <div key={sid} className={`border-t border-border ${i%2===0?"bg-card":"bg-table-stripe"}`}>
+                            <div className="px-4 pt-3 pb-1">
+                              <span className="font-mono font-bold text-accent text-sm">{seasonLabel(sid)}</span>
+                            </div>
+                            <div className={`px-4 pb-3 grid gap-3 ${pls.length>1?"md:grid-cols-2":"grid-cols-1"}`}>
+                              {pls.map(pl=>{
+                                const teamEntries = totyIsTeamNum
+                                  ? entries.filter(e=>e.placement===pl)
+                                  : [...entries].sort((a,b)=>a.placement-b.placement);
+                                const m = pl===1?MEDAL.gold:pl===2?MEDAL.silver:MEDAL.bronze;
+                                const slots = slotGroups(teamEntries);
+                                return (
+                                  <div key={pl} className={`rounded border ${m.border} ${m.bg} p-3`}>
+                                    {totyIsTeamNum&&<p className={`text-xs font-bold mb-1.5 ${m.text}`}>{TEAM_LABELS[pl]||`${pl}th Team`}</p>}
+                                    <div className="space-y-1">
+                                      {slots.map(slot=>(
+                                        <div key={slot.label} className="flex items-start gap-2">
+                                          <span className="text-xs text-muted-foreground w-14 shrink-0 pt-0.5">{slot.label}</span>
+                                          <div className="flex flex-wrap gap-x-2">
+                                            {slot.players.map(e=><Link key={e.playerid} to={`/player/${e.playerid}`} className="text-accent hover:underline text-xs">{playerMap.get(e.playerid)||`#${e.playerid}`}</Link>)}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ):(()=>{
                       const awardEntries = awards.filter(a=>a.awardname===awardName);
                       const allPl = [...new Set(awardEntries.map(e=>e.placement))].sort((a,b)=>a-b);
                       const maxPl = Math.min(Math.max(...allPl,1),5);
@@ -650,7 +750,7 @@ export default function LeagueHistory() {
                           </tbody>
                         </table></div>
                       );
-                    })()}
+                    })()
                   )}
                 </div>
               );

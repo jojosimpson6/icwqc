@@ -13,7 +13,7 @@ const COLORS = [
 interface EloNewPoint {
   FullName: string;
   Matchday: string;
-  elo_rating: number;
+  elo_rating: number;  // mapped from PostElo
   current_game_number: number;
 }
 
@@ -55,19 +55,29 @@ export function EloChart() {
   useEffect(() => {
     Promise.all([
       supabase.from("leagues").select("LeagueID, LeagueName").order("LeagueTier").order("LeagueName"),
-      fetchAllRows("elo_new", { select: "*", order: { column: "Matchday", ascending: true } }),
+      fetchAllRows("elo_history", { select: "TeamID,PostElo,Matchday", order: { column: "Matchday", ascending: true } }),
       supabase.from("teams").select("FullName, LeagueID"),
     ]).then(([{ data: leagueData }, eData, { data: teamsData }]) => {
       if (leagueData) setLeagues(leagueData as LeagueOption[]);
 
-      const elo = (eData || []).filter((d: any) => d.FullName && d.Matchday && d.elo_rating != null) as EloNewPoint[];
-      setEloData(elo);
-
       const tlm = new Map<string, number>();
+      const teamIdToName = new Map<number, string>();
       (teamsData || []).forEach((t: any) => {
         if (t.FullName && t.LeagueID) tlm.set(t.FullName, t.LeagueID);
+        if (t.TeamID && t.FullName) teamIdToName.set(t.TeamID, t.FullName);
       });
       setTeamLeagueMap(tlm);
+
+      // Convert elo_history rows (TeamID-based) to EloNewPoint (FullName-based)
+      const elo: EloNewPoint[] = (eData || [])
+        .filter((d: any) => d.TeamID && d.Matchday && d.PostElo != null)
+        .map((d: any, i: number) => ({
+          FullName: teamIdToName.get(d.TeamID) || `Team#${d.TeamID}`,
+          Matchday: d.Matchday,
+          elo_rating: d.PostElo,
+          current_game_number: i,
+        }));
+      setEloData(elo);
     });
   }, []);
 
