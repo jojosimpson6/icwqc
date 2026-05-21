@@ -750,8 +750,7 @@ export default function LeagueHistory() {
                           </tbody>
                         </table></div>
                       );
-                    })()
-                  )}
+                    })()}
                 </div>
               );
             })}
