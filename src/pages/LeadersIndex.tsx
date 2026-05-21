@@ -372,7 +372,7 @@ export default function LeadersIndex() {
           c.ShotAtt+=r.ShotAtt; c.ShotScored+=r.ShotScored;
           c.PassAtt+=r.PassAtt; c.PassComp+=r.PassComp;
           c.KPassAtt+=r.KPassAtt; c.KPassComp+=r.KPassComp;
-          c.FullName=r.FullName ?? r.TeamFullName; c.LeagueName=r.LeagueName;
+          c.FullName=r.FullName ?? (r as any).TeamFullName; c.LeagueName=r.LeagueName;
           cum.set(key, c);
         });
         const snap = [...cum.values()].filter(filterValid).sort(sortFn);

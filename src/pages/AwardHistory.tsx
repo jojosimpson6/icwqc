@@ -272,7 +272,7 @@ export default function AwardHistory() {
                     </table>
                   </div>
                 );
-              })()
+              })()}
             </div>
           </div>
 
