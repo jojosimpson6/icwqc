@@ -255,14 +255,64 @@ export default function LeadersIndex() {
     setCareerLoading(true);
     setCareerError(null);
 
-    cachedQuery("leaders:career:mat-v1", async () => {
-      const { data, error } = await supabase
-        .from("player_season_stats")
-        .select(AGG_SELECT);
-      if (error) throw new Error(error.message);
-      return data || [];
+    cachedQuery("leaders:career:client-agg-v1", async () => {
+      // PostgREST aggregate functions are disabled on this project — fetch raw
+      // per-season rows (paginated) and aggregate client-side.
+      const PAGE = 1000;
+      const all: any[] = [];
+      let from = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from("player_season_stats")
+          .select(SEASON_SELECT)
+          .order("SeasonID", { ascending: false })
+          .range(from, from + PAGE - 1);
+        if (error) throw new Error(error.message);
+        if (!data || data.length === 0) break;
+        all.push(...data);
+        if (data.length < PAGE) break;
+        from += PAGE;
+      }
+      return all;
     }).then(data => {
-      const rows = (data as any[]).map(r => mapAggRow(r, intlNames));
+      // Group by PlayerID + Position, sum stats, take latest season's team/league
+      const groups = new Map<string, any>();
+      for (const r of data as any[]) {
+        const key = `${r.PlayerID}||${r.Position}`;
+        let g = groups.get(key);
+        if (!g) {
+          g = { PlayerID: r.PlayerID, PlayerName: r.PlayerName, Position: r.Position,
+                Nation: r.Nation, _latestSeason: -1, TeamFullName: null, LeagueName: null,
+                SeasonID: 0, GamesPlayed: 0, MinPlayed: 0, Goals: 0, GoldenSnitchCatches: 0,
+                KeeperSaves: 0, KeeperShotsFaced: 0, BludgersHit: 0, TurnoversForced: 0,
+                TeammatesProtected: 0, ShotAtt: 0, ShotScored: 0, PassAtt: 0, PassComp: 0,
+                KeeperPassAtt: 0, KeeperPassComp: 0 };
+          groups.set(key, g);
+        }
+        const sid = r.SeasonID || 0;
+        if (sid > g._latestSeason) {
+          g._latestSeason = sid;
+          g.SeasonID = sid;
+          g.TeamFullName = r.TeamFullName ?? g.TeamFullName;
+          g.LeagueName = r.LeagueName ?? g.LeagueName;
+        }
+        g.GamesPlayed        += r.GamesPlayed || 0;
+        g.MinPlayed          += r.MinPlayed || 0;
+        g.Goals              += r.Goals || 0;
+        g.GoldenSnitchCatches+= r.GoldenSnitchCatches || 0;
+        g.KeeperSaves        += r.KeeperSaves || 0;
+        g.KeeperShotsFaced   += r.KeeperShotsFaced || 0;
+        g.BludgersHit        += r.BludgersHit || 0;
+        g.TurnoversForced    += r.TurnoversForced || 0;
+        g.TeammatesProtected += r.TeammatesProtected || 0;
+        g.ShotAtt            += r.ShotAtt || 0;
+        g.ShotScored         += r.ShotScored || 0;
+        g.PassAtt            += r.PassAtt || 0;
+        g.PassComp           += r.PassComp || 0;
+        g.KeeperPassAtt      += r.KeeperPassAtt || 0;
+        g.KeeperPassComp     += r.KeeperPassComp || 0;
+      }
+      const rows = Array.from(groups.values()).map(r => mapAggRow(r, intlNames));
       setCareerRows(rows);
       setCareerLoading(false);
     }).catch(err => {
