@@ -607,6 +607,36 @@ export type Database = {
       }
     }
     Views: {
+      elo_history: {
+        Row: {
+          MatchID: number | null
+          TeamID: number | null
+          SeasonID: number | null
+          PreElo: number | null
+          ELoDelta: number | null
+          PostElo: number | null
+          Matchday: string | null
+        }
+        Insert: {
+          MatchID?: number | null
+          TeamID?: number | null
+          SeasonID?: number | null
+          PreElo?: number | null
+          ELoDelta?: number | null
+          PostElo?: number | null
+          Matchday?: string | null
+        }
+        Update: {
+          MatchID?: number | null
+          TeamID?: number | null
+          SeasonID?: number | null
+          PreElo?: number | null
+          ELoDelta?: number | null
+          PostElo?: number | null
+          Matchday?: string | null
+        }
+        Relationships: []
+      }
       elo_new: {
         Row: {
           current_game_number: number | null
