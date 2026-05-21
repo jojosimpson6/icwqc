@@ -56,7 +56,7 @@ export function EloChart() {
     Promise.all([
       supabase.from("leagues").select("LeagueID, LeagueName").order("LeagueTier").order("LeagueName"),
       fetchAllRows("elo_history", { select: "TeamID,PostElo,Matchday", order: { column: "Matchday", ascending: true } }),
-      supabase.from("teams").select("FullName, LeagueID"),
+      supabase.from("teams").select("TeamID, FullName, LeagueID"),
     ]).then(([{ data: leagueData }, eData, { data: teamsData }]) => {
       if (leagueData) setLeagues(leagueData as LeagueOption[]);
 
