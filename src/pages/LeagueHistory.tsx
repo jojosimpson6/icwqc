@@ -49,6 +49,42 @@ const MEDAL = {
 // LeagueIDs that are cup/knockout competitions (not round-robin)
 const CUP_IDS = new Set([15,16,17,18,19,20,21]);
 
+// Build round labels: Final/Semis/Quarters are descriptive; earlier rounds get ordinal names.
+function buildRoundLabels(weekGroups: Map<number, any[]>, sortedWeeks: number[]): Map<number, string> {
+  const weekToRaw = new Map<number, string>();
+  let wi = 0;
+  while (wi < sortedWeeks.length) {
+    const w = sortedWeeks[wi];
+    const cnt = weekGroups.get(w)!.length;
+    let lbl: string;
+    if (cnt === 1) lbl = "Final";
+    else if (cnt === 2) lbl = "Semifinals";
+    else if (cnt === 4) lbl = "Quarterfinals";
+    else lbl = `__ordinal__${cnt}_wi${wi}`;
+    weekToRaw.set(w, lbl);
+    if (wi + 1 < sortedWeeks.length && weekGroups.get(sortedWeeks[wi + 1])!.length === cnt && cnt > 1) {
+      weekToRaw.set(sortedWeeks[wi + 1], lbl);
+      wi += 2;
+    } else { wi++; }
+  }
+  const ordinals = ["1st Round", "2nd Round", "3rd Round", "4th Round", "5th Round"];
+  const seenOrdinals: string[] = [];
+  sortedWeeks.forEach(w => {
+    const lbl = weekToRaw.get(w)!;
+    if (lbl.startsWith("__ordinal__") && !seenOrdinals.includes(lbl)) seenOrdinals.push(lbl);
+  });
+  const result = new Map<number, string>();
+  sortedWeeks.forEach(w => {
+    const lbl = weekToRaw.get(w)!;
+    if (lbl.startsWith("__ordinal__")) {
+      result.set(w, ordinals[seenOrdinals.indexOf(lbl)] || lbl);
+    } else {
+      result.set(w, lbl);
+    }
+  });
+  return result;
+}
+
 type TabType = "timeline" | "awards" | "player_season_stats";
 
 export default function LeagueHistory() {
