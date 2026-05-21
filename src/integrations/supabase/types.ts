@@ -41,6 +41,36 @@ export type Database = {
         }
         Relationships: []
       }
+      elo_history: {
+        Row: {
+          ELoDelta: number
+          Matchday: string | null
+          MatchID: number
+          PostElo: number
+          PreElo: number
+          SeasonID: number
+          TeamID: number
+        }
+        Insert: {
+          ELoDelta: number
+          Matchday?: string | null
+          MatchID: number
+          PostElo: number
+          PreElo: number
+          SeasonID: number
+          TeamID: number
+        }
+        Update: {
+          ELoDelta?: number
+          Matchday?: string | null
+          MatchID?: number
+          PostElo?: number
+          PreElo?: number
+          SeasonID?: number
+          TeamID?: number
+        }
+        Relationships: []
+      }
       leagues: {
         Row: {
           LeagueID: number
@@ -607,37 +637,16 @@ export type Database = {
       }
     }
     Views: {
-      elo_history: {
+      elo_new: {
         Row: {
-          MatchID: number | null
-          TeamID: number | null
-          SeasonID: number | null
-          PreElo: number | null
-          ELoDelta: number | null
-          PostElo: number | null
+          current_game_number: number | null
+          elo_rating: number | null
+          FullName: string | null
           Matchday: string | null
-        }
-        Insert: {
-          MatchID?: number | null
-          TeamID?: number | null
-          SeasonID?: number | null
-          PreElo?: number | null
-          ELoDelta?: number | null
-          PostElo?: number | null
-          Matchday?: string | null
-        }
-        Update: {
-          MatchID?: number | null
-          TeamID?: number | null
-          SeasonID?: number | null
-          PreElo?: number | null
-          ELoDelta?: number | null
-          PostElo?: number | null
-          Matchday?: string | null
         }
         Relationships: []
       }
-      elo_new: {
+      elo_ratings: {
         Row: {
           current_game_number: number | null
           elo_rating: number | null
@@ -769,6 +778,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      refresh_elo_history: { Args: never; Returns: undefined }
       refresh_player_views: { Args: never; Returns: undefined }
     }
     Enums: {
