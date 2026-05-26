@@ -265,7 +265,7 @@ export default function LeadersIndex() {
     setCareerLoading(true);
     setCareerError(null);
 
-    cachedQuery("leaders:career:client-agg-v1", async () => {
+    cachedQuery("leaders:career:client-agg-v2-teamid", async () => {
       // PostgREST aggregate functions are disabled on this project — fetch raw
       // per-season rows (paginated) and aggregate client-side.
       const PAGE = 1000;
