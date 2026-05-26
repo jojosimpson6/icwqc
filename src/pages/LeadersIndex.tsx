@@ -287,7 +287,8 @@ export default function LeadersIndex() {
         let g = groups.get(key);
         if (!g) {
           g = { PlayerID: r.PlayerID, PlayerName: r.PlayerName, Position: r.Position,
-                Nation: r.Nation, _latestSeason: -1, TeamFullName: null, LeagueName: null,
+                Nation: r.Nation, _latestSeason: -1, _latestClubSeason: -1,
+                TeamFullName: null, LeagueName: null,
                 SeasonID: 0, GamesPlayed: 0, MinPlayed: 0, Goals: 0, GoldenSnitchCatches: 0,
                 KeeperSaves: 0, KeeperShotsFaced: 0, BludgersHit: 0, TurnoversForced: 0,
                 TeammatesProtected: 0, ShotAtt: 0, ShotScored: 0, PassAtt: 0, PassComp: 0,
@@ -295,11 +296,24 @@ export default function LeadersIndex() {
           groups.set(key, g);
         }
         const sid = r.SeasonID || 0;
+        const isClub = isClubTeamId(r.TeamID);
+        // Track latest overall season for the "LatestSeason" display
         if (sid > g._latestSeason) {
           g._latestSeason = sid;
           g.SeasonID = sid;
-          g.TeamFullName = r.TeamFullName ?? g.TeamFullName;
-          g.LeagueName = r.LeagueName ?? g.LeagueName;
+        }
+        // Prefer the latest CLUB season's team/league. Fall back to any season
+        // if the player never had a club row.
+        if (isClub) {
+          if (sid > g._latestClubSeason) {
+            g._latestClubSeason = sid;
+            g.TeamFullName = r.TeamFullName ?? g.TeamFullName;
+            g.LeagueName = r.LeagueName ?? g.LeagueName;
+          }
+        } else if (g._latestClubSeason < 0 && sid > g._latestSeason - 1) {
+          // No club team seen yet — keep most-recent fallback
+          g.TeamFullName = g.TeamFullName ?? r.TeamFullName;
+          g.LeagueName = g.LeagueName ?? r.LeagueName;
         }
         g.GamesPlayed        += r.GamesPlayed || 0;
         g.MinPlayed          += r.MinPlayed || 0;
