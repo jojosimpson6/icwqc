@@ -27,6 +27,7 @@ interface CareerRow {
 
 interface SeasonRow extends Omit<CareerRow, "LatestSeason"> {
   SeasonID: number;
+  TeamID?: number | null;
 }
 
 interface LeagueInfo {
@@ -145,13 +146,16 @@ const AGG_SELECT = [
 // but filtered to just those seasons — still small payload.
 const SEASON_SELECT = [
   "PlayerID", "PlayerName", "Position", "Nation",
-  "TeamFullName", "LeagueName", "SeasonID",
+  "TeamID", "TeamFullName", "LeagueName", "SeasonID",
   "GamesPlayed", "MinPlayed", "Goals", "GoldenSnitchCatches",
   "KeeperSaves", "KeeperShotsFaced",
   "BludgersHit", "TurnoversForced", "TeammatesProtected",
   "ShotAtt", "ShotScored", "PassAtt", "PassComp",
   "KeeperPassAtt", "KeeperPassComp",
 ].join(",");
+
+// Club teams have TeamID < 1000; >= 1000 are national/international teams.
+const isClubTeamId = (id: number | null | undefined) => typeof id === "number" && id < 1000;
 
 function mapAggRow(r: any, intlNames: Set<string>): CareerRow {
   // PostgREST returns aggregate columns as e.g. "Goals.sum()" → key is "Goals.sum()"
@@ -161,6 +165,11 @@ function mapAggRow(r: any, intlNames: Set<string>): CareerRow {
   const ln = (r["LeagueName"] ?? r["LeagueName.max()"] ?? null) as string | null;
   const fn = (r["TeamFullName"] ?? r["TeamFullName.max()"] ?? null) as string | null;
   const ls = (r["SeasonID"] ?? r["SeasonID.max()"] ?? 0) as number;
+  // Classify a player as "intl" only if they never played for a club team.
+  // (Falls back to league-name lookup for server-aggregated rows without TeamID.)
+  const isIntl = "_hasClubSeason" in r
+    ? !r._hasClubSeason
+    : intlNames.has(ln || "");
   return {
     PlayerID: r.PlayerID,
     PlayerName: r.PlayerName,
@@ -184,7 +193,7 @@ function mapAggRow(r: any, intlNames: Set<string>): CareerRow {
     PassComp: (r["PassComp"] ?? r["PassComp.sum()"] ?? 0) as number,
     KPassAtt: (r["KeeperPassAtt"] ?? r["KeeperPassAtt.sum()"] ?? 0) as number,
     KPassComp:(r["KeeperPassComp"] ?? r["KeeperPassComp.sum()"] ?? 0) as number,
-    isIntl: intlNames.has(ln || ""),
+    isIntl,
   };
 }
 
@@ -200,8 +209,9 @@ function mapSeasonRow(r: any, intlNames: Set<string>): SeasonRow {
     ShotAtt: r.ShotAtt || 0, ShotScored: r.ShotScored || 0,
     PassAtt: r.PassAtt || 0, PassComp: r.PassComp || 0,
     KPassAtt: r.KeeperPassAtt || 0, KPassComp: r.KeeperPassComp || 0,
-    isIntl: intlNames.has(r.LeagueName || ""),
-  };
+    isIntl: intlNames.has(r.LeagueName || "") || !isClubTeamId(r.TeamID),
+    TeamID: r.TeamID ?? null,
+  } as SeasonRow;
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -255,7 +265,7 @@ export default function LeadersIndex() {
     setCareerLoading(true);
     setCareerError(null);
 
-    cachedQuery("leaders:career:client-agg-v1", async () => {
+    cachedQuery("leaders:career:client-agg-v2-teamid", async () => {
       // PostgREST aggregate functions are disabled on this project — fetch raw
       // per-season rows (paginated) and aggregate client-side.
       const PAGE = 1000;
@@ -282,7 +292,9 @@ export default function LeadersIndex() {
         let g = groups.get(key);
         if (!g) {
           g = { PlayerID: r.PlayerID, PlayerName: r.PlayerName, Position: r.Position,
-                Nation: r.Nation, _latestSeason: -1, TeamFullName: null, LeagueName: null,
+                Nation: r.Nation, _latestSeason: -1, _latestClubSeason: -1,
+                _hasClubSeason: false,
+                TeamFullName: null, LeagueName: null,
                 SeasonID: 0, GamesPlayed: 0, MinPlayed: 0, Goals: 0, GoldenSnitchCatches: 0,
                 KeeperSaves: 0, KeeperShotsFaced: 0, BludgersHit: 0, TurnoversForced: 0,
                 TeammatesProtected: 0, ShotAtt: 0, ShotScored: 0, PassAtt: 0, PassComp: 0,
@@ -290,11 +302,25 @@ export default function LeadersIndex() {
           groups.set(key, g);
         }
         const sid = r.SeasonID || 0;
+        const isClub = isClubTeamId(r.TeamID);
+        if (isClub) g._hasClubSeason = true;
+        // Track latest overall season for the "LatestSeason" display
         if (sid > g._latestSeason) {
           g._latestSeason = sid;
           g.SeasonID = sid;
-          g.TeamFullName = r.TeamFullName ?? g.TeamFullName;
-          g.LeagueName = r.LeagueName ?? g.LeagueName;
+        }
+        // Prefer the latest CLUB season's team/league. Fall back to any season
+        // if the player never had a club row.
+        if (isClub) {
+          if (sid > g._latestClubSeason) {
+            g._latestClubSeason = sid;
+            g.TeamFullName = r.TeamFullName ?? g.TeamFullName;
+            g.LeagueName = r.LeagueName ?? g.LeagueName;
+          }
+        } else if (g._latestClubSeason < 0 && sid > g._latestSeason - 1) {
+          // No club team seen yet — keep most-recent fallback
+          g.TeamFullName = g.TeamFullName ?? r.TeamFullName;
+          g.LeagueName = g.LeagueName ?? r.LeagueName;
         }
         g.GamesPlayed        += r.GamesPlayed || 0;
         g.MinPlayed          += r.MinPlayed || 0;
@@ -328,7 +354,7 @@ export default function LeadersIndex() {
     if (seasonLoaded || seasonLoading) return;
     setSeasonLoading(true);
     try {
-      const rows = await cachedQuery("leaders:seasons:mat-v1", async () => {
+      const rows = await cachedQuery("leaders:seasons:v2-teamid", async () => {
         // Fetch all season rows — but only the columns we need
         // These are already filtered per-season (no aggregation) so each row is small
         const PAGE = 1000;
