@@ -293,6 +293,7 @@ export default function LeadersIndex() {
         if (!g) {
           g = { PlayerID: r.PlayerID, PlayerName: r.PlayerName, Position: r.Position,
                 Nation: r.Nation, _latestSeason: -1, _latestClubSeason: -1,
+                _hasClubSeason: false,
                 TeamFullName: null, LeagueName: null,
                 SeasonID: 0, GamesPlayed: 0, MinPlayed: 0, Goals: 0, GoldenSnitchCatches: 0,
                 KeeperSaves: 0, KeeperShotsFaced: 0, BludgersHit: 0, TurnoversForced: 0,
@@ -302,6 +303,7 @@ export default function LeadersIndex() {
         }
         const sid = r.SeasonID || 0;
         const isClub = isClubTeamId(r.TeamID);
+        if (isClub) g._hasClubSeason = true;
         // Track latest overall season for the "LatestSeason" display
         if (sid > g._latestSeason) {
           g._latestSeason = sid;
