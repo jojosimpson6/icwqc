@@ -27,6 +27,7 @@ interface CareerRow {
 
 interface SeasonRow extends Omit<CareerRow, "LatestSeason"> {
   SeasonID: number;
+  TeamID?: number | null;
 }
 
 interface LeagueInfo {
