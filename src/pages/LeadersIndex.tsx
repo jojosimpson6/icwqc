@@ -203,8 +203,9 @@ function mapSeasonRow(r: any, intlNames: Set<string>): SeasonRow {
     ShotAtt: r.ShotAtt || 0, ShotScored: r.ShotScored || 0,
     PassAtt: r.PassAtt || 0, PassComp: r.PassComp || 0,
     KPassAtt: r.KeeperPassAtt || 0, KPassComp: r.KeeperPassComp || 0,
-    isIntl: intlNames.has(r.LeagueName || ""),
-  };
+    isIntl: intlNames.has(r.LeagueName || "") || !isClubTeamId(r.TeamID),
+    TeamID: r.TeamID ?? null,
+  } as SeasonRow;
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
