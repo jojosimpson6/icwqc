@@ -33,7 +33,7 @@ export function PlayerSpotlight() {
         //    Order by PlayerName so we get a stable, varied set; take first 200 rows
         const { data: statsData, error: statsError } = await supabase
           .from("player_season_stats")
-          .select("PlayerID, PlayerName, TeamFullName, Position, GamesPlayed")
+          .select("PlayerID, PlayerName, TeamID, TeamFullName, Position, GamesPlayed")
           .eq("SeasonID", latestSeason)
           .gt("GamesPlayed", 0)
           .order("PlayerID", { ascending: true })
@@ -44,8 +44,22 @@ export function PlayerSpotlight() {
           return;
         }
 
-        // 3. Pick 6 random players spread across all fetched rows
-        const shuffled = [...statsData].sort(() => Math.random() - 0.5);
+        // Dedupe by PlayerID — a player can have rows for both club and national
+        // team in the same season. Prefer the club team row (TeamID < 1000).
+        const byPlayer = new Map<number, any>();
+        for (const row of statsData as any[]) {
+          if (!row.PlayerID) continue;
+          const existing = byPlayer.get(row.PlayerID);
+          const rowIsClub = typeof row.TeamID === "number" && row.TeamID < 1000;
+          const existingIsClub = existing && typeof existing.TeamID === "number" && existing.TeamID < 1000;
+          if (!existing || (rowIsClub && !existingIsClub)) {
+            byPlayer.set(row.PlayerID, row);
+          }
+        }
+        const uniqueRows = Array.from(byPlayer.values());
+
+        // 3. Pick 6 random players from the deduped set
+        const shuffled = uniqueRows.sort(() => Math.random() - 0.5);
         const chosen = shuffled.slice(0, 6);
 
         // 4. Enrich with nation info
