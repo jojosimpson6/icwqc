@@ -165,6 +165,11 @@ function mapAggRow(r: any, intlNames: Set<string>): CareerRow {
   const ln = (r["LeagueName"] ?? r["LeagueName.max()"] ?? null) as string | null;
   const fn = (r["TeamFullName"] ?? r["TeamFullName.max()"] ?? null) as string | null;
   const ls = (r["SeasonID"] ?? r["SeasonID.max()"] ?? 0) as number;
+  // Classify a player as "intl" only if they never played for a club team.
+  // (Falls back to league-name lookup for server-aggregated rows without TeamID.)
+  const isIntl = "_hasClubSeason" in r
+    ? !r._hasClubSeason
+    : intlNames.has(ln || "");
   return {
     PlayerID: r.PlayerID,
     PlayerName: r.PlayerName,
@@ -188,7 +193,7 @@ function mapAggRow(r: any, intlNames: Set<string>): CareerRow {
     PassComp: (r["PassComp"] ?? r["PassComp.sum()"] ?? 0) as number,
     KPassAtt: (r["KeeperPassAtt"] ?? r["KeeperPassAtt.sum()"] ?? 0) as number,
     KPassComp:(r["KeeperPassComp"] ?? r["KeeperPassComp.sum()"] ?? 0) as number,
-    isIntl: intlNames.has(ln || ""),
+    isIntl,
   };
 }
 
