@@ -354,7 +354,7 @@ export default function LeadersIndex() {
     if (seasonLoaded || seasonLoading) return;
     setSeasonLoading(true);
     try {
-      const rows = await cachedQuery("leaders:seasons:mat-v1", async () => {
+      const rows = await cachedQuery("leaders:seasons:v2-teamid", async () => {
         // Fetch all season rows — but only the columns we need
         // These are already filtered per-season (no aggregation) so each row is small
         const PAGE = 1000;
