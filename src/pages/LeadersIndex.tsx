@@ -435,7 +435,13 @@ export default function LeadersIndex() {
           c.ShotAtt+=r.ShotAtt; c.ShotScored+=r.ShotScored;
           c.PassAtt+=r.PassAtt; c.PassComp+=r.PassComp;
           c.KPassAtt+=r.KPassAtt; c.KPassComp+=r.KPassComp;
-          c.FullName=r.FullName ?? (r as any).TeamFullName; c.LeagueName=r.LeagueName;
+          // Only adopt team/league from rows matching the current scope,
+          // so a club-view leader doesn't display their national team.
+          const rowMatchesScope = scope === "club" ? !r.isIntl : r.isIntl;
+          if (rowMatchesScope) {
+            c.FullName = r.FullName ?? (r as any).TeamFullName ?? c.FullName;
+            c.LeagueName = r.LeagueName ?? c.LeagueName;
+          }
           cum.set(key, c);
         });
         const snap = [...cum.values()].filter(filterValid).sort(sortFn);
