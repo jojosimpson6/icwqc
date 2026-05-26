@@ -369,9 +369,22 @@ export default function LeadersIndex() {
     careerRows.filter(r => scope === "club" ? !r.isIntl : r.isIntl),
     [careerRows, scope]
   );
+  // Classify each player by their career-level scope (matches the Career tab logic)
+  // so per-season tabs (progressive, season, yearly) include the same totals.
+  const playerScope = useMemo(() => {
+    const m = new Map<string, boolean>(); // key: PlayerID||Position → isIntl
+    careerRows.forEach(r => {
+      m.set(`${r.PlayerID}||${r.Position}`, r.isIntl);
+    });
+    return m;
+  }, [careerRows]);
   const filteredSeason = useMemo(() =>
-    seasonRows.filter(r => scope === "club" ? !r.isIntl : r.isIntl),
-    [seasonRows, scope]
+    seasonRows.filter(r => {
+      const isIntl = playerScope.get(`${r.PlayerID}||${r.Position}`);
+      if (isIntl === undefined) return scope === "club" ? !r.isIntl : r.isIntl;
+      return scope === "club" ? !isIntl : isIntl;
+    }),
+    [seasonRows, scope, playerScope]
   );
   const maxSeason = useMemo(() =>
     filteredCareer.reduce((m, r) => Math.max(m, r.LatestSeason || 0), 0),
