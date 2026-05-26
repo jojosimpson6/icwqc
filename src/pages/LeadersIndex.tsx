@@ -429,7 +429,7 @@ export default function LeadersIndex() {
       seasons.forEach(sid => {
         filteredSeason.filter(r => r.SeasonID === sid).forEach(r => {
           const key = `${r.PlayerID ?? r.PlayerName}||${r.Position}`;
-          const c = cum.get(key) || { ...r, GP:0,G:0,GSC:0,KS:0,KSF:0,BH:0,TF:0,TP:0,MIN:0,ShotAtt:0,ShotScored:0,PassAtt:0,PassComp:0,KPassAtt:0,KPassComp:0 };
+          const c = cum.get(key) || { ...r, FullName: null, LeagueName: null, GP:0,G:0,GSC:0,KS:0,KSF:0,BH:0,TF:0,TP:0,MIN:0,ShotAtt:0,ShotScored:0,PassAtt:0,PassComp:0,KPassAtt:0,KPassComp:0 };
           c.GP+=r.GP; c.G+=r.G; c.GSC+=r.GSC; c.KS+=r.KS; c.KSF+=r.KSF;
           c.BH+=r.BH; c.TF+=r.TF; c.TP+=r.TP; c.MIN+=r.MIN;
           c.ShotAtt+=r.ShotAtt; c.ShotScored+=r.ShotScored;
