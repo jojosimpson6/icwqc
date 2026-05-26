@@ -145,13 +145,16 @@ const AGG_SELECT = [
 // but filtered to just those seasons — still small payload.
 const SEASON_SELECT = [
   "PlayerID", "PlayerName", "Position", "Nation",
-  "TeamFullName", "LeagueName", "SeasonID",
+  "TeamID", "TeamFullName", "LeagueName", "SeasonID",
   "GamesPlayed", "MinPlayed", "Goals", "GoldenSnitchCatches",
   "KeeperSaves", "KeeperShotsFaced",
   "BludgersHit", "TurnoversForced", "TeammatesProtected",
   "ShotAtt", "ShotScored", "PassAtt", "PassComp",
   "KeeperPassAtt", "KeeperPassComp",
 ].join(",");
+
+// Club teams have TeamID < 1000; >= 1000 are national/international teams.
+const isClubTeamId = (id: number | null | undefined) => typeof id === "number" && id < 1000;
 
 function mapAggRow(r: any, intlNames: Set<string>): CareerRow {
   // PostgREST returns aggregate columns as e.g. "Goals.sum()" → key is "Goals.sum()"
