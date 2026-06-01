@@ -153,7 +153,7 @@ export default function LeaguePage() {
         fetchAllRows<MatchResult>("results", {
           select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID,SeasonID,LeagueID,IsNeutralSite",
           filters: [{ method: "eq", args: ["LeagueID", lid] }],
-          order: { column: "WeekID", ascending: true },
+          order: { column: "MatchID", ascending: true },
         }).then(results => {
           setMatchResults(results);
           const seasons = [...new Set(results.map(r => r.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number)) as number[];
