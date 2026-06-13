@@ -778,6 +778,10 @@ export type Database = {
         }
         Returns: boolean
       }
+      match_week_is_past: {
+        Args: { _league: number; _season: number; _week: number }
+        Returns: boolean
+      }
       refresh_elo_history: { Args: never; Returns: undefined }
       refresh_player_views: { Args: never; Returns: undefined }
     }
