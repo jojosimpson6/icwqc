@@ -300,14 +300,22 @@ export default function TeamPage() {
       }
     });
 
+    // Only need standings for seasons this team played in
+    const domesticSeasonIds = [...new Set(
+      [...seasonLeaguePairs.values()].map(v => v.seasonId)
+    )].filter(Boolean);
+
     // Batch all reference data in parallel — single round trip
     const [leagueData, allTeamsForReg, allStandingsRaw] = await Promise.all([
       fetchAllRows("leagues", { select: "LeagueID, LeagueName, LeagueTier" }),
       fetchAllRows("teams", { select: "FullName, LeagueID" }),
-      fetchAllRows("standings", {
-        select: "FullName, SeasonID, totalpoints, totalgamesplayed, GoalsFor, GoalsAgainst, totalgsc",
-        order: { column: "totalpoints", ascending: false },
-      }),
+      domesticSeasonIds.length > 0
+        ? fetchAllRows("standings", {
+            select: "FullName, SeasonID, totalpoints, totalgamesplayed, GoalsFor, GoalsAgainst, totalgsc",
+            filters: [{ method: "in", args: ["SeasonID", domesticSeasonIds] }],
+            order: { column: "totalpoints", ascending: false },
+          })
+        : Promise.resolve([]),
     ]);
 
     const leagueTierMap = new Map<string, number>();
