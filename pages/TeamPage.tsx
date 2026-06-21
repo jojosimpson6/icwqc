@@ -300,14 +300,10 @@ export default function TeamPage() {
       }
     });
 
-    // Batch all reference data in parallel — single round trip
-    const [leagueData, allTeamsForReg, allStandingsRaw] = await Promise.all([
+    // Batch reference data in parallel — keep standings out of this bulk call
+    const [leagueData, allTeamsForReg] = await Promise.all([
       fetchAllRows("leagues", { select: "LeagueID, LeagueName, LeagueTier" }),
       fetchAllRows("teams", { select: "FullName, LeagueID" }),
-      fetchAllRows("standings", {
-        select: "FullName, SeasonID, totalpoints, totalgamesplayed, GoalsFor, GoalsAgainst, totalgsc",
-        order: { column: "totalpoints", ascending: false },
-      }),
     ]);
 
     const leagueTierMap = new Map<string, number>();
@@ -319,15 +315,6 @@ export default function TeamPage() {
     const teamsByLeagueId = new Map<number, string[]>();
     (allTeamsForReg || []).forEach((t: any) => {
       const arr = teamsByLeagueId.get(t.LeagueID) || []; arr.push(t.FullName); teamsByLeagueId.set(t.LeagueID, arr);
-    });
-
-    // Build season standings lookup: seasonId -> [{FullName, totalpoints}] already sorted desc
-    const standingsBySeason = new Map<number, { FullName: string; totalpoints: number }[]>();
-    (allStandingsRaw || []).forEach((s: any) => {
-      if (s.SeasonID) {
-        if (!standingsBySeason.has(s.SeasonID)) standingsBySeason.set(s.SeasonID, []);
-        standingsBySeason.get(s.SeasonID)!.push({ FullName: s.FullName || "", totalpoints: s.totalpoints || 0 });
-      }
     });
 
     const standingsMap = new Map<string, StandingRow>();
@@ -347,12 +334,34 @@ export default function TeamPage() {
       else cupPairs.push({ seasonId, leagueId, leagueN, tier });
     }
 
+    // Fetch each domestic table with exact season+league filters. The standings view times out on broad IN scans.
+    const standingsBySeasonLeague = new Map<string, { FullName: string; totalpoints: number }[]>();
+    const domesticStandingsRaw = domesticPairs.length > 0
+      ? await Promise.all(domesticPairs.map(({ seasonId, leagueId }) =>
+          fetchAllRows("standings", {
+            select: "FullName, SeasonID, LeagueID, totalpoints",
+            filters: [
+              { method: "eq", args: ["SeasonID", seasonId] },
+              { method: "eq", args: ["LeagueID", leagueId] },
+            ],
+            order: { column: "totalpoints", ascending: false },
+          })
+        ))
+      : [];
+    domesticStandingsRaw.forEach((rows: any[], i) => {
+      const pair = domesticPairs[i];
+      standingsBySeasonLeague.set(`${pair.seasonId}|${pair.leagueId}`, (rows || []).map((s: any) => ({
+        FullName: s.FullName || "",
+        totalpoints: s.totalpoints || 0,
+      })));
+    });
+
     // Process domestic leagues using pre-fetched standings
     for (const { seasonId, leagueN, tier, leagueId } of domesticPairs) {
       const standing = standingsMap.get(String(seasonId));
       if (!standing) continue;
       const leagueTeamNames = teamsByLeagueId.get(leagueId) || [];
-      const seasonStandings = (standingsBySeason.get(seasonId) || [])
+      const seasonStandings = (standingsBySeasonLeague.get(`${seasonId}|${leagueId}`) || [])
         .filter(s => leagueTeamNames.length === 0 || leagueTeamNames.includes(s.FullName))
         .sort((a, b) => b.totalpoints - a.totalpoints);
       const idx = seasonStandings.findIndex(s => s.FullName === teamName);
@@ -695,10 +704,18 @@ export default function TeamPage() {
                 </span>
               )}
             </div>
-            <div>
-              <h1 className="font-display text-3xl font-bold" style={safeTextColor ? { color: safeTextColor } : undefined}>
-                {team.FullName}
-              </h1>
+            <div className="flex-1">
+              <div className="flex items-start justify-between gap-2">
+                <h1 className="font-display text-3xl font-bold" style={safeTextColor ? { color: safeTextColor } : undefined}>
+                  {team.FullName}
+                </h1>
+                <Link
+                  to={`/compare?mode=teams&t1=${team.TeamID}`}
+                  className="text-xs font-sans text-muted-foreground hover:text-accent border border-border rounded px-2 py-1 hover:border-accent transition-colors shrink-0 mt-1.5"
+                >
+                  Compare →
+                </Link>
+              </div>
               <p className="text-sm text-muted-foreground font-sans mt-1">
                 {team.City}{team.Country ? `, ${team.Country}` : ""}
                 {team.Nickname ? ` — "${team.Nickname}"` : ""}

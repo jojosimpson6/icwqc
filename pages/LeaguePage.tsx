@@ -153,7 +153,7 @@ export default function LeaguePage() {
         fetchAllRows<MatchResult>("results", {
           select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID,SeasonID,LeagueID,IsNeutralSite",
           filters: [{ method: "eq", args: ["LeagueID", lid] }],
-          order: { column: "WeekID", ascending: true },
+          order: { column: "MatchID", ascending: true },
         }).then(results => {
           setMatchResults(results);
           const seasons = [...new Set(results.map(r => r.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number)) as number[];
@@ -219,13 +219,12 @@ export default function LeaguePage() {
 
     // Determine round names based on match count
     const roundNames = (count: number): string => {
-      if (count === 1)  return "Final";
-      if (count === 2)  return "Semifinals";
-      if (count === 4)  return "Quarterfinals";
-      if (count === 8)  return "Fourth Round";
-      if (count === 16) return "Third Round";
-      if (count === 32) return "Second Round";
-      return "First Round";
+      if (count === 1) return "Final";
+      if (count === 2) return "Semifinals";
+      if (count === 4) return "Quarterfinals";
+      if (count === 8) return "Round of 16";
+      if (count === 16) return "Round of 32";
+      return `Round (${count} matches)`;
     };
 
     // For two-leg rounds, group pairs of weeks
@@ -251,7 +250,14 @@ export default function LeaguePage() {
 
   // Build CL group standings from weeks 1-6
   const buildCLGroups = (matches: MatchResult[]) => {
-    const groupMatches = matches.filter(m => (m.WeekID || 0) <= 6);
+    const seen = new Set<number>();
+    const groupMatches = matches.filter(m => {
+      if ((m.WeekID || 0) > 6) return false;
+      if (m.MatchID == null) return true;
+      if (seen.has(m.MatchID)) return false;
+      seen.add(m.MatchID);
+      return true;
+    });
     // Determine groups: teams that play each other are in the same group
     const teamAdj = new Map<number, Set<number>>();
     groupMatches.forEach(m => {

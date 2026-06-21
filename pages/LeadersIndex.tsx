@@ -4,48 +4,30 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
-import { fetchAllRows } from "@/lib/fetchAll";
+import { cachedQuery } from "@/lib/queryCache";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
-
-interface RawRow {
-  PlayerID: number | null;
-  PlayerName: string | null;
-  Position: string | null;
-  Nation: string | null;
-  TeamFullName: string | null;
-  LeagueName: string | null;
-  SeasonID: number | null;
-  GamesPlayed: number | null;
-  MinPlayed: number | null;
-  Goals: number | null;
-  GoldenSnitchCatches: number | null;
-  KeeperSaves: number | null;
-  KeeperShotsFaced: number | null;
-  BludgersHit: number | null;
-  TurnoversForced: number | null;
-  TeammatesProtected: number | null;
-  ShotAtt: number | null;
-  ShotScored: number | null;
-  PassAtt: number | null;
-  PassComp: number | null;
-  KeeperPassAtt: number | null;
-  KeeperPassComp: number | null;
-}
 
 interface CareerRow {
   PlayerID: number | null;
   PlayerName: string | null;
   Position: string | null;
   Nation: string | null;
-  TeamFullName: string | null;
+  FullName: string | null;        // most recent team
   LeagueName: string | null;
   LatestSeason: number;
-  isIntl: boolean;
   GP: number; MIN: number;
   G: number; GSC: number; KS: number; KSF: number;
   BH: number; TF: number; TP: number;
-  SA: number; SS: number; PA: number; PC: number; KPA: number; KPC: number;
+  ShotAtt: number; ShotScored: number;
+  PassAtt: number; PassComp: number;
+  KPassAtt: number; KPassComp: number;
+  isIntl: boolean;
+}
+
+interface SeasonRow extends Omit<CareerRow, "LatestSeason"> {
+  SeasonID: number;
+  TeamID?: number | null;
 }
 
 interface LeagueInfo {
@@ -58,32 +40,36 @@ interface LeagueInfo {
 
 type StatCat =
   "GP" | "G" | "G_GP" | "SH_PCT" | "PASS_PCT_C" | "MIN_G"
-  | "GSC" | "GSC_GP"
+  | "GSC" | "GSC_GP" | "MIN_GSC"
   | "KSF" | "KS" | "SV_PCT" | "KS_GP" | "PASS_PCT_K"
   | "BH" | "BH_GP" | "TF" | "TF_GP" | "TP" | "TP_GP";
 
 type RegType = "career" | "active" | "season" | "progressive" | "yearly" | "yby";
 
-const STATS: { key: StatCat; label: string; abbr: string; higher: boolean; minGP?: number; requirePos?: string }[] = [
-  { key: "GP",         label: "Games Played",              abbr: "GP",     higher: true },
-  { key: "G",          label: "Goals",                     abbr: "G",      higher: true,  requirePos: "Chaser" },
-  { key: "G_GP",       label: "Goals per Game",            abbr: "G/GP",   higher: true,  minGP: 10, requirePos: "Chaser" },
-  { key: "SH_PCT",     label: "Shooting %",                abbr: "SH%",    higher: true,  minGP: 10, requirePos: "Chaser" },
-  { key: "PASS_PCT_C", label: "Pass % (Chaser)",           abbr: "PASS%",  higher: true,  minGP: 10, requirePos: "Chaser" },
-  { key: "MIN_G",      label: "Minutes per Goal",          abbr: "MIN/G",  higher: false, minGP: 10, requirePos: "Chaser" },
-  { key: "GSC",        label: "Snitch Catches",            abbr: "GSC",    higher: true,  requirePos: "Seeker" },
-  { key: "GSC_GP",     label: "Snitch Catches per Game",   abbr: "GSC/GP", higher: true,  minGP: 10, requirePos: "Seeker" },
-  { key: "KSF",        label: "Shots Faced",               abbr: "SF",     higher: true,  requirePos: "Keeper" },
-  { key: "KS",         label: "Saves",                     abbr: "SV",     higher: true,  requirePos: "Keeper" },
-  { key: "SV_PCT",     label: "Save %",                    abbr: "SV%",    higher: true,  minGP: 10, requirePos: "Keeper" },
-  { key: "KS_GP",      label: "Saves per Game",            abbr: "SV/GP",  higher: true,  minGP: 10, requirePos: "Keeper" },
-  { key: "PASS_PCT_K", label: "Pass % (Keeper)",           abbr: "KP%",    higher: true,  minGP: 10, requirePos: "Keeper" },
-  { key: "BH",         label: "Bludgers Hit",              abbr: "BH",     higher: true,  requirePos: "Beater" },
-  { key: "BH_GP",      label: "Bludgers Hit per Game",     abbr: "BH/GP",  higher: true,  minGP: 10, requirePos: "Beater" },
-  { key: "TF",         label: "Turnovers Forced",          abbr: "TF",     higher: true,  requirePos: "Beater" },
-  { key: "TF_GP",      label: "Turnovers Forced / Game",   abbr: "TF/GP",  higher: true,  minGP: 10, requirePos: "Beater" },
-  { key: "TP",         label: "Teammates Protected",       abbr: "TP",     higher: true,  requirePos: "Beater" },
-  { key: "TP_GP",      label: "Teammates Protected / Game",abbr: "TP/GP",  higher: true,  minGP: 10, requirePos: "Beater" },
+const STATS: {
+  key: StatCat; label: string; abbr: string; higher: boolean;
+  minGP?: number; requirePos?: string;
+}[] = [
+  { key: "GP",         label: "Games Played",              abbr: "GP",    higher: true },
+  { key: "G",          label: "Goals",                     abbr: "G",     higher: true,  requirePos: "Chaser" },
+  { key: "G_GP",       label: "Goals per Game",            abbr: "G/GP",  higher: true,  minGP: 10, requirePos: "Chaser" },
+  { key: "SH_PCT",     label: "Shooting %",                abbr: "SH%",   higher: true,  minGP: 10, requirePos: "Chaser" },
+  { key: "PASS_PCT_C", label: "Pass % (Chaser)",           abbr: "PASS%", higher: true,  minGP: 10, requirePos: "Chaser" },
+  { key: "MIN_G",      label: "Minutes per Goal",          abbr: "MIN/G", higher: false, minGP: 10, requirePos: "Chaser" },
+  { key: "GSC",        label: "Snitch Catches",            abbr: "GSC",   higher: true,  requirePos: "Seeker" },
+  { key: "GSC_GP",     label: "Snitch Catches per Game",   abbr: "GSC/GP",higher: true,  minGP: 10, requirePos: "Seeker" },
+  { key: "MIN_GSC",    label: "Minutes per Snitch",        abbr: "MIN/GSC",higher: false,minGP: 10, requirePos: "Seeker" },
+  { key: "KSF",        label: "Shots Faced",               abbr: "SF",    higher: true,  requirePos: "Keeper" },
+  { key: "KS",         label: "Saves",                     abbr: "SV",    higher: true,  requirePos: "Keeper" },
+  { key: "SV_PCT",     label: "Save %",                    abbr: "SV%",   higher: true,  minGP: 10, requirePos: "Keeper" },
+  { key: "KS_GP",      label: "Saves per Game",            abbr: "SV/GP", higher: true,  minGP: 10, requirePos: "Keeper" },
+  { key: "PASS_PCT_K", label: "Pass % (Keeper)",           abbr: "KP%",   higher: true,  minGP: 10, requirePos: "Keeper" },
+  { key: "BH",         label: "Bludgers Hit",              abbr: "BH",    higher: true,  requirePos: "Beater" },
+  { key: "BH_GP",      label: "Bludgers Hit per Game",     abbr: "BH/GP", higher: true,  minGP: 10, requirePos: "Beater" },
+  { key: "TF",         label: "Turnovers Forced",          abbr: "TF",    higher: true,  requirePos: "Beater" },
+  { key: "TF_GP",      label: "Turnovers Forced / Game",   abbr: "TF/GP", higher: true,  minGP: 10, requirePos: "Beater" },
+  { key: "TP",         label: "Teammates Protected",       abbr: "TP",    higher: true,  requirePos: "Beater" },
+  { key: "TP_GP",      label: "Teammates Protected / Game",abbr: "TP/GP", higher: true,  minGP: 10, requirePos: "Beater" },
 ];
 
 const REGS: { key: RegType; label: string }[] = [
@@ -95,99 +81,137 @@ const REGS: { key: RegType; label: string }[] = [
   { key: "yby",         label: "Year-by-Year" },
 ];
 
-const FETCH_SELECT = "PlayerID,PlayerName,Position,Nation,TeamFullName,LeagueName,SeasonID,GamesPlayed,MinPlayed,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,BludgersHit,TurnoversForced,TeammatesProtected,ShotAtt,ShotScored,PassAtt,PassComp,KeeperPassAtt,KeeperPassComp";
-
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const sl = (id: number) => `${id - 1}–${String(id).slice(-2)}`;
+function seasonLabel(id: number) { return `${id - 1}–${String(id).slice(-2)}`; }
 
 function val(row: any, cat: StatCat): number | null {
-  const gp = row.GP ?? row.GamesPlayed ?? 0;
-  const mn = row.MIN ?? row.MinPlayed ?? 0;
-  const g  = row.G  ?? row.Goals ?? 0;
-  const gsc = row.GSC ?? row.GoldenSnitchCatches ?? 0;
-  const ks  = row.KS  ?? row.KeeperSaves ?? 0;
-  const ksf = row.KSF ?? row.KeeperShotsFaced ?? 0;
-  const bh  = row.BH  ?? row.BludgersHit ?? 0;
-  const tf  = row.TF  ?? row.TurnoversForced ?? 0;
-  const tp  = row.TP  ?? row.TeammatesProtected ?? 0;
-  const sa  = row.SA  ?? row.ShotAtt ?? 0;
-  const ss  = row.SS  ?? row.ShotScored ?? 0;
-  const pa  = row.PA  ?? row.PassAtt ?? 0;
-  const pc  = row.PC  ?? row.PassComp ?? 0;
-  const kpa = row.KPA ?? row.KeeperPassAtt ?? 0;
-  const kpc = row.KPC ?? row.KeeperPassComp ?? 0;
+  const g = row.GP || 0, mn = row.MIN || 0;
+  const goals = row.G || 0, gsc = row.GSC || 0, ks = row.KS || 0, ksf = row.KSF || 0;
+  const bh = row.BH || 0, tf = row.TF || 0, tp = row.TP || 0;
+  const sa = row.ShotAtt || 0, ss = row.ShotScored || 0;
+  const pa = row.PassAtt || 0, pc = row.PassComp || 0;
+  const kpa = row.KPassAtt || 0, kpc = row.KPassComp || 0;
   const minGP = STATS.find(s => s.key === cat)?.minGP ?? 0;
-  if (gp < minGP) return null;
+  if (g < minGP) return null;
   switch (cat) {
-    case "GP":       return gp > 0 ? gp : null;
-    case "G":        return g > 0 ? g : null;
-    case "G_GP":     return gp > 0 && g > 0 ? g / gp : null;
+    case "GP":       return g > 0 ? g : null;
+    case "G":        return goals > 0 ? goals : null;
+    case "G_GP":     return g > 0 && goals > 0 ? goals / g : null;
     case "SH_PCT":   return sa > 0 ? ss / sa : null;
     case "PASS_PCT_C": return pa > 0 ? pc / pa : null;
-    case "MIN_G":    return g > 0 && mn > 0 ? mn / g : null;
+    case "MIN_G":    return goals > 0 && mn > 0 ? mn / goals : null;
     case "GSC":      return gsc > 0 ? gsc : null;
-    case "GSC_GP":   return gp > 0 && gsc > 0 ? gsc / gp : null;
+    case "GSC_GP":   return g > 0 && gsc > 0 ? gsc / g : null;
+    case "MIN_GSC":  return gsc > 0 && mn > 0 ? mn / gsc : null;
     case "KSF":      return ksf > 0 ? ksf : null;
     case "KS":       return ks > 0 ? ks : null;
     case "SV_PCT":   return ksf > 0 ? ks / ksf : null;
-    case "KS_GP":    return gp > 0 && ks > 0 ? ks / gp : null;
+    case "KS_GP":    return g > 0 && ks > 0 ? ks / g : null;
     case "PASS_PCT_K": return kpa > 0 ? kpc / kpa : null;
     case "BH":       return bh > 0 ? bh : null;
-    case "BH_GP":    return gp > 0 && bh > 0 ? bh / gp : null;
+    case "BH_GP":    return g > 0 && bh > 0 ? bh / g : null;
     case "TF":       return tf > 0 ? tf : null;
-    case "TF_GP":    return gp > 0 && tf > 0 ? tf / gp : null;
+    case "TF_GP":    return g > 0 && tf > 0 ? tf / g : null;
     case "TP":       return tp > 0 ? tp : null;
-    case "TP_GP":    return gp > 0 && tp > 0 ? tp / gp : null;
+    case "TP_GP":    return g > 0 && tp > 0 ? tp / g : null;
   }
 }
 
 function fmt(v: number | null, cat: StatCat): string {
   if (v === null) return "—";
   if (["SV_PCT","SH_PCT","PASS_PCT_C","PASS_PCT_K"].includes(cat)) return (v * 100).toFixed(1) + "%";
-  if (["GSC_GP","KS_GP","G_GP","BH_GP","TF_GP","TP_GP","MIN_G"].includes(cat)) return v.toFixed(2);
+  if (["GSC_GP","SV_PCT","MIN_G","MIN_GSC","KS_GP","G_GP","BH_GP","TF_GP","TP_GP"].includes(cat)) return v.toFixed(2);
   return String(Math.round(v));
 }
 
-// Aggregate raw per-season rows into career totals, grouped by PlayerID+Position
-function buildCareer(rows: RawRow[], intlNames: Set<string>): CareerRow[] {
-  const map = new Map<string, CareerRow>();
-  rows.forEach(r => {
-    const key = `${r.PlayerID ?? r.PlayerName}|${r.Position}`;
-    const ln = r.LeagueName || "";
-    let c = map.get(key);
-    if (!c) {
-      c = {
-        PlayerID: r.PlayerID, PlayerName: r.PlayerName, Position: r.Position,
-        Nation: r.Nation, TeamFullName: r.TeamFullName, LeagueName: r.LeagueName,
-        LatestSeason: r.SeasonID ?? 0, isIntl: intlNames.has(ln),
-        GP:0, MIN:0, G:0, GSC:0, KS:0, KSF:0, BH:0, TF:0, TP:0,
-        SA:0, SS:0, PA:0, PC:0, KPA:0, KPC:0,
-      };
-      map.set(key, c);
-    }
-    c.GP  += r.GamesPlayed ?? 0;
-    c.MIN += r.MinPlayed ?? 0;
-    c.G   += r.Goals ?? 0;
-    c.GSC += r.GoldenSnitchCatches ?? 0;
-    c.KS  += r.KeeperSaves ?? 0;
-    c.KSF += r.KeeperShotsFaced ?? 0;
-    c.BH  += r.BludgersHit ?? 0;
-    c.TF  += r.TurnoversForced ?? 0;
-    c.TP  += r.TeammatesProtected ?? 0;
-    c.SA  += r.ShotAtt ?? 0;
-    c.SS  += r.ShotScored ?? 0;
-    c.PA  += r.PassAtt ?? 0;
-    c.PC  += r.PassComp ?? 0;
-    c.KPA += r.KeeperPassAtt ?? 0;
-    c.KPC += r.KeeperPassComp ?? 0;
-    if ((r.SeasonID ?? 0) > c.LatestSeason) {
-      c.LatestSeason = r.SeasonID!;
-      c.TeamFullName = r.TeamFullName;
-      c.LeagueName = r.LeagueName;
-    }
-  });
-  return [...map.values()];
+// ─── DB fetch: server-side aggregation via PostgREST ─────────────────────────
+// Uses PostgREST aggregate functions (sum, max) so the DB does the grouping —
+// returns one row per player+position, not one row per season.
+// Payload: ~2-5k rows instead of tens of thousands.
+
+const AGG_SELECT = [
+  "PlayerID", "PlayerName", "Position", "Nation",
+  "TeamFullName.max()", "LeagueName.max()", "SeasonID.max()",
+  "GamesPlayed.sum()", "MinPlayed.sum()",
+  "Goals.sum()", "GoldenSnitchCatches.sum()",
+  "KeeperSaves.sum()", "KeeperShotsFaced.sum()",
+  "BludgersHit.sum()", "TurnoversForced.sum()", "TeammatesProtected.sum()",
+  "ShotAtt.sum()", "ShotScored.sum()",
+  "PassAtt.sum()", "PassComp.sum()",
+  "KeeperPassAtt.sum()", "KeeperPassComp.sum()",
+].join(",");
+
+// For single-season or active (recent seasons): fetch per-season rows (no aggregation)
+// but filtered to just those seasons — still small payload.
+const SEASON_SELECT = [
+  "PlayerID", "PlayerName", "Position", "Nation",
+  "TeamID", "TeamFullName", "LeagueName", "SeasonID",
+  "GamesPlayed", "MinPlayed", "Goals", "GoldenSnitchCatches",
+  "KeeperSaves", "KeeperShotsFaced",
+  "BludgersHit", "TurnoversForced", "TeammatesProtected",
+  "ShotAtt", "ShotScored", "PassAtt", "PassComp",
+  "KeeperPassAtt", "KeeperPassComp",
+].join(",");
+
+// Club teams have TeamID < 1000; >= 1000 are national/international teams.
+const isClubTeamId = (id: number | null | undefined) => typeof id === "number" && id < 1000;
+
+function mapAggRow(r: any, intlNames: Set<string>): CareerRow {
+  // PostgREST returns aggregate columns as e.g. "Goals.sum()" → key is "Goals.sum()"
+  // but supabase-js v2 strips the suffix and returns them as the base column name
+  // Actually with supabase-js the key comes back as the expression — let's handle both
+  const g = (r["GamesPlayed"] ?? r["GamesPlayed.sum()"] ?? 0) as number;
+  const ln = (r["LeagueName"] ?? r["LeagueName.max()"] ?? null) as string | null;
+  const fn = (r["TeamFullName"] ?? r["TeamFullName.max()"] ?? null) as string | null;
+  const ls = (r["SeasonID"] ?? r["SeasonID.max()"] ?? 0) as number;
+  // Classify a player as "intl" only if they never played for a club team.
+  // (Falls back to league-name lookup for server-aggregated rows without TeamID.)
+  const isIntl = "_hasClubSeason" in r
+    ? !r._hasClubSeason
+    : intlNames.has(ln || "");
+  return {
+    PlayerID: r.PlayerID,
+    PlayerName: r.PlayerName,
+    Position: r.Position,
+    Nation: r.Nation,
+    FullName: fn,
+    LeagueName: ln,
+    LatestSeason: ls,
+    GP:  g,
+    MIN: (r["MinPlayed"] ?? r["MinPlayed.sum()"] ?? 0) as number,
+    G:   (r["Goals"] ?? r["Goals.sum()"] ?? 0) as number,
+    GSC: (r["GoldenSnitchCatches"] ?? r["GoldenSnitchCatches.sum()"] ?? 0) as number,
+    KS:  (r["KeeperSaves"] ?? r["KeeperSaves.sum()"] ?? 0) as number,
+    KSF: (r["KeeperShotsFaced"] ?? r["KeeperShotsFaced.sum()"] ?? 0) as number,
+    BH:  (r["BludgersHit"] ?? r["BludgersHit.sum()"] ?? 0) as number,
+    TF:  (r["TurnoversForced"] ?? r["TurnoversForced.sum()"] ?? 0) as number,
+    TP:  (r["TeammatesProtected"] ?? r["TeammatesProtected.sum()"] ?? 0) as number,
+    ShotAtt:  (r["ShotAtt"] ?? r["ShotAtt.sum()"] ?? 0) as number,
+    ShotScored:(r["ShotScored"] ?? r["ShotScored.sum()"] ?? 0) as number,
+    PassAtt:  (r["PassAtt"] ?? r["PassAtt.sum()"] ?? 0) as number,
+    PassComp: (r["PassComp"] ?? r["PassComp.sum()"] ?? 0) as number,
+    KPassAtt: (r["KeeperPassAtt"] ?? r["KeeperPassAtt.sum()"] ?? 0) as number,
+    KPassComp:(r["KeeperPassComp"] ?? r["KeeperPassComp.sum()"] ?? 0) as number,
+    isIntl,
+  };
+}
+
+function mapSeasonRow(r: any, intlNames: Set<string>): SeasonRow {
+  return {
+    PlayerID: r.PlayerID, PlayerName: r.PlayerName, Position: r.Position,
+    Nation: r.Nation, FullName: r.TeamFullName, LeagueName: r.LeagueName,
+    SeasonID: r.SeasonID,
+    GP: r.GamesPlayed || 0, MIN: r.MinPlayed || 0,
+    G: r.Goals || 0, GSC: r.GoldenSnitchCatches || 0,
+    KS: r.KeeperSaves || 0, KSF: r.KeeperShotsFaced || 0,
+    BH: r.BludgersHit || 0, TF: r.TurnoversForced || 0, TP: r.TeammatesProtected || 0,
+    ShotAtt: r.ShotAtt || 0, ShotScored: r.ShotScored || 0,
+    PassAtt: r.PassAtt || 0, PassComp: r.PassComp || 0,
+    KPassAtt: r.KeeperPassAtt || 0, KPassComp: r.KeeperPassComp || 0,
+    isIntl: intlNames.has(r.LeagueName || "") || !isClubTeamId(r.TeamID),
+    TeamID: r.TeamID ?? null,
+  } as SeasonRow;
 }
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -199,123 +223,254 @@ export default function LeadersIndex() {
   const register = (searchParams.get("reg")   as RegType) || "career";
 
   const setParam = (key: string, value: string) => {
-    const p = new URLSearchParams(searchParams);
-    p.set(key, value);
-    setSearchParams(p, { replace: true });
+    const next = new URLSearchParams(searchParams);
+    next.set(key, value);
+    setSearchParams(next, { replace: true });
   };
 
-  // All raw rows — fetched once from the materialized view (fast because it's pre-computed)
-  const [rawRows,    setRawRows]    = useState<RawRow[]>([]);
-  const [leagues,    setLeagues]    = useState<LeagueInfo[]>([]);
-  const [intlNames,  setIntlNames]  = useState<Set<string>>(new Set());
-  const [lgIdByName, setLgIdByName] = useState<Map<string, number>>(new Map());
-  const [loading,    setLoading]    = useState(true);
-  const [error,      setError]      = useState<string | null>(null);
+  const [careerRows, setCareerRows]   = useState<CareerRow[]>([]);
+  const [seasonRows, setSeasonRows]   = useState<SeasonRow[]>([]);
+  const [leagues, setLeagues]         = useState<LeagueInfo[]>([]);
+  const [intlNames, setIntlNames]     = useState<Set<string>>(new Set());
+  const [lgIdByName, setLgIdByName]   = useState<Map<string, number>>(new Map());
+  const [careerLoading, setCareerLoading] = useState(true);
+  const [seasonLoading, setSeasonLoading] = useState(false);
+  const [seasonLoaded,  setSeasonLoaded]  = useState(false);
+  const [careerError, setCareerError] = useState<string | null>(null);
 
+  // ── Load leagues once (tiny query) ──────────────────────────────────────────
   useEffect(() => {
-    (async () => {
-      setLoading(true);
-      setError(null);
-      try {
-        // Fetch leagues first (tiny query)
-        const { data: lgData } = await supabase
-          .from("leagues")
-          .select("LeagueID, LeagueName, LeagueTier");
-
+    supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier")
+      .then(({ data }) => {
+        if (!data) return;
+        setLeagues(data as LeagueInfo[]);
         const intl = new Set<string>();
         const lim  = new Map<string, number>();
-        (lgData || []).forEach((l: any) => {
+        (data as LeagueInfo[]).forEach(l => {
           if (l.LeagueName && l.LeagueID) {
             lim.set(l.LeagueName, l.LeagueID);
             if (l.LeagueTier === 0) intl.add(l.LeagueName);
           }
         });
-        setLeagues((lgData || []) as LeagueInfo[]);
         setIntlNames(intl);
         setLgIdByName(lim);
-
-        // Fetch ALL rows from the materialized view — it's pre-computed so this is fast
-        // No aggregate syntax — just raw rows, aggregate in JS
-        const rows = await fetchAllRows<RawRow>("player_season_stats", {
-          select: FETCH_SELECT,
-        });
-
-        setRawRows(rows);
-      } catch (err: any) {
-        console.error("LeadersIndex load error:", err);
-        setError(err?.message || "Failed to load data. Please refresh.");
-      } finally {
-        setLoading(false);
-      }
-    })();
+      });
   }, []);
 
-  // Career rows (aggregated in JS)
-  const careerRows = useMemo(() => buildCareer(rawRows, intlNames), [rawRows, intlNames]);
+  // ── Load career totals via server-side aggregation ──────────────────────────
+  // PostgREST runs GROUP BY PlayerID, PlayerName, Position, Nation on the DB.
+  // Returns ~2-5k rows (one per player+position) instead of 50k+ raw rows.
+  useEffect(() => {
+    if (intlNames.size === 0 && leagues.length === 0) return; // wait for leagues
+    setCareerLoading(true);
+    setCareerError(null);
 
-  // Scoped views
-  const filteredCareer = useMemo(
-    () => careerRows.filter(r => scope === "club" ? !r.isIntl : r.isIntl),
+    cachedQuery("leaders:career:client-agg-v2-teamid", async () => {
+      // PostgREST aggregate functions are disabled on this project — fetch raw
+      // per-season rows (paginated) and aggregate client-side.
+      const PAGE = 1000;
+      const all: any[] = [];
+      let from = 0;
+      while (true) {
+        const { data, error } = await supabase
+          .from("player_season_stats")
+          .select(SEASON_SELECT)
+          .order("SeasonID", { ascending: false })
+          .range(from, from + PAGE - 1);
+        if (error) throw new Error(error.message);
+        if (!data || data.length === 0) break;
+        all.push(...data);
+        if (data.length < PAGE) break;
+        from += PAGE;
+      }
+      return all;
+    }).then(data => {
+      // Group by PlayerID + Position, sum stats, take latest season's team/league
+      const groups = new Map<string, any>();
+      for (const r of data as any[]) {
+        const key = `${r.PlayerID}||${r.Position}`;
+        let g = groups.get(key);
+        if (!g) {
+          g = { PlayerID: r.PlayerID, PlayerName: r.PlayerName, Position: r.Position,
+                Nation: r.Nation, _latestSeason: -1, _latestClubSeason: -1,
+                _hasClubSeason: false,
+                TeamFullName: null, LeagueName: null,
+                SeasonID: 0, GamesPlayed: 0, MinPlayed: 0, Goals: 0, GoldenSnitchCatches: 0,
+                KeeperSaves: 0, KeeperShotsFaced: 0, BludgersHit: 0, TurnoversForced: 0,
+                TeammatesProtected: 0, ShotAtt: 0, ShotScored: 0, PassAtt: 0, PassComp: 0,
+                KeeperPassAtt: 0, KeeperPassComp: 0 };
+          groups.set(key, g);
+        }
+        const sid = r.SeasonID || 0;
+        const isClub = isClubTeamId(r.TeamID);
+        if (isClub) g._hasClubSeason = true;
+        // Track latest overall season for the "LatestSeason" display
+        if (sid > g._latestSeason) {
+          g._latestSeason = sid;
+          g.SeasonID = sid;
+        }
+        // Prefer the latest CLUB season's team/league. Fall back to any season
+        // if the player never had a club row.
+        if (isClub) {
+          if (sid > g._latestClubSeason) {
+            g._latestClubSeason = sid;
+            g.TeamFullName = r.TeamFullName ?? g.TeamFullName;
+            g.LeagueName = r.LeagueName ?? g.LeagueName;
+          }
+        } else if (g._latestClubSeason < 0 && sid > g._latestSeason - 1) {
+          // No club team seen yet — keep most-recent fallback
+          g.TeamFullName = g.TeamFullName ?? r.TeamFullName;
+          g.LeagueName = g.LeagueName ?? r.LeagueName;
+        }
+        g.GamesPlayed        += r.GamesPlayed || 0;
+        g.MinPlayed          += r.MinPlayed || 0;
+        g.Goals              += r.Goals || 0;
+        g.GoldenSnitchCatches+= r.GoldenSnitchCatches || 0;
+        g.KeeperSaves        += r.KeeperSaves || 0;
+        g.KeeperShotsFaced   += r.KeeperShotsFaced || 0;
+        g.BludgersHit        += r.BludgersHit || 0;
+        g.TurnoversForced    += r.TurnoversForced || 0;
+        g.TeammatesProtected += r.TeammatesProtected || 0;
+        g.ShotAtt            += r.ShotAtt || 0;
+        g.ShotScored         += r.ShotScored || 0;
+        g.PassAtt            += r.PassAtt || 0;
+        g.PassComp           += r.PassComp || 0;
+        g.KeeperPassAtt      += r.KeeperPassAtt || 0;
+        g.KeeperPassComp     += r.KeeperPassComp || 0;
+      }
+      const rows = Array.from(groups.values()).map(r => mapAggRow(r, intlNames));
+      setCareerRows(rows);
+      setCareerLoading(false);
+    }).catch(err => {
+      console.error("Career leaders error:", err);
+      setCareerError("Failed to load career data. Please refresh.");
+      setCareerLoading(false);
+    });
+  }, [intlNames, leagues.length]);
+
+  // ── Lazy-load per-season rows only when a season-based register is selected ──
+  // This runs a FILTERED query — only fetches a few seasons of data, not all time.
+  const loadSeasonRows = useCallback(async () => {
+    if (seasonLoaded || seasonLoading) return;
+    setSeasonLoading(true);
+    try {
+      const rows = await cachedQuery("leaders:seasons:v2-teamid", async () => {
+        // Fetch all season rows — but only the columns we need
+        // These are already filtered per-season (no aggregation) so each row is small
+        const PAGE = 1000;
+        const all: any[] = [];
+        let from = 0;
+        while (true) {
+          const { data, error } = await supabase
+            .from("player_season_stats")
+            .select(SEASON_SELECT)
+            .range(from, from + PAGE - 1)
+            .order("SeasonID", { ascending: false });
+          if (error) throw new Error(error.message);
+          if (!data || data.length === 0) break;
+          all.push(...data);
+          if (data.length < PAGE) break;
+          from += PAGE;
+        }
+        return all;
+      });
+      const mapped = (rows as any[]).map(r => mapSeasonRow(r, intlNames));
+      setSeasonRows(mapped);
+      setSeasonLoaded(true);
+    } catch (err) {
+      console.error("Season rows error:", err);
+    } finally {
+      setSeasonLoading(false);
+    }
+  }, [seasonLoaded, seasonLoading, intlNames]);
+
+  useEffect(() => {
+    if (["season", "progressive", "yearly", "yby"].includes(register)) {
+      loadSeasonRows();
+    }
+  }, [register, loadSeasonRows]);
+
+  // ── Filtered views ───────────────────────────────────────────────────────────
+  const filteredCareer = useMemo(() =>
+    careerRows.filter(r => scope === "club" ? !r.isIntl : r.isIntl),
     [careerRows, scope]
   );
-  const filteredSeason = useMemo(
-    () => rawRows.filter(r => {
-      const isIntl = intlNames.has(r.LeagueName || "");
+  // Classify each player by their career-level scope (matches the Career tab logic)
+  // so per-season tabs (progressive, season, yearly) include the same totals.
+  const playerScope = useMemo(() => {
+    const m = new Map<string, boolean>(); // key: PlayerID||Position → isIntl
+    careerRows.forEach(r => {
+      m.set(`${r.PlayerID}||${r.Position}`, r.isIntl);
+    });
+    return m;
+  }, [careerRows]);
+  const filteredSeason = useMemo(() =>
+    seasonRows.filter(r => {
+      const isIntl = playerScope.get(`${r.PlayerID}||${r.Position}`);
+      if (isIntl === undefined) return scope === "club" ? !r.isIntl : r.isIntl;
       return scope === "club" ? !isIntl : isIntl;
     }),
-    [rawRows, intlNames, scope]
+    [seasonRows, scope, playerScope]
   );
-
-  const maxSeason = useMemo(
-    () => filteredCareer.reduce((m, r) => Math.max(m, r.LatestSeason), 0),
+  const maxSeason = useMemo(() =>
+    filteredCareer.reduce((m, r) => Math.max(m, r.LatestSeason || 0), 0),
     [filteredCareer]
   );
 
-  // Leaderboard
-  const statInfo = STATS.find(s => s.key === stat)!;
-  const reqPos   = statInfo.requirePos;
-
+  // ── Leaderboard computation ──────────────────────────────────────────────────
+  const statInfo   = STATS.find(s => s.key === stat)!;
+  const reqPos     = statInfo.requirePos;
+  const higherBetter = statInfo.higher;
   const sortFn = (a: any, b: any) => {
     const va = val(a, stat), vb = val(b, stat);
     if (va === null && vb === null) return 0;
     if (va === null) return 1; if (vb === null) return -1;
-    return statInfo.higher ? vb - va : va - vb;
+    return higherBetter ? vb - va : va - vb;
   };
-  const isValid = (r: any) =>
+  const filterValid = (r: any) =>
     val(r, stat) !== null && (!reqPos || r.Position === reqPos);
 
   const leaderboard = useMemo(() => {
     if (register === "career") {
-      return filteredCareer.filter(isValid).sort(sortFn).slice(0, 25)
-        .map(r => ({ ...r, statVal: val(r, stat), SeasonID: null }));
+      return filteredCareer.filter(filterValid).sort(sortFn).slice(0, 25)
+        .map(r => ({ ...r, statVal: val(r, stat), season: null }));
     }
     if (register === "active") {
-      const top2 = [...new Set(filteredCareer.map(r => r.LatestSeason))].sort((a, b) => b - a).slice(0, 2);
-      const minS  = top2[top2.length - 1] ?? maxSeason;
-      return filteredCareer.filter(r => r.LatestSeason >= minS && isValid(r)).sort(sortFn).slice(0, 25)
-        .map(r => ({ ...r, statVal: val(r, stat), SeasonID: null }));
+      const recentSeasons = [...new Set(filteredCareer.map(r => r.LatestSeason))]
+        .sort((a,b) => b - a).slice(0, 2);
+      const minSeason = recentSeasons[recentSeasons.length - 1] ?? maxSeason;
+      return filteredCareer
+        .filter(r => r.LatestSeason >= minSeason && filterValid(r))
+        .sort(sortFn).slice(0, 25)
+        .map(r => ({ ...r, statVal: val(r, stat), season: null }));
     }
-    if (register === "season") {
-      return filteredSeason.filter(isValid).sort(sortFn).slice(0, 25)
+    if (register === "season" && seasonLoaded) {
+      return filteredSeason.filter(filterValid).sort(sortFn).slice(0, 25)
         .map(r => ({ ...r, statVal: val(r, stat) }));
     }
-    if (register === "progressive") {
+    if (register === "progressive" && seasonLoaded) {
       const cum = new Map<string, any>();
       const results: any[] = [];
-      const seasons = [...new Set(filteredSeason.map(r => r.SeasonID).filter(Boolean))].sort((a, b) => (a as number) - (b as number)) as number[];
+      const seasons = [...new Set(filteredSeason.map(r => r.SeasonID))].sort((a,b) => a-b);
       seasons.forEach(sid => {
         filteredSeason.filter(r => r.SeasonID === sid).forEach(r => {
-          const key = `${r.PlayerID ?? r.PlayerName}|${r.Position}`;
-          const c = cum.get(key) || { ...r, GP:0,G:0,GSC:0,KS:0,KSF:0,BH:0,TF:0,TP:0,MIN:0,SA:0,SS:0,PA:0,PC:0,KPA:0,KPC:0 };
-          c.GP+=(r.GamesPlayed??0); c.G+=(r.Goals??0); c.GSC+=(r.GoldenSnitchCatches??0);
-          c.KS+=(r.KeeperSaves??0); c.KSF+=(r.KeeperShotsFaced??0); c.BH+=(r.BludgersHit??0);
-          c.TF+=(r.TurnoversForced??0); c.TP+=(r.TeammatesProtected??0); c.MIN+=(r.MinPlayed??0);
-          c.SA+=(r.ShotAtt??0); c.SS+=(r.ShotScored??0); c.PA+=(r.PassAtt??0); c.PC+=(r.PassComp??0);
-          c.KPA+=(r.KeeperPassAtt??0); c.KPC+=(r.KeeperPassComp??0);
-          c.TeamFullName=r.TeamFullName; c.LeagueName=r.LeagueName;
+          const key = `${r.PlayerID ?? r.PlayerName}||${r.Position}`;
+          const c = cum.get(key) || { ...r, FullName: null, LeagueName: null, GP:0,G:0,GSC:0,KS:0,KSF:0,BH:0,TF:0,TP:0,MIN:0,ShotAtt:0,ShotScored:0,PassAtt:0,PassComp:0,KPassAtt:0,KPassComp:0 };
+          c.GP+=r.GP; c.G+=r.G; c.GSC+=r.GSC; c.KS+=r.KS; c.KSF+=r.KSF;
+          c.BH+=r.BH; c.TF+=r.TF; c.TP+=r.TP; c.MIN+=r.MIN;
+          c.ShotAtt+=r.ShotAtt; c.ShotScored+=r.ShotScored;
+          c.PassAtt+=r.PassAtt; c.PassComp+=r.PassComp;
+          c.KPassAtt+=r.KPassAtt; c.KPassComp+=r.KPassComp;
+          // Only adopt team/league from rows matching the current scope,
+          // so a club-view leader doesn't display their national team.
+          const rowMatchesScope = scope === "club" ? !r.isIntl : r.isIntl;
+          if (rowMatchesScope) {
+            c.FullName = r.FullName ?? (r as any).TeamFullName ?? c.FullName;
+            c.LeagueName = r.LeagueName ?? c.LeagueName;
+          }
           cum.set(key, c);
         });
-        const snap = [...cum.values()].filter(isValid).sort(sortFn);
+        const snap = [...cum.values()].filter(filterValid).sort(sortFn);
         if (!snap.length) return;
         const topVal = val(snap[0], stat);
         const leaders = snap.filter(r => val(r, stat) === topVal);
@@ -326,86 +481,89 @@ export default function LeadersIndex() {
       return results;
     }
     return [];
-  }, [filteredCareer, filteredSeason, stat, register, maxSeason, scope]);
+  }, [filteredCareer, filteredSeason, stat, register, seasonLoaded, maxSeason, scope]);
 
   const yearlyData = useMemo(() => {
-    if (!["yearly", "yby"].includes(register)) return [];
+    if (!["yearly","yby"].includes(register) || !seasonLoaded) return [];
+    const sortFnLocal = sortFn;
+    const filterValidLocal = filterValid;
 
     if (register === "yearly") {
-      const groups = new Map<string, RawRow[]>();
+      const groups = new Map<string, SeasonRow[]>();
       filteredSeason.forEach(r => {
-        const k = `${r.SeasonID}|${r.LeagueName}`;
+        const k = `${r.SeasonID}||${r.LeagueName}`;
         if (!groups.has(k)) groups.set(k, []);
         groups.get(k)!.push(r);
       });
       const results: any[] = [];
       groups.forEach((rows, key) => {
-        const [sidStr, league] = key.split("|");
-        const valid = rows.filter(isValid).sort(sortFn);
+        const [sidStr, league] = key.split("||");
+        const valid = rows.filter(filterValidLocal).sort(sortFnLocal);
         if (!valid.length) return;
         const topVal = val(valid[0], stat);
         const leaders = valid.filter(r => val(r, stat) === topVal);
         results.push({ seasonID: parseInt(sidStr), league,
-          entry: { ...leaders[0], _leaders: leaders, _isTie: leaders.length > 1,
-            PlayerName: leaders.map(l => l.PlayerName).join(" / "), statVal: topVal }});
+          entry: { ...leaders[0], _leaders: leaders, _isTie: leaders.length>1,
+            PlayerName: leaders.map(l=>l.PlayerName).join(" / "),
+            statVal: topVal, season: parseInt(sidStr) }});
       });
-      return results.sort((a, b) => a.seasonID - b.seasonID || a.league.localeCompare(b.league));
+      return results.sort((a,b) => a.seasonID-b.seasonID || a.league.localeCompare(b.league));
     }
-
     // yby
-    const groups2 = new Map<number, RawRow[]>();
+    const groups2 = new Map<number, SeasonRow[]>();
     filteredSeason.forEach(r => {
-      if (r.SeasonID == null) return;
       if (!groups2.has(r.SeasonID)) groups2.set(r.SeasonID, []);
       groups2.get(r.SeasonID)!.push(r);
     });
     const results2: any[] = [];
     groups2.forEach((rows, sid) => {
-      const valid = rows.filter(isValid).sort(sortFn);
+      const valid = rows.filter(filterValidLocal).sort(sortFnLocal);
       if (!valid.length) return;
       const topVal = val(valid[0], stat);
       const leaders = valid.filter(r => val(r, stat) === topVal);
       results2.push({ seasonID: sid, league: "",
-        entry: { ...leaders[0], _leaders: leaders, _isTie: leaders.length > 1,
-          PlayerName: leaders.map(l => l.PlayerName).join(" / "), statVal: topVal }});
+        entry: { ...leaders[0], _leaders: leaders, _isTie: leaders.length>1,
+          PlayerName: leaders.map(l=>l.PlayerName).join(" / "),
+          statVal: topVal, season: sid }});
     });
-    return results2.sort((a, b) => a.seasonID - b.seasonID);
-  }, [filteredSeason, stat, register, scope]);
+    return results2.sort((a,b) => a.seasonID-b.seasonID);
+  }, [filteredSeason, stat, register, seasonLoaded, scope]);
 
   // ── Rendering ────────────────────────────────────────────────────────────────
-  const showSeason = ["season", "progressive", "yearly", "yby"].includes(register);
-  const thCls = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground";
+  const showSeason = ["season","progressive","yearly","yby"].includes(register);
+  const loading = careerLoading || (showSeason && seasonLoading);
 
   const PlayerLink = ({ name, pid }: { name: string; pid?: number | null }) =>
     pid ? <Link to={`/player/${pid}`} className="text-accent hover:underline">{name}</Link>
-        : <span>{name}</span>;
+        : <span className="text-foreground">{name}</span>;
+
+  const thCls = "px-3 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground";
 
   const renderRow = (entry: any, i: number) => {
     const lid = entry.LeagueName ? lgIdByName.get(entry.LeagueName) : null;
-    const team = entry.TeamFullName;
     return (
-      <tr key={`${entry.PlayerName}-${entry.SeasonID}-${i}`}
-        className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20 transition-colors`}>
-        <td className="px-3 py-1.5 font-mono text-muted-foreground text-sm w-8">{i + 1}</td>
+      <tr key={`${entry.PlayerName}-${i}`}
+        className={`border-t border-border ${i%2===1?"bg-table-stripe":"bg-card"} hover:bg-highlight/20 transition-colors`}>
+        <td className="px-3 py-1.5 font-mono text-muted-foreground text-sm w-8">{i+1}</td>
         <td className="px-3 py-1.5 font-medium">
           {entry._isTie
-            ? <span>{(entry._leaders as any[]).map((l: any, li: number) => (
-                <span key={li}>{li > 0 && " / "}<PlayerLink name={l.PlayerName} pid={l.PlayerID} /></span>
+            ? <span>{(entry._leaders as any[]).map((l:any,li:number)=>(
+                <span key={li}>{li>0&&" / "}<PlayerLink name={l.PlayerName} pid={l.PlayerID}/></span>
               ))}<span className="text-muted-foreground text-xs ml-1">(tie)</span></span>
-            : <PlayerLink name={entry.PlayerName} pid={entry.PlayerID} />}
+            : <PlayerLink name={entry.PlayerName} pid={entry.PlayerID}/>}
         </td>
-        <td className="px-3 py-1.5 text-muted-foreground text-xs">{entry.Position || "—"}</td>
+        <td className="px-3 py-1.5 text-muted-foreground text-xs">{entry.Position||"—"}</td>
         <td className="px-3 py-1.5 text-xs">
-          {team
-            ? <Link to={`/team/${encodeURIComponent(team)}`} className="text-accent hover:underline">{team}</Link>
+          {entry.FullName
+            ? <Link to={`/team/${encodeURIComponent(entry.FullName)}`} className="text-accent hover:underline">{entry.FullName}</Link>
             : "—"}
         </td>
         {showSeason && (
           <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">
             {entry.SeasonID
               ? lid
-                ? <Link to={`/league/${lid}/history`} className="text-accent hover:underline">{sl(entry.SeasonID)}</Link>
-                : sl(entry.SeasonID)
+                ? <Link to={`/league/${lid}/history`} className="text-accent hover:underline">{seasonLabel(entry.SeasonID)}</Link>
+                : seasonLabel(entry.SeasonID)
               : "—"}
           </td>
         )}
@@ -416,12 +574,12 @@ export default function LeadersIndex() {
 
   const Skeleton = () => (
     <div className="bg-card">
-      {[...Array(15)].map((_, i) => (
-        <div key={i} className={`border-t border-border px-3 py-2.5 flex gap-4 animate-pulse ${i % 2 === 1 ? "bg-table-stripe" : ""}`}>
-          <div className="w-5 h-3 bg-secondary rounded shrink-0" />
-          <div className="h-3 bg-secondary rounded" style={{ width: `${35 + (i * 19) % 40}%` }} />
-          <div className="h-3 bg-secondary rounded w-12 ml-auto" />
-          <div className="h-3 bg-secondary rounded w-16" />
+      {[...Array(15)].map((_,i) => (
+        <div key={i} className={`border-t border-border px-3 py-2.5 flex gap-4 animate-pulse ${i%2===1?"bg-table-stripe":""}`}>
+          <div className="w-5 h-3 bg-secondary rounded shrink-0"/>
+          <div className="h-3 bg-secondary rounded" style={{width:`${35+(i*19)%40}%`}}/>
+          <div className="h-3 bg-secondary rounded w-12 ml-auto"/>
+          <div className="h-3 bg-secondary rounded w-16"/>
         </div>
       ))}
     </div>
@@ -439,10 +597,10 @@ export default function LeadersIndex() {
           <th className={`${thCls} text-right`}>{statInfo.abbr}</th>
         </tr></thead>
         <tbody>
-          {rows.map((r, i) => renderRow(r, i))}
-          {rows.length === 0 && (
-            <tr><td colSpan={showSeason ? 6 : 5} className="px-3 py-8 text-center text-muted-foreground italic">
-              No data available.
+          {rows.map((r,i) => renderRow(r,i))}
+          {rows.length===0 && (
+            <tr><td colSpan={showSeason?6:5} className="px-3 py-8 text-center text-muted-foreground italic">
+              {seasonLoading ? "Loading season data…" : "No data available."}
             </td></tr>
           )}
         </tbody>
@@ -450,75 +608,80 @@ export default function LeadersIndex() {
     </div>
   );
 
-  const renderYearly = () => yearlyData.length === 0
-    ? <p className="text-muted-foreground font-sans py-8 text-center italic px-3">No data available.</p>
-    : <div className="overflow-x-auto"><table className="w-full text-sm font-sans">
-        <thead><tr className="bg-secondary">
-          <th className={`${thCls} text-left`}>Season</th>
-          {register === "yearly" && <th className={`${thCls} text-left`}>League</th>}
-          <th className={`${thCls} text-left`}>Player</th>
-          <th className={`${thCls} text-left`}>Pos</th>
-          <th className={`${thCls} text-left`}>Team</th>
-          <th className={`${thCls} text-right`}>{statInfo.abbr}</th>
-        </tr></thead>
-        <tbody>{yearlyData.map((g, i) => {
-          const e = g.entry;
-          const lid = g.league ? lgIdByName.get(g.league) : null;
-          return (
-            <tr key={`${g.seasonID}-${g.league}-${i}`}
-              className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
-              <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">
-                {lid ? <Link to={`/league/${lid}/history`} className="text-accent hover:underline">{sl(g.seasonID)}</Link> : sl(g.seasonID)}
-              </td>
-              {register === "yearly" && (
-                <td className="px-3 py-1.5 text-xs text-muted-foreground">
-                  {lid ? <Link to={`/league/${lid}`} className="hover:underline hover:text-accent">{g.league}</Link> : g.league}
+  const renderYearly = () => (
+    yearlyData.length === 0
+      ? <p className="text-muted-foreground font-sans py-8 text-center italic px-3">
+          {seasonLoading ? "Loading season data…" : "No data available."}
+        </p>
+      : <div className="overflow-x-auto"><table className="w-full text-sm font-sans">
+          <thead><tr className="bg-secondary">
+            <th className={`${thCls} text-left`}>Season</th>
+            {register==="yearly" && <th className={`${thCls} text-left`}>League</th>}
+            <th className={`${thCls} text-left`}>Player</th>
+            <th className={`${thCls} text-left`}>Pos</th>
+            <th className={`${thCls} text-left`}>Team</th>
+            <th className={`${thCls} text-right`}>{statInfo.abbr}</th>
+          </tr></thead>
+          <tbody>{yearlyData.map((g,i) => {
+            const e = g.entry;
+            const lid = g.league ? lgIdByName.get(g.league) : null;
+            return (
+              <tr key={`${g.seasonID}-${g.league}-${i}`}
+                className={`border-t border-border ${i%2===1?"bg-table-stripe":"bg-card"} hover:bg-highlight/20`}>
+                <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">
+                  {lid ? <Link to={`/league/${lid}/history`} className="text-accent hover:underline">{seasonLabel(g.seasonID)}</Link> : seasonLabel(g.seasonID)}
                 </td>
-              )}
-              <td className="px-3 py-1.5 font-medium">
-                {e._isTie
-                  ? <span>{(e._leaders as any[]).map((l: any, li: number) => (
-                      <span key={li}>{li > 0 && " / "}<PlayerLink name={l.PlayerName} pid={l.PlayerID} /></span>
-                    ))}<span className="text-muted-foreground text-xs ml-1">(tie)</span></span>
-                  : <PlayerLink name={e.PlayerName} pid={e.PlayerID} />}
-              </td>
-              <td className="px-3 py-1.5 text-xs text-muted-foreground">{e.Position}</td>
-              <td className="px-3 py-1.5 text-xs">
-                {e.TeamFullName ? <Link to={`/team/${encodeURIComponent(e.TeamFullName)}`} className="text-accent hover:underline">{e.TeamFullName}</Link> : "—"}
-              </td>
-              <td className="px-3 py-1.5 text-right font-mono font-bold">{fmt(e.statVal, stat)}</td>
-            </tr>
-          );
-        })}</tbody>
-      </table></div>;
+                {register==="yearly" && <td className="px-3 py-1.5 text-xs text-muted-foreground">
+                  {lid ? <Link to={`/league/${lid}`} className="hover:underline hover:text-accent">{g.league}</Link> : g.league}
+                </td>}
+                <td className="px-3 py-1.5 font-medium">
+                  {e._isTie
+                    ? <span>{(e._leaders as any[]).map((l:any,li:number)=>(
+                        <span key={li}>{li>0&&" / "}<PlayerLink name={l.PlayerName} pid={l.PlayerID}/></span>
+                      ))}<span className="text-muted-foreground text-xs ml-1">(tie)</span></span>
+                    : <PlayerLink name={e.PlayerName} pid={e.PlayerID}/>}
+                </td>
+                <td className="px-3 py-1.5 text-xs text-muted-foreground">{e.Position}</td>
+                <td className="px-3 py-1.5 text-xs">
+                  {e.FullName ? <Link to={`/team/${encodeURIComponent(e.FullName)}`} className="text-accent hover:underline">{e.FullName}</Link> : "—"}
+                </td>
+                <td className="px-3 py-1.5 text-right font-mono font-bold">{fmt(e.statVal, stat)}</td>
+              </tr>
+            );
+          })}</tbody>
+        </table></div>
+  );
 
   return (
     <div className="min-h-screen bg-background flex flex-col pb-14 md:pb-0">
-      <SiteHeader />
+      <SiteHeader/>
       <main className="flex-1 container py-8">
         <div className="mb-6 border-b-2 border-primary pb-2">
           <h1 className="font-display text-3xl font-bold text-foreground">Statistical Leaders</h1>
           <p className="text-sm text-muted-foreground font-sans mt-1">All-time records and seasonal leaderboards</p>
         </div>
 
+        {/* Scope */}
         <div className="flex gap-2 mb-4">
-          {(["club", "intl"] as const).map(s => (
+          {(["club","intl"] as const).map(s => (
             <button key={s} onClick={() => setParam("scope", s)}
-              className={`px-4 py-2 text-sm font-sans font-medium rounded transition-colors ${scope === s ? "bg-primary text-primary-foreground" : "bg-secondary text-muted-foreground hover:text-foreground"}`}>
-              {s === "club" ? "Club Stats" : "International Stats"}
+              className={`px-4 py-2 text-sm font-sans font-medium rounded transition-colors ${scope===s?"bg-primary text-primary-foreground":"bg-secondary text-muted-foreground hover:text-foreground"}`}>
+              {s==="club" ? "Club Stats" : "International Stats"}
             </button>
           ))}
         </div>
 
+        {/* Register tabs */}
         <div className="flex gap-0 mb-4 border-b border-border overflow-x-auto scrollbar-hide">
           {REGS.map(r => (
             <button key={r.key} onClick={() => setParam("reg", r.key)}
-              className={`px-3 py-2 text-sm font-sans font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${register === r.key ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+              className={`px-3 py-2 text-sm font-sans font-medium border-b-2 -mb-px whitespace-nowrap transition-colors ${register===r.key?"border-primary text-foreground":"border-transparent text-muted-foreground hover:text-foreground"}`}>
               {r.label}
             </button>
           ))}
         </div>
 
+        {/* Stat selector */}
         <div className="mb-4 flex items-center gap-3 flex-wrap">
           <label className="text-sm font-sans font-medium text-muted-foreground">Statistic:</label>
           <select value={stat} onChange={e => setParam("stat", e.target.value)}
@@ -533,31 +696,35 @@ export default function LeadersIndex() {
           {statInfo.minGP && <span className="text-xs text-muted-foreground font-sans">Min {statInfo.minGP} GP</span>}
         </div>
 
-        {error && (
+        {careerError && (
           <div className="mb-4 border border-red-500/40 rounded bg-red-500/10 px-4 py-3 text-sm text-red-600 dark:text-red-400 font-sans">
-            {error}
-            <button onClick={() => window.location.reload()} className="ml-3 underline hover:no-underline">Retry</button>
+            {careerError}
+            <button onClick={() => { setCareerError(null); setCareerLoading(true); }}
+              className="ml-3 underline hover:no-underline">Retry</button>
           </div>
         )}
 
+        {/* Main leaderboard */}
         <div className="border border-border rounded overflow-hidden">
           <div className="bg-table-header px-3 py-2 flex items-center justify-between">
             <h3 className="font-display text-sm font-bold text-table-header-foreground">
-              {REGS.find(r => r.key === register)?.label} — {statInfo.label}
-              {!loading && rawRows.length > 0 && (
+              {REGS.find(r=>r.key===register)?.label} — {statInfo.label}
+              {!careerLoading && filteredCareer.length > 0 && (
                 <span className="text-table-header-foreground/60 font-sans font-normal text-xs ml-2">
                   ({filteredCareer.length} players)
                 </span>
               )}
             </h3>
           </div>
-          {loading ? <Skeleton />
-            : register === "yearly" || register === "yby" ? renderYearly()
-            : renderTable(leaderboard)}
+          {loading
+            ? <Skeleton/>
+            : register==="yearly"||register==="yby"
+              ? renderYearly()
+              : renderTable(leaderboard)}
         </div>
       </main>
-      <SiteFooter />
-      <MobileBottomNav />
+      <SiteFooter/>
+      <MobileBottomNav/>
     </div>
   );
 }
