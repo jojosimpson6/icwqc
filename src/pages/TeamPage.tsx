@@ -704,10 +704,18 @@ export default function TeamPage() {
                 </span>
               )}
             </div>
-            <div>
-              <h1 className="font-display text-3xl font-bold" style={safeTextColor ? { color: safeTextColor } : undefined}>
-                {team.FullName}
-              </h1>
+            <div className="flex-1">
+              <div className="flex items-start justify-between gap-2">
+                <h1 className="font-display text-3xl font-bold" style={safeTextColor ? { color: safeTextColor } : undefined}>
+                  {team.FullName}
+                </h1>
+                <Link
+                  to={`/compare?mode=teams&t1=${team.TeamID}`}
+                  className="text-xs font-sans text-muted-foreground hover:text-accent border border-border rounded px-2 py-1 hover:border-accent transition-colors shrink-0 mt-1.5"
+                >
+                  Compare →
+                </Link>
+              </div>
               <p className="text-sm text-muted-foreground font-sans mt-1">
                 {team.City}{team.Country ? `, ${team.Country}` : ""}
                 {team.Nickname ? ` — "${team.Nickname}"` : ""}
