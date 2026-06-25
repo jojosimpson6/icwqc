@@ -1260,6 +1260,64 @@ export default function PlayerProfile() {
                   );
                 })}
 
+                {/* ── Team Competition Wins ── */}
+                {teamCompWins.length > 0 && (() => {
+                  // Group by leagueId → list of { seasonId, teamName }
+                  const byLeague = new Map<number, { leagueName: string; entries: { seasonId: number; teamName: string }[] }>();
+                  teamCompWins.forEach(w => {
+                    if (!byLeague.has(w.leagueId)) byLeague.set(w.leagueId, { leagueName: w.leagueName, entries: [] });
+                    byLeague.get(w.leagueId)!.entries.push({ seasonId: w.seasonId, teamName: w.teamName });
+                  });
+                  const leagueIds = [...byLeague.keys()].sort((a, b) => a - b);
+                  return (
+                    <div className="border-t border-border">
+                      <div className="px-3 py-1.5 bg-secondary/40">
+                        <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Team Competition Wins</span>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm font-sans">
+                          <thead>
+                            <tr className="bg-secondary/30">
+                              <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground w-48">Competition</th>
+                              <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Seasons</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {leagueIds.map((lid, i) => {
+                              const grp = byLeague.get(lid)!;
+                              const sorted = [...grp.entries].sort((a, b) => a.seasonId - b.seasonId);
+                              return (
+                                <tr key={lid} className={`border-t border-border/50 ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
+                                  <td className="px-3 py-2 font-medium text-foreground text-sm align-top">
+                                    <Link to={`/league/${lid}`} className="hover:text-accent hover:underline">
+                                      {grp.leagueName}
+                                    </Link>
+                                  </td>
+                                  <td className="px-3 py-2">
+                                    <div className="flex flex-wrap gap-1.5">
+                                      {sorted.map(e => (
+                                        <span
+                                          key={`${e.seasonId}-${e.teamName}`}
+                                          title={`${e.teamName} — Champion`}
+                                          className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
+                                        >
+                                          <span className="font-bold">🏆</span>
+                                          <span>{seasonLabel(e.seasonId)}</span>
+                                          <span className="opacity-70">{e.teamName}</span>
+                                        </span>
+                                      ))}
+                                    </div>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  );
+                })()}
+
                 {/* ── Leaderboard appearances ── */}
                 {leaderGroups.size > 0 && (
                   <div className="border-t border-border">
