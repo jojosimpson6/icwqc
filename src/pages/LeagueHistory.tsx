@@ -230,6 +230,38 @@ export default function LeagueHistory() {
           });
           const sortedWeeks = [...weekGroups.keys()].sort((a,b)=>a-b);
 
+          // Americas Cup (LeagueID 17): Final is a round-robin in weeks 6, 7, 8.
+          // Rank by wins, tiebreaker = goal difference.
+          if (lid === 17) {
+            const finalWeeks = [6, 7, 8].filter(w => weekGroups.has(w));
+            if (!finalWeeks.length) return;
+            const stats = new Map<number,{w:number;gf:number;ga:number}>();
+            const bump = (id:number) => { if (!stats.has(id)) stats.set(id,{w:0,gf:0,ga:0}); return stats.get(id)!; };
+            finalWeeks.forEach(fw => {
+              (weekGroups.get(fw)||[]).forEach((m:any) => {
+                if (!m.HomeTeamID || !m.AwayTeamID) return;
+                const h = bump(m.HomeTeamID), a = bump(m.AwayTeamID);
+                const hs = m.HomeTeamScore||0, as = m.AwayTeamScore||0;
+                h.gf += hs; h.ga += as; a.gf += as; a.ga += hs;
+                if (hs > as) h.w += 1;
+                else if (as > hs) a.w += 1;
+              });
+            });
+            const ranked = [...stats.entries()].sort((a,b) => {
+              if (b[1].w !== a[1].w) return b[1].w - a[1].w;
+              return (b[1].gf - b[1].ga) - (a[1].gf - a[1].ga);
+            });
+            summaries.push({
+              seasonId: sid,
+              champion: ranked[0] ? (tMap[ranked[0][0]]||null) : null,
+              runnerUp: ranked[1] ? (tMap[ranked[1][0]]||null) : null,
+              third:    ranked[2] ? (tMap[ranked[2][0]]||null) : null,
+              isCupFinal: true,
+              teams: [],
+            });
+            return;
+          }
+
           // Map each week to its round label, collapsing consecutive two-leg rounds
           const weekToRound = buildRoundLabels(weekGroups, sortedWeeks);
 
