@@ -1060,7 +1060,7 @@ export default function PlayerProfile() {
           </div>
 
           {/* Awards & Honours — Baseball Reference style */}
-          {(playerAwards.length > 0 || leagueLeaders.length > 0) && (() => {
+          {(playerAwards.length > 0 || leagueLeaders.length > 0 || teamCompWins.length > 0) && (() => {
             const plLabel = (n: number) => n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : `${n}th`;
             const plColor = (n: number) =>
               n === 1 ? "text-yellow-600 dark:text-yellow-400 font-bold"
