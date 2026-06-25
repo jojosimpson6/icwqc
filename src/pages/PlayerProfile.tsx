@@ -373,6 +373,180 @@ export default function PlayerProfile() {
     });
   }, [id]);
 
+  // ── Team Competition Wins ──
+  // For each (LeagueID, SeasonID, TeamName) the player appeared in, check whether that team
+  // won the competition that season. Cup leagues (CUP_IDS) are resolved via results final;
+  // round-robin leagues via the standings table.
+  const CUP_IDS_SET = new Set([15, 16, 17, 18, 19, 20, 21]);
+  useEffect(() => {
+    if (!stats.length || leagueNameMap.size === 0) { setTeamCompWins([]); return; }
+    const leagueIdByName = new Map<string, number>();
+    leagueNameMap.forEach((name, lid) => leagueIdByName.set(name, lid));
+
+    // Unique (leagueId, seasonId, teamName) tuples this player appeared in
+    const tuples = new Map<string, { leagueId: number; seasonId: number; teamName: string }>();
+    stats.forEach(s => {
+      if (!s.LeagueName || !s.SeasonID || !s.TeamFullName) return;
+      const lid = leagueIdByName.get(s.LeagueName);
+      if (!lid) return;
+      const key = `${lid}|${s.SeasonID}|${s.TeamFullName}`;
+      if (!tuples.has(key)) tuples.set(key, { leagueId: lid, seasonId: s.SeasonID, teamName: s.TeamFullName });
+    });
+    if (tuples.size === 0) return;
+
+    // Split into league vs cup unique (leagueId, seasonId)
+    const leagueSeasons = new Map<string, { leagueId: number; seasonId: number }>();
+    const cupSeasons = new Map<string, { leagueId: number; seasonId: number }>();
+    tuples.forEach(t => {
+      const k = `${t.leagueId}|${t.seasonId}`;
+      if (CUP_IDS_SET.has(t.leagueId)) cupSeasons.set(k, { leagueId: t.leagueId, seasonId: t.seasonId });
+      else leagueSeasons.set(k, { leagueId: t.leagueId, seasonId: t.seasonId });
+    });
+
+    (async () => {
+      const wins: { leagueId: number; leagueName: string; seasonId: number; teamName: string }[] = [];
+
+      // ── Round-robin league champions via standings ──
+      if (leagueSeasons.size > 0) {
+        const seasonIds = [...new Set([...leagueSeasons.values()].map(v => v.seasonId))];
+        const leagueIds = [...new Set([...leagueSeasons.values()].map(v => v.leagueId))];
+        const { data: stData } = await supabase
+          .from("standings")
+          .select('"LeagueID","SeasonID","FullName",totalpoints')
+          .in("SeasonID", seasonIds)
+          .in("LeagueID", leagueIds);
+        const champByKey = new Map<string, string>();
+        const bestPts = new Map<string, number>();
+        (stData || []).forEach((r: any) => {
+          const k = `${r.LeagueID}|${r.SeasonID}`;
+          if (!leagueSeasons.has(k)) return;
+          const pts = r.totalpoints || 0;
+          if (!bestPts.has(k) || pts > (bestPts.get(k) || 0)) {
+            bestPts.set(k, pts);
+            champByKey.set(k, r.FullName || "");
+          }
+        });
+        tuples.forEach(t => {
+          if (CUP_IDS_SET.has(t.leagueId)) return;
+          const k = `${t.leagueId}|${t.seasonId}`;
+          if (champByKey.get(k) === t.teamName) {
+            wins.push({ leagueId: t.leagueId, leagueName: leagueNameMap.get(t.leagueId) || "", seasonId: t.seasonId, teamName: t.teamName });
+          }
+        });
+      }
+
+      // ── Cup champions via results ──
+      if (cupSeasons.size > 0) {
+        const cupLeagueIds = [...new Set([...cupSeasons.values()].map(v => v.leagueId))];
+        const cupSeasonIds = [...new Set([...cupSeasons.values()].map(v => v.seasonId))];
+        const resultsData = await fetchAllRows("results", {
+          select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID,SeasonID,LeagueID",
+          filters: [
+            { method: "in", args: ["LeagueID", cupLeagueIds] },
+            { method: "in", args: ["SeasonID", cupSeasonIds] },
+          ],
+        });
+        // Need team IDs → names
+        const teamIds = new Set<number>();
+        (resultsData || []).forEach((r: any) => { if (r.HomeTeamID) teamIds.add(r.HomeTeamID); if (r.AwayTeamID) teamIds.add(r.AwayTeamID); });
+        const teamNameById = new Map<number, string>();
+        if (teamIds.size > 0) {
+          const chunks = Array.from({ length: Math.ceil(teamIds.size / 100) }, (_, i) => [...teamIds].slice(i * 100, (i + 1) * 100));
+          await Promise.all(chunks.map(async ch => {
+            const { data } = await supabase.from("teams").select('"TeamID","FullName"').in("TeamID", ch);
+            (data || []).forEach((t: any) => { if (t.TeamID && t.FullName) teamNameById.set(t.TeamID, t.FullName); });
+          }));
+        }
+
+        // Group results by (leagueId, seasonId)
+        const byKey = new Map<string, any[]>();
+        (resultsData || []).forEach((r: any) => {
+          const k = `${r.LeagueID}|${r.SeasonID}`;
+          if (!cupSeasons.has(k)) return;
+          if (!byKey.has(k)) byKey.set(k, []);
+          byKey.get(k)!.push(r);
+        });
+
+        const champByKey = new Map<string, string>();
+        byKey.forEach((matches, key) => {
+          const [lidStr] = key.split("|");
+          const lid = Number(lidStr);
+          const weekGroups = new Map<number, any[]>();
+          matches.forEach(m => {
+            const w = m.WeekID || 0;
+            if (!weekGroups.has(w)) weekGroups.set(w, []);
+            weekGroups.get(w)!.push(m);
+          });
+          const sortedWeeks = [...weekGroups.keys()].sort((a, b) => a - b);
+
+          if (lid === 17) {
+            // Americas Cup round-robin final in weeks 6,7,8
+            const finalWeeks = [6, 7, 8].filter(w => weekGroups.has(w));
+            if (!finalWeeks.length) return;
+            const tally = new Map<number, { w: number; gf: number; ga: number }>();
+            const bump = (tid: number) => { if (!tally.has(tid)) tally.set(tid, { w: 0, gf: 0, ga: 0 }); return tally.get(tid)!; };
+            finalWeeks.forEach(fw => (weekGroups.get(fw) || []).forEach((m: any) => {
+              if (!m.HomeTeamID || !m.AwayTeamID) return;
+              const h = bump(m.HomeTeamID), a = bump(m.AwayTeamID);
+              const hs = m.HomeTeamScore || 0, as = m.AwayTeamScore || 0;
+              h.gf += hs; h.ga += as; a.gf += as; a.ga += hs;
+              if (hs > as) h.w += 1; else if (as > hs) a.w += 1;
+            }));
+            const ranked = [...tally.entries()].sort((a, b) => b[1].w - a[1].w || (b[1].gf - b[1].ga) - (a[1].gf - a[1].ga));
+            if (ranked[0]) champByKey.set(key, teamNameById.get(ranked[0][0]) || "");
+            return;
+          }
+
+          // Knockout: aggregate goals across final weeks (consecutive 1-match weeks)
+          const finalWeeks: number[] = [];
+          for (let i = sortedWeeks.length - 1; i >= 0; i--) {
+            const w = sortedWeeks[i];
+            if ((weekGroups.get(w) || []).length === 1) finalWeeks.unshift(w);
+            else break;
+          }
+          if (!finalWeeks.length) return;
+          // If the very last single-match week is the 3rd-place playoff, drop it
+          // Detect by checking if preceding rounds had 2 matches (semis); a 3rd-place match
+          // sits between semis and final as a lone game — but our reverse scan picks up
+          // all trailing single-match weeks. The Final is the LAST one.
+          const teamGoals = new Map<number, number>();
+          const lastFinalWeek = finalWeeks[finalWeeks.length - 1];
+          // Treat the final as weeks with same descriptive role: collapse consecutive trailing 1-match weeks
+          // that are NOT separated by a different round — already done. Aggregate goals across them.
+          finalWeeks.forEach(fw => (weekGroups.get(fw) || []).forEach((m: any) => {
+            if (m.HomeTeamID) teamGoals.set(m.HomeTeamID, (teamGoals.get(m.HomeTeamID) || 0) + (m.HomeTeamScore || 0));
+            if (m.AwayTeamID) teamGoals.set(m.AwayTeamID, (teamGoals.get(m.AwayTeamID) || 0) + (m.AwayTeamScore || 0));
+          }));
+          // If finalWeeks includes 3rd-place playoff plus final, the final winner may be wrong.
+          // Safer: just use the LAST week's match aggregate (single Final leg) if multiple
+          // single-match weeks are present and there's no preceding non-single week between them.
+          if (finalWeeks.length > 1) {
+            teamGoals.clear();
+            (weekGroups.get(lastFinalWeek) || []).forEach((m: any) => {
+              if (m.HomeTeamID) teamGoals.set(m.HomeTeamID, (teamGoals.get(m.HomeTeamID) || 0) + (m.HomeTeamScore || 0));
+              if (m.AwayTeamID) teamGoals.set(m.AwayTeamID, (teamGoals.get(m.AwayTeamID) || 0) + (m.AwayTeamScore || 0));
+            });
+          }
+          const sortedTeams = [...teamGoals.entries()].sort((a, b) => b[1] - a[1]);
+          if (sortedTeams[0]) champByKey.set(key, teamNameById.get(sortedTeams[0][0]) || "");
+        });
+
+        tuples.forEach(t => {
+          if (!CUP_IDS_SET.has(t.leagueId)) return;
+          const k = `${t.leagueId}|${t.seasonId}`;
+          if (champByKey.get(k) === t.teamName) {
+            wins.push({ leagueId: t.leagueId, leagueName: leagueNameMap.get(t.leagueId) || "", seasonId: t.seasonId, teamName: t.teamName });
+          }
+        });
+      }
+
+      wins.sort((a, b) => a.leagueId - b.leagueId || a.seasonId - b.seasonId);
+      setTeamCompWins(wins);
+    })();
+  }, [stats, leagueNameMap]);
+
+
+
 
   if (!player) {
     return (
