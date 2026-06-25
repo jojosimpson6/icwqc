@@ -1236,10 +1236,12 @@ export default function PlayerProfile() {
                                         return uniquePlacements.map(pl => (
                                           <span
                                             key={`toty-${sid}-${pl}`}
+                                            title={isTeamNumber ? `${plLabel(pl)} Team` : `Selection`}
                                             className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono
                                               ${pl === 1 ? "bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
                                                 : pl === 2 ? "bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300"
-                                                : "bg-amber-700/15 border-amber-700/40 text-amber-700 dark:text-amber-500"}`}
+                                                : pl === 3 ? "bg-amber-700/15 border-amber-700/40 text-amber-700 dark:text-amber-500"
+                                                : "bg-muted/40 border-border text-muted-foreground"}`}
                                           >
                                             {isTeamNumber && <span className="font-bold">{plLabel(pl)}</span>}
                                             <span>{seasonLabel(sid)}</span>
