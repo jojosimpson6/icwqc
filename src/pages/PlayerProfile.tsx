@@ -1298,7 +1298,7 @@ export default function PlayerProfile() {
                                           title={`${e.teamName} — Champion`}
                                           className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
                                         >
-                                          <span className="font-bold">🏆</span>
+                                          <span className="font-bold">1st</span>
                                           <span>{seasonLabel(e.seasonId)}</span>
                                           <span className="opacity-70">{e.teamName}</span>
                                         </span>
