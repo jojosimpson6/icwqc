@@ -1145,8 +1145,9 @@ export default function PlayerProfile() {
                         <span className="text-xs text-muted-foreground font-sans">— {lname}</span>
                       </div>
 
-                      {/* Regular awards: one row per award name, columns = winning seasons grouped */}
-                      {awardGroups.size > 0 && (
+                      {/* Unified awards table: regular awards + Team of the Year share one table
+                          so columns, padding and zebra-striping line up consistently. */}
+                      {(awardGroups.size > 0 || toty.length > 0) && (
                         <div className="overflow-x-auto">
                           <table className="w-full text-sm font-sans">
                             <thead>
@@ -1156,109 +1157,105 @@ export default function PlayerProfile() {
                               </tr>
                             </thead>
                             <tbody>
-                              {[...awardGroups.entries()].map(([awardName, entries], ai) => {
-                                // Sort seasons newest first; group by placement
-                                const byPl = new Map<number, AwardEntry[]>();
-                                entries.forEach(e => {
-                                  if (!byPl.has(e.placement)) byPl.set(e.placement, []);
-                                  byPl.get(e.placement)!.push(e);
-                                });
-                                const placements = [...byPl.keys()].sort();
+                              {(() => {
+                                // Build a unified row list: regular awards first, then TOTY (if any).
+                                type RowKind =
+                                  | { kind: "regular"; awardName: string; entries: AwardEntry[] }
+                                  | { kind: "toty" };
+                                const rows: RowKind[] = [...awardGroups.entries()].map(([awardName, entries]) => ({
+                                  kind: "regular" as const, awardName, entries,
+                                }));
+                                if (toty.length > 0) rows.push({ kind: "toty" as const });
 
-                                return (
-                                  <tr key={awardName} className={`border-t border-border/50 ${ai % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
-                                    <td className="px-3 py-2 font-medium text-foreground text-sm align-top">
-                                      <Link to={`/league/${lid}/award/${encodeURIComponent(awardName)}`} className="hover:text-accent hover:underline">
-                                        {awardName}
-                                      </Link>
-                                    </td>
-                                    <td className="px-3 py-2">
-                                      <div className="flex flex-wrap gap-1.5">
-                                        {placements.map(pl => {
-                                          const seasonEntries = byPl.get(pl)!.sort((a, b) => a.seasonid - b.seasonid);
-                                          return seasonEntries.map(e => (
-                                            <span
-                                              key={`${pl}-${e.seasonid}`}
-                                              title={`${plLabel(pl)} place`}
-                                              className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono
-                                                ${pl === 1 ? "bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
-                                                  : pl === 2 ? "bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300"
-                                                  : pl === 3 ? "bg-amber-700/15 border-amber-700/40 text-amber-700 dark:text-amber-500"
-                                                  : "bg-muted/40 border-border text-muted-foreground"}`}
-                                            >
-                                              <span className="font-bold">{plLabel(pl)}</span>
-                                              <span>{seasonLabel(e.seasonid)}</span>
-                                            </span>
-                                          ));
-                                        })}
-                                      </div>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
+                                return rows.map((row, ai) => {
+                                  const stripeCls = ai % 2 === 1 ? "bg-table-stripe" : "bg-card";
+
+                                  if (row.kind === "regular") {
+                                    const byPl = new Map<number, AwardEntry[]>();
+                                    row.entries.forEach(e => {
+                                      if (!byPl.has(e.placement)) byPl.set(e.placement, []);
+                                      byPl.get(e.placement)!.push(e);
+                                    });
+                                    const placements = [...byPl.keys()].sort();
+
+                                    return (
+                                      <tr key={`reg-${row.awardName}`} className={`border-t border-border/50 ${stripeCls}`}>
+                                        <td className="px-3 py-2 font-medium text-foreground text-sm align-top">
+                                          <Link to={`/league/${lid}/award/${encodeURIComponent(row.awardName)}`} className="hover:text-accent hover:underline">
+                                            {row.awardName}
+                                          </Link>
+                                        </td>
+                                        <td className="px-3 py-2">
+                                          <div className="flex flex-wrap gap-1.5">
+                                            {placements.map(pl => {
+                                              const seasonEntries = byPl.get(pl)!.sort((a, b) => a.seasonid - b.seasonid);
+                                              return seasonEntries.map(e => (
+                                                <span
+                                                  key={`${pl}-${e.seasonid}`}
+                                                  title={`${plLabel(pl)} place`}
+                                                  className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono
+                                                    ${pl === 1 ? "bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
+                                                      : pl === 2 ? "bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300"
+                                                      : pl === 3 ? "bg-amber-700/15 border-amber-700/40 text-amber-700 dark:text-amber-500"
+                                                      : "bg-muted/40 border-border text-muted-foreground"}`}
+                                                >
+                                                  <span className="font-bold">{plLabel(pl)}</span>
+                                                  <span>{seasonLabel(e.seasonid)}</span>
+                                                </span>
+                                              ));
+                                            })}
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  }
+
+                                  // TOTY row
+                                  return (
+                                    <tr key="toty" className={`border-t border-border/50 ${stripeCls}`}>
+                                      <td className="px-3 py-2 font-medium text-foreground text-sm align-top">
+                                        <Link to={`/league/${lid}/award/${encodeURIComponent("Team of the Year")}`} className="hover:text-accent hover:underline">
+                                          Team of the Year
+                                        </Link>
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        <div className="flex flex-wrap gap-1.5">
+                                          {totySeasons.map(sid => {
+                                            const entries = totySeasonsMap.get(sid)!;
+                                            const placementCounts = new Map<number, number>();
+                                            entries.forEach(e => placementCounts.set(e.placement, (placementCounts.get(e.placement) || 0) + 1));
+                                            const maxPl = Math.max(...entries.map(e => e.placement));
+                                            const isTeamNumber = maxPl <= 3 || [...placementCounts.values()].some(c => c > 1);
+
+                                            const myPlacements = entries.map(e => e.placement).sort();
+                                            const uniquePlacements = [...new Set(myPlacements)];
+
+                                            return uniquePlacements.map(pl => (
+                                              <span
+                                                key={`toty-${sid}-${pl}`}
+                                                title={isTeamNumber ? `${plLabel(pl)} Team` : `Selection`}
+                                                className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono
+                                                  ${pl === 1 ? "bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
+                                                    : pl === 2 ? "bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300"
+                                                    : pl === 3 ? "bg-amber-700/15 border-amber-700/40 text-amber-700 dark:text-amber-500"
+                                                    : "bg-muted/40 border-border text-muted-foreground"}`}
+                                              >
+                                                {isTeamNumber && <span className="font-bold">{plLabel(pl)}</span>}
+                                                <span>{seasonLabel(sid)}</span>
+                                              </span>
+                                            ));
+                                          })}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                });
+                              })()}
                             </tbody>
                           </table>
                         </div>
                       )}
 
-                      {/* Team of the Year: show per season, with team number */}
-                      {toty.length > 0 && (
-                        <div className={`${awardGroups.size > 0 ? "border-t border-border/50" : ""}`}>
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-sm font-sans">
-                              {awardGroups.size === 0 && (
-                                <thead>
-                                  <tr className="bg-secondary/30">
-                                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground w-48">Award</th>
-                                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Seasons</th>
-                                  </tr>
-                                </thead>
-                              )}
-                              <tbody>
-                                <tr className="border-t border-border/50 bg-card">
-                                  <td className="px-3 py-2 font-medium text-foreground text-sm align-top">
-                                    <Link to={`/league/${lid}/award/${encodeURIComponent("Team of the Year")}`} className="hover:text-accent hover:underline">
-                                      Team of the Year
-                                    </Link>
-                                  </td>
-                                  <td className="px-3 py-2">
-                                    <div className="flex flex-wrap gap-1.5">
-                                      {totySeasons.map(sid => {
-                                        const entries = totySeasonsMap.get(sid)!;
-                                        // If max placement <= 3 AND multiple players share a placement → it's team number
-                                        // Otherwise treat all as just "selection" (show no team number)
-                                        const placementCounts = new Map<number, number>();
-                                        entries.forEach(e => placementCounts.set(e.placement, (placementCounts.get(e.placement) || 0) + 1));
-                                        const maxPl = Math.max(...entries.map(e => e.placement));
-                                        const isTeamNumber = maxPl <= 3 || [...placementCounts.values()].some(c => c > 1);
-
-                                        // Get this player's placement(s) for this season
-                                        const myPlacements = entries.map(e => e.placement).sort();
-                                        const uniquePlacements = [...new Set(myPlacements)];
-
-                                        return uniquePlacements.map(pl => (
-                                          <span
-                                            key={`toty-${sid}-${pl}`}
-                                            title={isTeamNumber ? `${plLabel(pl)} Team` : `Selection`}
-                                            className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono
-                                              ${pl === 1 ? "bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
-                                                : pl === 2 ? "bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300"
-                                                : pl === 3 ? "bg-amber-700/15 border-amber-700/40 text-amber-700 dark:text-amber-500"
-                                                : "bg-muted/40 border-border text-muted-foreground"}`}
-                                          >
-                                            {isTeamNumber && <span className="font-bold">{plLabel(pl)}</span>}
-                                            <span>{seasonLabel(sid)}</span>
-                                          </span>
-                                        ));
-                                      })}
-                                    </div>
-                                  </td>
-                                </tr>
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      )}
                     </div>
                   );
                 })}
