@@ -28,7 +28,9 @@ interface StatLine {
   PlayerID: number | null;
   PlayerName: string | null;
   SeasonID: number | null;
+  LeagueID: number | null;
   LeagueName: string | null;
+  TeamID: number | null;
   TeamFullName: string | null;
   Position: string | null;
   Nation: string | null;
@@ -408,27 +410,28 @@ export default function PlayerProfile() {
 
     (async () => {
       const wins: { leagueId: number; leagueName: string; seasonId: number; teamName: string }[] = [];
+      const publishWins = () => {
+        const deduped = new Map<string, { leagueId: number; leagueName: string; seasonId: number; teamName: string }>();
+        wins.forEach(w => deduped.set(`${w.leagueId}|${w.seasonId}|${w.teamName}`, w));
+        setTeamCompWins([...deduped.values()].sort((a, b) =>
+          a.leagueId - b.leagueId || a.seasonId - b.seasonId || a.teamName.localeCompare(b.teamName)
+        ));
+      };
 
       // ── Round-robin league champions via standings ──
       if (leagueSeasons.size > 0) {
-        const seasonIds = [...new Set([...leagueSeasons.values()].map(v => v.seasonId))];
-        const leagueIds = [...new Set([...leagueSeasons.values()].map(v => v.leagueId))];
-        const { data: stData } = await supabase
-          .from("standings")
-          .select('"LeagueID","SeasonID","FullName",totalpoints')
-          .in("SeasonID", seasonIds)
-          .in("LeagueID", leagueIds);
         const champByKey = new Map<string, string>();
-        const bestPts = new Map<string, number>();
-        (stData || []).forEach((r: any) => {
-          const k = `${r.LeagueID}|${r.SeasonID}`;
-          if (!leagueSeasons.has(k)) return;
-          const pts = r.totalpoints || 0;
-          if (!bestPts.has(k) || pts > (bestPts.get(k) || 0)) {
-            bestPts.set(k, pts);
-            champByKey.set(k, r.FullName || "");
-          }
-        });
+        await Promise.all([...leagueSeasons.values()].map(async ({ leagueId, seasonId }) => {
+          const { data } = await supabase
+            .from("standings")
+            .select('"LeagueID","SeasonID","FullName",totalpoints')
+            .eq("SeasonID", seasonId)
+            .eq("LeagueID", leagueId)
+            .order("totalpoints", { ascending: false })
+            .limit(1);
+          const champion = data?.[0]?.FullName;
+          if (champion) champByKey.set(`${leagueId}|${seasonId}`, champion);
+        }));
         tuples.forEach(t => {
           if (CUP_IDS_SET.has(t.leagueId)) return;
           const k = `${t.leagueId}|${t.seasonId}`;
@@ -436,6 +439,7 @@ export default function PlayerProfile() {
             wins.push({ leagueId: t.leagueId, leagueName: leagueNameMap.get(t.leagueId) || "", seasonId: t.seasonId, teamName: t.teamName });
           }
         });
+        publishWins();
       }
 
       // ── Cup champions via results ──
@@ -543,8 +547,7 @@ export default function PlayerProfile() {
         });
       }
 
-      wins.sort((a, b) => a.leagueId - b.leagueId || a.seasonId - b.seasonId);
-      setTeamCompWins(wins);
+      publishWins();
     })();
   }, [stats, leagueNameMap]);
 
@@ -1133,7 +1136,7 @@ export default function PlayerProfile() {
                   });
                   // For display: just show "TOTY 1st Team / 2nd Team" per season using placement as team#
                   // If placement > 3 it's probably a slot number — treat all as "Team of the Year" membership
-                  const totySeasons = [...totySeasonsMap.keys()].sort((a, b) => b - a);
+                  const totySeasons = [...totySeasonsMap.keys()].sort((a, b) => a - b);
 
                   if (awardGroups.size === 0 && toty.length === 0) return null;
 
@@ -1171,12 +1174,9 @@ export default function PlayerProfile() {
                                   const stripeCls = ai % 2 === 1 ? "bg-table-stripe" : "bg-card";
 
                                   if (row.kind === "regular") {
-                                    const byPl = new Map<number, AwardEntry[]>();
-                                    row.entries.forEach(e => {
-                                      if (!byPl.has(e.placement)) byPl.set(e.placement, []);
-                                      byPl.get(e.placement)!.push(e);
-                                    });
-                                    const placements = [...byPl.keys()].sort();
+                                    const sortedEntries = [...row.entries].sort((a, b) =>
+                                      a.seasonid - b.seasonid || a.placement - b.placement
+                                    );
 
                                     return (
                                       <tr key={`reg-${row.awardName}`} className={`border-t border-border/50 ${stripeCls}`}>
@@ -1187,23 +1187,20 @@ export default function PlayerProfile() {
                                         </td>
                                         <td className="px-3 py-2">
                                           <div className="flex flex-wrap gap-1.5">
-                                            {placements.map(pl => {
-                                              const seasonEntries = byPl.get(pl)!.sort((a, b) => a.seasonid - b.seasonid);
-                                              return seasonEntries.map(e => (
-                                                <span
-                                                  key={`${pl}-${e.seasonid}`}
-                                                  title={`${plLabel(pl)} place`}
-                                                  className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono
-                                                    ${pl === 1 ? "bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
-                                                      : pl === 2 ? "bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300"
-                                                      : pl === 3 ? "bg-amber-700/15 border-amber-700/40 text-amber-700 dark:text-amber-500"
-                                                      : "bg-muted/40 border-border text-muted-foreground"}`}
-                                                >
-                                                  <span className="font-bold">{plLabel(pl)}</span>
-                                                  <span>{seasonLabel(e.seasonid)}</span>
-                                                </span>
-                                              ));
-                                            })}
+                                            {sortedEntries.map(e => (
+                                              <span
+                                                key={`${e.placement}-${e.seasonid}`}
+                                                title={`${plLabel(e.placement)} place`}
+                                                className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono
+                                                  ${e.placement === 1 ? "bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
+                                                    : e.placement === 2 ? "bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300"
+                                                    : e.placement === 3 ? "bg-amber-700/15 border-amber-700/40 text-amber-700 dark:text-amber-500"
+                                                    : "bg-muted/40 border-border text-muted-foreground"}`}
+                                              >
+                                                <span className="font-bold">{plLabel(e.placement)}</span>
+                                                <span>{seasonLabel(e.seasonid)}</span>
+                                              </span>
+                                            ))}
                                           </div>
                                         </td>
                                       </tr>
@@ -1301,7 +1298,7 @@ export default function PlayerProfile() {
                                           title={`${e.teamName} — Champion`}
                                           className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
                                         >
-                                          <span className="font-bold">🏆</span>
+                                          <span className="font-bold">1st</span>
                                           <span>{seasonLabel(e.seasonId)}</span>
                                           <span className="opacity-70">{e.teamName}</span>
                                         </span>
