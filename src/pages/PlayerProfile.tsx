@@ -410,11 +410,18 @@ export default function PlayerProfile() {
 
     (async () => {
       const wins: { leagueId: number; leagueName: string; seasonId: number; teamName: string }[] = [];
+      const publishWins = () => {
+        const deduped = new Map<string, { leagueId: number; leagueName: string; seasonId: number; teamName: string }>();
+        wins.forEach(w => deduped.set(`${w.leagueId}|${w.seasonId}|${w.teamName}`, w));
+        setTeamCompWins([...deduped.values()].sort((a, b) =>
+          a.leagueId - b.leagueId || a.seasonId - b.seasonId || a.teamName.localeCompare(b.teamName)
+        ));
+      };
 
       // ── Round-robin league champions via standings ──
       if (leagueSeasons.size > 0) {
         const champByKey = new Map<string, string>();
-        for (const { leagueId, seasonId } of leagueSeasons.values()) {
+        await Promise.all([...leagueSeasons.values()].map(async ({ leagueId, seasonId }) => {
           const { data } = await supabase
             .from("standings")
             .select('"LeagueID","SeasonID","FullName",totalpoints')
@@ -424,7 +431,7 @@ export default function PlayerProfile() {
             .limit(1);
           const champion = data?.[0]?.FullName;
           if (champion) champByKey.set(`${leagueId}|${seasonId}`, champion);
-        }
+        }));
         tuples.forEach(t => {
           if (CUP_IDS_SET.has(t.leagueId)) return;
           const k = `${t.leagueId}|${t.seasonId}`;
@@ -432,6 +439,7 @@ export default function PlayerProfile() {
             wins.push({ leagueId: t.leagueId, leagueName: leagueNameMap.get(t.leagueId) || "", seasonId: t.seasonId, teamName: t.teamName });
           }
         });
+        publishWins();
       }
 
       // ── Cup champions via results ──
@@ -539,8 +547,7 @@ export default function PlayerProfile() {
         });
       }
 
-      wins.sort((a, b) => a.leagueId - b.leagueId || a.seasonId - b.seasonId || a.teamName.localeCompare(b.teamName));
-      setTeamCompWins(wins);
+      publishWins();
     })();
   }, [stats, leagueNameMap]);
 
