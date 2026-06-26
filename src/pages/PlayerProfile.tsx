@@ -1174,12 +1174,9 @@ export default function PlayerProfile() {
                                   const stripeCls = ai % 2 === 1 ? "bg-table-stripe" : "bg-card";
 
                                   if (row.kind === "regular") {
-                                    const byPl = new Map<number, AwardEntry[]>();
-                                    row.entries.forEach(e => {
-                                      if (!byPl.has(e.placement)) byPl.set(e.placement, []);
-                                      byPl.get(e.placement)!.push(e);
-                                    });
-                                    const placements = [...byPl.keys()].sort();
+                                    const sortedEntries = [...row.entries].sort((a, b) =>
+                                      a.seasonid - b.seasonid || a.placement - b.placement
+                                    );
 
                                     return (
                                       <tr key={`reg-${row.awardName}`} className={`border-t border-border/50 ${stripeCls}`}>
@@ -1190,23 +1187,20 @@ export default function PlayerProfile() {
                                         </td>
                                         <td className="px-3 py-2">
                                           <div className="flex flex-wrap gap-1.5">
-                                            {placements.map(pl => {
-                                              const seasonEntries = byPl.get(pl)!.sort((a, b) => a.seasonid - b.seasonid);
-                                              return seasonEntries.map(e => (
-                                                <span
-                                                  key={`${pl}-${e.seasonid}`}
-                                                  title={`${plLabel(pl)} place`}
-                                                  className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono
-                                                    ${pl === 1 ? "bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
-                                                      : pl === 2 ? "bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300"
-                                                      : pl === 3 ? "bg-amber-700/15 border-amber-700/40 text-amber-700 dark:text-amber-500"
-                                                      : "bg-muted/40 border-border text-muted-foreground"}`}
-                                                >
-                                                  <span className="font-bold">{plLabel(pl)}</span>
-                                                  <span>{seasonLabel(e.seasonid)}</span>
-                                                </span>
-                                              ));
-                                            })}
+                                            {sortedEntries.map(e => (
+                                              <span
+                                                key={`${e.placement}-${e.seasonid}`}
+                                                title={`${plLabel(e.placement)} place`}
+                                                className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono
+                                                  ${e.placement === 1 ? "bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
+                                                    : e.placement === 2 ? "bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300"
+                                                    : e.placement === 3 ? "bg-amber-700/15 border-amber-700/40 text-amber-700 dark:text-amber-500"
+                                                    : "bg-muted/40 border-border text-muted-foreground"}`}
+                                              >
+                                                <span className="font-bold">{plLabel(e.placement)}</span>
+                                                <span>{seasonLabel(e.seasonid)}</span>
+                                              </span>
+                                            ))}
                                           </div>
                                         </td>
                                       </tr>
