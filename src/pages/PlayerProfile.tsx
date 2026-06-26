@@ -391,7 +391,7 @@ export default function PlayerProfile() {
     stats.forEach(s => {
       if (!s.LeagueName || !s.SeasonID || !s.TeamFullName) return;
       const lid = leagueIdByName.get(s.LeagueName);
-      if (!lid) return;
+      if (!lid || EXCLUDED_LEAGUE_IDS.has(lid)) return;
       const key = `${lid}|${s.SeasonID}|${s.TeamFullName}`;
       if (!tuples.has(key)) tuples.set(key, { leagueId: lid, seasonId: s.SeasonID, teamName: s.TeamFullName });
     });
