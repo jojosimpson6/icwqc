@@ -28,7 +28,9 @@ interface StatLine {
   PlayerID: number | null;
   PlayerName: string | null;
   SeasonID: number | null;
+  LeagueID: number | null;
   LeagueName: string | null;
+  TeamID: number | null;
   TeamFullName: string | null;
   Position: string | null;
   Nation: string | null;
@@ -411,24 +413,18 @@ export default function PlayerProfile() {
 
       // ── Round-robin league champions via standings ──
       if (leagueSeasons.size > 0) {
-        const seasonIds = [...new Set([...leagueSeasons.values()].map(v => v.seasonId))];
-        const leagueIds = [...new Set([...leagueSeasons.values()].map(v => v.leagueId))];
-        const { data: stData } = await supabase
-          .from("standings")
-          .select('"LeagueID","SeasonID","FullName",totalpoints')
-          .in("SeasonID", seasonIds)
-          .in("LeagueID", leagueIds);
         const champByKey = new Map<string, string>();
-        const bestPts = new Map<string, number>();
-        (stData || []).forEach((r: any) => {
-          const k = `${r.LeagueID}|${r.SeasonID}`;
-          if (!leagueSeasons.has(k)) return;
-          const pts = r.totalpoints || 0;
-          if (!bestPts.has(k) || pts > (bestPts.get(k) || 0)) {
-            bestPts.set(k, pts);
-            champByKey.set(k, r.FullName || "");
-          }
-        });
+        for (const { leagueId, seasonId } of leagueSeasons.values()) {
+          const { data } = await supabase
+            .from("standings")
+            .select('"LeagueID","SeasonID","FullName",totalpoints')
+            .eq("SeasonID", seasonId)
+            .eq("LeagueID", leagueId)
+            .order("totalpoints", { ascending: false })
+            .limit(1);
+          const champion = data?.[0]?.FullName;
+          if (champion) champByKey.set(`${leagueId}|${seasonId}`, champion);
+        }
         tuples.forEach(t => {
           if (CUP_IDS_SET.has(t.leagueId)) return;
           const k = `${t.leagueId}|${t.seasonId}`;
@@ -543,7 +539,7 @@ export default function PlayerProfile() {
         });
       }
 
-      wins.sort((a, b) => a.leagueId - b.leagueId || a.seasonId - b.seasonId);
+      wins.sort((a, b) => a.leagueId - b.leagueId || a.seasonId - b.seasonId || a.teamName.localeCompare(b.teamName));
       setTeamCompWins(wins);
     })();
   }, [stats, leagueNameMap]);
@@ -1133,7 +1129,7 @@ export default function PlayerProfile() {
                   });
                   // For display: just show "TOTY 1st Team / 2nd Team" per season using placement as team#
                   // If placement > 3 it's probably a slot number — treat all as "Team of the Year" membership
-                  const totySeasons = [...totySeasonsMap.keys()].sort((a, b) => b - a);
+                  const totySeasons = [...totySeasonsMap.keys()].sort((a, b) => a - b);
 
                   if (awardGroups.size === 0 && toty.length === 0) return null;
 
