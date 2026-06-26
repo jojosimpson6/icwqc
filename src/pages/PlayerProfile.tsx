@@ -377,7 +377,10 @@ export default function PlayerProfile() {
   // For each (LeagueID, SeasonID, TeamName) the player appeared in, check whether that team
   // won the competition that season. Cup leagues (CUP_IDS) are resolved via results final;
   // round-robin leagues via the standings table.
-  const CUP_IDS_SET = new Set([15, 16, 17, 18, 19, 20, 21]);
+  // Knockout/cup competitions (winner determined by results final, not standings).
+  // LeagueID 21 = Quidditch World Cup Qualification — explicitly excluded from championship credit.
+  const CUP_IDS_SET = new Set([15, 16, 17, 18, 19, 20]);
+  const EXCLUDED_LEAGUE_IDS = new Set([21]);
   useEffect(() => {
     if (!stats.length || leagueNameMap.size === 0) { setTeamCompWins([]); return; }
     const leagueIdByName = new Map<string, number>();
