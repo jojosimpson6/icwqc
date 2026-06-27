@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/tooltip";
 
 interface League { LeagueID: number; LeagueName: string | null; LeagueTier: number | null; }
-interface Team   { TeamID: number; FullName: string | null; ShortName: string | null; }
+interface Team   { TeamID: number; FullName: string | null; Nickname: string | null; }
 interface Game {
   MatchID: number | null;
   SeasonID: number;
