@@ -236,7 +236,7 @@ export default function SchedulePage() {
   function teamLabel(id: number, short = false): string {
     const t = teamMap.get(id);
     if (!t) return `Team#${id}`;
-    return (short ? (t.ShortName || t.FullName) : (t.FullName || t.ShortName)) || `Team#${id}`;
+    return (short ? (t.Nickname || t.FullName) : (t.FullName || t.Nickname)) || `Team#${id}`;
   }
 
   const selectedTeam = teamId !== "all" ? teamMap.get(teamId as number) : null;
