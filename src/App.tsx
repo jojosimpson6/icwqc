@@ -21,6 +21,7 @@ import AwardHistory from "./pages/AwardHistory";
 import EloPage from "./pages/EloPage";
 import ComparePage from "./pages/ComparePage";
 import LeadersIndex from "./pages/LeadersIndex";
+import SchedulePage from "./pages/SchedulePage";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 const queryClient = new QueryClient();
