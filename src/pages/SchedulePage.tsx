@@ -85,7 +85,7 @@ export default function SchedulePage() {
     (async () => {
       const [{ data: l }, { data: t }, s] = await Promise.all([
         supabase.from("leagues").select('"LeagueID","LeagueName","LeagueTier"').eq("ValidToDt", "9999-12-31").order("LeagueTier").order("LeagueName"),
-        supabase.from("teams").select('"TeamID","FullName","ShortName"').eq("ValidToDt", "9999-12-31"),
+        supabase.from("teams").select('"TeamID","FullName","Nickname"').eq("ValidToDt", "9999-12-31"),
         fetchSeasons(),
       ]);
       setLeagues((l || []) as League[]);
