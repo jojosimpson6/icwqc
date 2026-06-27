@@ -123,18 +123,21 @@ export type Database = {
         Row: {
           Nation: string | null
           NationID: number
+          Region: string | null
           ValidFromDt: string
           ValidToDt: string
         }
         Insert: {
           Nation?: string | null
           NationID: number
+          Region?: string | null
           ValidFromDt: string
           ValidToDt: string
         }
         Update: {
           Nation?: string | null
           NationID?: number
+          Region?: string | null
           ValidFromDt?: string
           ValidToDt?: string
         }
