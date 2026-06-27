@@ -722,6 +722,19 @@ export type Database = {
         }
         Relationships: []
       }
+      scheduled_matches: {
+        Row: {
+          AwayTeamID: number | null
+          HomeTeamID: number | null
+          IsNeutralSite: number | null
+          LeagueID: number | null
+          Matchday: string | null
+          MatchID: number | null
+          SeasonID: number | null
+          WeekID: number | null
+        }
+        Relationships: []
+      }
       standings: {
         Row: {
           awaygamesplayed: number | null

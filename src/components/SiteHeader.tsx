@@ -33,6 +33,7 @@ export function SiteHeader() {
 
   const navLinks = [
     { to: "/players", label: "Players" },
+    { to: "/schedule", label: "Schedule" },
     { to: "/leagues", label: "Leagues" },
     { to: "/leaders", label: "Leaders" },
     { to: "/nations", label: "Nations" },

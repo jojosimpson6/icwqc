@@ -21,6 +21,7 @@ import AwardHistory from "./pages/AwardHistory";
 import EloPage from "./pages/EloPage";
 import ComparePage from "./pages/ComparePage";
 import LeadersIndex from "./pages/LeadersIndex";
+import SchedulePage from "./pages/SchedulePage";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 const queryClient = new QueryClient();
@@ -47,6 +48,7 @@ const App = () => (
           <Route path="/nations" element={<NationsIndex />} />
           <Route path="/news/:id" element={<NewsArticle />} />
           <Route path="/leaders" element={<LeadersIndex />} />
+          <Route path="/schedule" element={<SchedulePage />} />
           <Route path="/admin/login" element={<AdminLogin />} />
           <Route path="/admin" element={<AdminPanel />} />
           {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
