@@ -43,6 +43,16 @@ function parseLocal(s: string): Date {
 }
 const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
 
+// Deterministic color per league — golden-angle hue rotation for good separation
+function leagueColor(id: number): string {
+  const hue = Math.round((id * 137.508) % 360);
+  return `hsl(${hue} 65% 42%)`;
+}
+function leagueBg(id: number): string {
+  const hue = Math.round((id * 137.508) % 360);
+  return `hsl(${hue} 65% 42% / 0.12)`;
+}
+
 /** Determine the current season the database is in (largest SeasonID with any matchday). */
 async function fetchSeasons(): Promise<number[]> {
   const past = await supabase.from("matchdays").select('"SeasonID"').order("SeasonID", { ascending: false }).limit(5000);
@@ -359,14 +369,24 @@ export default function SchedulePage() {
                         );
                       })}
 
-                      {/* Not team-filtered: show count + first league names */}
+                      {/* Not team-filtered: show colored league chips */}
                       {!selectedTeam && hasGames && (
                         <div className="space-y-0.5 overflow-hidden">
-                          {dayGames.slice(0, 3).map((g, i) => (
-                            <div key={i} className="truncate text-[10px] text-muted-foreground">
-                              {leagueMap.get(g.LeagueID)?.LeagueName?.split(" ").slice(0, 2).join(" ") || ""}
-                            </div>
-                          ))}
+                          {dayGames.slice(0, 3).map((g, i) => {
+                            const lg = leagueMap.get(g.LeagueID);
+                            const home = teamLabel(g.HomeTeamID, true);
+                            const away = teamLabel(g.AwayTeamID, true);
+                            return (
+                              <div
+                                key={i}
+                                className="truncate text-[10px] px-1 rounded-sm border-l-2"
+                                style={{ borderLeftColor: leagueColor(g.LeagueID), backgroundColor: leagueBg(g.LeagueID), color: leagueColor(g.LeagueID) }}
+                                title={lg?.LeagueName || ""}
+                              >
+                                {home} v {away}
+                              </div>
+                            );
+                          })}
                           {dayGames.length > 3 && <div className="text-[10px] text-muted-foreground">+{dayGames.length - 3} more</div>}
                         </div>
                       )}
@@ -417,12 +437,19 @@ export default function SchedulePage() {
                 const home = teamMap.get(g.HomeTeamID);
                 const away = teamMap.get(g.AwayTeamID);
                 return (
-                  <div key={i} className="px-4 py-3 flex items-center gap-4 text-sm">
-                    <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground w-48 truncate">
-                      {league ? <Link to={`/league/${league.LeagueID}`} className="hover:text-accent hover:underline">{league.LeagueName}</Link> : "—"}
+                  <div
+                    key={i}
+                    className="px-4 py-3 flex items-center gap-4 text-sm border-l-4"
+                    style={{ borderLeftColor: leagueColor(g.LeagueID) }}
+                  >
+                    <div
+                      className="text-xs font-semibold uppercase tracking-wider w-48 truncate px-2 py-1 rounded"
+                      style={{ backgroundColor: leagueBg(g.LeagueID), color: leagueColor(g.LeagueID) }}
+                    >
+                      {league ? <Link to={`/league/${league.LeagueID}`} className="hover:underline">{league.LeagueName}</Link> : "—"}
                     </div>
                     <div className="flex-1 flex items-center gap-2 justify-end font-medium">
-                      {home ? <Link to={`/team/${encodeURIComponent(home.FullName || "")}`} className="hover:text-accent hover:underline text-right">{home.FullName}</Link> : `#${g.HomeTeamID}`}
+                      {home ? <Link to={`/team/${encodeURIComponent(home.FullName || "")}`} className="hover:text-accent hover:underline text-right">{home.FullName}</Link> : (teamLabel(g.HomeTeamID))}
                     </div>
                     <div className="font-mono text-center min-w-[70px]">
                       {g.played && g.HomeScore != null ? (
@@ -436,7 +463,7 @@ export default function SchedulePage() {
                       )}
                     </div>
                     <div className="flex-1 flex items-center gap-2 font-medium">
-                      {away ? <Link to={`/team/${encodeURIComponent(away.FullName || "")}`} className="hover:text-accent hover:underline">{away.FullName}</Link> : `#${g.AwayTeamID}`}
+                      {away ? <Link to={`/team/${encodeURIComponent(away.FullName || "")}`} className="hover:text-accent hover:underline">{away.FullName}</Link> : (teamLabel(g.AwayTeamID))}
                     </div>
                   </div>
                 );
