@@ -53,13 +53,15 @@ function leagueBg(id: number): string {
   return `hsl(${hue} 65% 42% / 0.12)`;
 }
 
-/** Determine the current season the database is in (largest SeasonID with any matchday). */
+/** Determine all seasons that have any matchday (past or future). */
 async function fetchSeasons(): Promise<number[]> {
-  const past = await supabase.from("matchdays").select('"SeasonID"').order("SeasonID", { ascending: false }).limit(5000);
-  const future = await supabase.from("scheduled_matches").select('"SeasonID"').limit(5000);
+  const [past, future] = await Promise.all([
+    fetchAllRows<{ SeasonID: number }>("matchdays", { select: '"SeasonID"' }),
+    fetchAllRows<{ SeasonID: number }>("scheduled_matches", { select: '"SeasonID"' }).catch(() => []),
+  ]);
   const s = new Set<number>();
-  (past.data || []).forEach((r: any) => s.add(r.SeasonID));
-  (future.data || []).forEach((r: any) => s.add(r.SeasonID));
+  past.forEach(r => s.add(r.SeasonID));
+  future.forEach(r => s.add(r.SeasonID));
   return [...s].sort((a, b) => b - a);
 }
 
@@ -93,15 +95,30 @@ export default function SchedulePage() {
   // Initial bootstrap
   useEffect(() => {
     (async () => {
-      const [{ data: l }, { data: t }, s] = await Promise.all([
-        supabase.from("leagues").select('"LeagueID","LeagueName","LeagueTier"').eq("ValidToDt", "9999-12-31").order("LeagueTier").order("LeagueName"),
-        supabase.from("teams").select('"TeamID","FullName","Nickname"').eq("ValidToDt", "9999-12-31"),
+      const [l, tRows, s] = await Promise.all([
+        fetchAllRows<League>("leagues", {
+          select: '"LeagueID","LeagueName","LeagueTier"',
+          filters: [{ method: "eq", args: ["ValidToDt", "9999-12-31"] }],
+        }),
+        fetchAllRows<Team & { ValidFromDt: string }>("teams", {
+          select: '"TeamID","FullName","Nickname","ValidFromDt"',
+        }),
         fetchSeasons(),
       ]);
+      // Dedupe teams: latest ValidFromDt per TeamID
+      const latest = new Map<number, Team>();
+      const latestDt = new Map<number, string>();
+      (tRows || []).forEach((r: any) => {
+        const cur = latestDt.get(r.TeamID);
+        if (!cur || (r.ValidFromDt || "") > cur) {
+          latestDt.set(r.TeamID, r.ValidFromDt || "");
+          latest.set(r.TeamID, { TeamID: r.TeamID, FullName: r.FullName, Nickname: r.Nickname });
+        }
+      });
       setLeagues((l || []) as League[]);
-      setTeams((t || []) as Team[]);
+      setTeams([...latest.values()]);
       setSeasons(s);
-      if (s.length) setSeason(s[0]); // default: most recent / current
+      if (s.length) setSeason(s[0]);
     })();
   }, []);
 
