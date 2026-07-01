@@ -800,6 +800,10 @@ export type Database = {
       }
       refresh_elo_history: { Args: never; Returns: undefined }
       refresh_player_views: { Args: never; Returns: undefined }
+      season_is_complete: {
+        Args: { _league: number; _season: number }
+        Returns: boolean
+      }
     }
     Enums: {
       app_role: "admin" | "moderator" | "user"

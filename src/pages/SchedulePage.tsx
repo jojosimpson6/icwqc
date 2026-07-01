@@ -245,10 +245,7 @@ export default function SchedulePage() {
     <div className="min-h-screen bg-background flex flex-col">
       <SiteHeader />
       <main className="flex-1 container py-6 pb-20 md:pb-6">
-        <h1 className="font-display text-3xl font-bold mb-1">Schedule</h1>
-        <p className="text-sm text-muted-foreground mb-5">
-          Upcoming and past matches. Knockout-round matchups are hidden until the previous round has been decided.
-        </p>
+        <h1 className="font-display text-3xl font-bold mb-5">Schedule</h1>
 
         {/* Filters */}
         <div className="flex flex-wrap items-center gap-3 mb-4 p-3 bg-card border border-border rounded">
@@ -294,9 +291,7 @@ export default function SchedulePage() {
             </select>
           </div>
 
-          <div className="ml-auto text-xs text-muted-foreground font-mono">
-            {loading ? "Loading…" : `${filtered.length} matches`}
-          </div>
+          {loading && <div className="ml-auto text-xs text-muted-foreground font-mono">Loading…</div>}
         </div>
 
         {/* Calendar header */}
