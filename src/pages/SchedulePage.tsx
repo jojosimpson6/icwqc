@@ -53,13 +53,15 @@ function leagueBg(id: number): string {
   return `hsl(${hue} 65% 42% / 0.12)`;
 }
 
-/** Determine the current season the database is in (largest SeasonID with any matchday). */
+/** Determine all seasons that have any matchday (past or future). */
 async function fetchSeasons(): Promise<number[]> {
-  const past = await supabase.from("matchdays").select('"SeasonID"').order("SeasonID", { ascending: false }).limit(5000);
-  const future = await supabase.from("scheduled_matches").select('"SeasonID"').limit(5000);
+  const [past, future] = await Promise.all([
+    fetchAllRows<{ SeasonID: number }>("matchdays", { select: '"SeasonID"' }),
+    fetchAllRows<{ SeasonID: number }>("scheduled_matches", { select: '"SeasonID"' }).catch(() => []),
+  ]);
   const s = new Set<number>();
-  (past.data || []).forEach((r: any) => s.add(r.SeasonID));
-  (future.data || []).forEach((r: any) => s.add(r.SeasonID));
+  past.forEach(r => s.add(r.SeasonID));
+  future.forEach(r => s.add(r.SeasonID));
   return [...s].sort((a, b) => b - a);
 }
 
