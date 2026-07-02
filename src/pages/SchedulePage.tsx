@@ -128,28 +128,25 @@ export default function SchedulePage() {
     setLoading(true);
     setSelectedDay(null);
     (async () => {
-      // 1. Past results joined to matchdays (RLS hides future automatically)
-      let pastQ = supabase
-        .from("results")
-        .select('"MatchID","SeasonID","LeagueID","WeekID","HomeTeamID","AwayTeamID","HomeTeamScore","AwayTeamScore"')
-        .eq("SeasonID", season);
-      if (leagueId !== "all") pastQ = pastQ.eq("LeagueID", leagueId);
+      const leagueFilter = leagueId !== "all"
+        ? [{ method: "eq" as const, args: ["LeagueID", leagueId] }]
+        : [];
 
-      // 2. Future scheduled (no scores)
-      let futQ = supabase
-        .from("scheduled_matches")
-        .select('"MatchID","SeasonID","LeagueID","WeekID","HomeTeamID","AwayTeamID","Matchday"')
-        .eq("SeasonID", season);
-      if (leagueId !== "all") futQ = futQ.eq("LeagueID", leagueId);
+      const [pastRows, futRows, mdRows] = await Promise.all([
+        fetchAllRows<any>("results", {
+          select: '"MatchID","SeasonID","LeagueID","WeekID","HomeTeamID","AwayTeamID","HomeTeamScore","AwayTeamScore"',
+          filters: [{ method: "eq", args: ["SeasonID", season] }, ...leagueFilter],
+        }),
+        fetchAllRows<any>("scheduled_matches", {
+          select: '"MatchID","SeasonID","LeagueID","WeekID","HomeTeamID","AwayTeamID","Matchday"',
+          filters: [{ method: "eq", args: ["SeasonID", season] }, ...leagueFilter],
+        }).catch(() => []),
+        fetchAllRows<any>("matchdays", {
+          select: '"SeasonID","LeagueID","MatchdayWeek","Matchday"',
+          filters: [{ method: "eq", args: ["SeasonID", season] }, ...leagueFilter],
+        }),
+      ]);
 
-      // 3. Matchday calendar for the season+league (RLS hides future dates, but past dates suffice to join past)
-      let mdQ = supabase
-        .from("matchdays")
-        .select('"SeasonID","LeagueID","MatchdayWeek","Matchday"')
-        .eq("SeasonID", season);
-      if (leagueId !== "all") mdQ = mdQ.eq("LeagueID", leagueId);
-
-      const [pastR, futR, mdR] = await Promise.all([pastQ, futQ, mdQ]);
 
       // Build week->date map
       const dateMap = new Map<string, string>(); // "L|W" -> YYYY-MM-DD
