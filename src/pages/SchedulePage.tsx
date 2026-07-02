@@ -150,11 +150,11 @@ export default function SchedulePage() {
 
       // Build week->date map
       const dateMap = new Map<string, string>(); // "L|W" -> YYYY-MM-DD
-      (mdR.data || []).forEach((r: any) => dateMap.set(`${r.LeagueID}|${r.MatchdayWeek}`, r.Matchday));
+      (mdRows || []).forEach((r: any) => dateMap.set(`${r.LeagueID}|${r.MatchdayWeek}`, r.Matchday));
 
       const list: Game[] = [];
 
-      (pastR.data || []).forEach((r: any) => {
+      (pastRows || []).forEach((r: any) => {
         const d = dateMap.get(`${r.LeagueID}|${r.WeekID}`);
         if (!d) return;
         list.push({
@@ -171,7 +171,7 @@ export default function SchedulePage() {
         });
       });
 
-      (futR.data || []).forEach((r: any) => {
+      (futRows || []).forEach((r: any) => {
         list.push({
           MatchID: r.MatchID,
           SeasonID: r.SeasonID,
