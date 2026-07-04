@@ -498,8 +498,8 @@ export default function LeaguePage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-6">
+        <div className={`grid grid-cols-1 gap-6 ${isIntl ? "" : "lg:grid-cols-3"}`}>
+          <div className={isIntl ? "space-y-6" : "lg:col-span-2 space-y-6"}>
             {/* Domestic league standings */}
             {isDomestic && standings.length > 0 && (
               <div className="border border-border rounded overflow-hidden">
