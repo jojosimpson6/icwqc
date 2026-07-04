@@ -47,7 +47,10 @@ const MEDAL = {
 } as const;
 
 // LeagueIDs that are cup/knockout competitions (not round-robin)
-const CUP_IDS = new Set([15,16,17,18,19,20,21]);
+const CUP_IDS = new Set([15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30]);
+// International competitions where the last week (typically week 4) contains
+// both the Final and the 3rd-Place Playoff.
+const INTL_FINAL_THIRD_IDS = new Set([20,21,22,23,24,25,26,27,28,29,30]);
 
 // Build round labels: Final/Semis/Quarters are descriptive; earlier rounds get ordinal names.
 function buildRoundLabels(weekGroups: Map<number, any[]>, sortedWeeks: number[]): Map<number, string> {
