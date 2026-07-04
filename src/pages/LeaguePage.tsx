@@ -152,8 +152,8 @@ export default function LeaguePage() {
         setPlayerPosMap(ppm);
       }
 
-      // For cups/CL, fetch match results
-      if (isCup || isChampionsLeague || lid === 20 || lid === 21) {
+      // For cups/CL/international, fetch match results
+      if (isCup || isChampionsLeague || isIntl) {
         fetchAllRows<MatchResult>("results", {
           select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID,SeasonID,LeagueID,IsNeutralSite",
           filters: [{ method: "eq", args: ["LeagueID", lid] }],
