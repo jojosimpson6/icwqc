@@ -545,7 +545,8 @@ export default function TeamPage() {
 
   const domesticRegister = seasonRegister.filter(r => r.LeagueID >= 1 && r.LeagueID <= 14);
   const cupRegister = seasonRegister.filter(r => r.LeagueID >= 15 && r.LeagueID <= 18);
-  const championsLeagueRegister = seasonRegister.filter(r => r.LeagueID > 18);
+  const championsLeagueRegister = seasonRegister.filter(r => r.LeagueID === 19);
+  const internationalRegister = seasonRegister.filter(r => r.LeagueID >= 20);
 
   // Team color styling with contrast-aware text
   const primaryColor = team?.PrimaryColor || null;
