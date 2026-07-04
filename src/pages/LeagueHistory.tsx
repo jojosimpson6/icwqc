@@ -47,7 +47,10 @@ const MEDAL = {
 } as const;
 
 // LeagueIDs that are cup/knockout competitions (not round-robin)
-const CUP_IDS = new Set([15,16,17,18,19,20,21]);
+const CUP_IDS = new Set([15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30]);
+// International competitions where the last week (typically week 4) contains
+// both the Final and the 3rd-Place Playoff.
+const INTL_FINAL_THIRD_IDS = new Set([20,21,22,23,24,25,26,27,28,29,30]);
 
 // Build round labels: Final/Semis/Quarters are descriptive; earlier rounds get ordinal names.
 function buildRoundLabels(weekGroups: Map<number, any[]>, sortedWeeks: number[]): Map<number, string> {
@@ -261,6 +264,24 @@ export default function LeagueHistory() {
             });
             return;
           }
+
+          // International comps: last week (typically week 4) contains both
+          // the Final and the 3rd-place playoff. Lower MatchID = 3rd, higher = Final.
+          if (INTL_FINAL_THIRD_IDS.has(lid) && sortedWeeks.length > 0) {
+            const lastWeek = sortedWeeks[sortedWeeks.length - 1];
+            const lastMatches = weekGroups.get(lastWeek) || [];
+            if (lastMatches.length === 2) {
+              const [thirdMatch, finalMatch] = [...lastMatches].sort((a, b) => (a.MatchID || 0) - (b.MatchID || 0));
+              const fHomeWin = (finalMatch.HomeTeamScore || 0) >= (finalMatch.AwayTeamScore || 0);
+              const tHomeWin = (thirdMatch.HomeTeamScore || 0) >= (thirdMatch.AwayTeamScore || 0);
+              const champion = tMap[fHomeWin ? finalMatch.HomeTeamID : finalMatch.AwayTeamID] || null;
+              const runnerUp = tMap[fHomeWin ? finalMatch.AwayTeamID : finalMatch.HomeTeamID] || null;
+              const third = tMap[tHomeWin ? thirdMatch.HomeTeamID : thirdMatch.AwayTeamID] || null;
+              summaries.push({ seasonId: sid, champion, runnerUp, third, isCupFinal: true, teams: [] });
+              return;
+            }
+          }
+
 
           // Map each week to its round label, collapsing consecutive two-leg rounds
           const weekToRound = buildRoundLabels(weekGroups, sortedWeeks);

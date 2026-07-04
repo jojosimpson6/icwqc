@@ -617,8 +617,18 @@ export default function PlayerProfile() {
     "European Cup": 2, "All-Africa Cup": 2, "Americas Cup": 2, "Pacific Cup": 2,
     // CL third
     "Champions League": 3,
-    // International last
-    "Quidditch World Cup": 4,
+    // International: qualifying comes before its parent competition
+    "Quidditch World Cup Qualification": 4,
+    "Quidditch World Cup": 5,
+    "EIC Qualifying": 6,
+    "European International Championship": 7,
+    "Gold Cup Qualifying": 8,
+    "Gold Cup": 9,
+    "AFCON Qualifying": 10,
+    "African Continental Championship": 11,
+    "PAC Qualifying": 12,
+    "Pacfic-Asian Championships": 13,
+    "International Friendlies": 14,
   };
   const getCompOrder = (name: string | null) => compOrder[name || ""] || (name ? 5 : 99);
 

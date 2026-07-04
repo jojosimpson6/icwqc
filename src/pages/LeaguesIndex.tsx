@@ -58,8 +58,8 @@ export default function LeaguesIndex() {
   const grouped = {
     popular: leagues.filter(l => l.LeagueTier === 1),
     other: leagues.filter(l => l.LeagueTier === 2),
-    cups: leagues.filter(l => l.LeagueTier === 0 && l.LeagueName !== "Quidditch World Cup" && l.LeagueName !== "Quidditch World Cup Qualification"),
-    international: leagues.filter(l => l.LeagueTier === 0 && (l.LeagueName === "Quidditch World Cup" || l.LeagueName === "Quidditch World Cup Qualification")),
+    cups: leagues.filter(l => l.LeagueTier === 0 && l.LeagueID < 20),
+    international: leagues.filter(l => l.LeagueTier === 0 && l.LeagueID >= 20),
   };
 
   const renderSection = (title: string, items: League[], isCup = false) =>

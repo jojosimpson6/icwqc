@@ -28,8 +28,8 @@ export function SiteHeader() {
 
   const popularLeagues = leagues.filter((l) => l.LeagueTier === 1);
   const otherLeagues   = leagues.filter((l) => l.LeagueTier === 2);
-  const cupComps       = leagues.filter((l) => l.LeagueTier === 0 && l.LeagueName !== "Quidditch World Cup" && l.LeagueName !== "Quidditch World Cup Qualification");
-  const intlComps      = leagues.filter((l) => l.LeagueTier === 0 && (l.LeagueName === "Quidditch World Cup" || l.LeagueName === "Quidditch World Cup Qualification"));
+  const cupComps       = leagues.filter((l) => l.LeagueTier === 0 && l.LeagueID < 20);
+  const intlComps      = leagues.filter((l) => l.LeagueTier === 0 && l.LeagueID >= 20);
 
   const navLinks = [
     { to: "/players", label: "Players" },

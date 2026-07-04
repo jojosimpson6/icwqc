@@ -97,6 +97,10 @@ export default function LeaguePage() {
   const isCup = lid >= 15 && lid <= 18;
   const isChampionsLeague = lid === 19;
   const isDomestic = lid >= 1 && lid <= 14;
+  const isIntl = lid >= 20;
+  // Qualifying → parent competition mapping
+  const QUALIFYING_PARENT: Record<number, number> = { 21: 20, 23: 22, 25: 24, 27: 26, 29: 28 };
+  const parentCompId: number | null = QUALIFYING_PARENT[lid] ?? null;
 
   useEffect(() => {
     if (!id) return;
@@ -148,8 +152,8 @@ export default function LeaguePage() {
         setPlayerPosMap(ppm);
       }
 
-      // For cups/CL, fetch match results
-      if (isCup || isChampionsLeague || lid === 20 || lid === 21) {
+      // For cups/CL/international, fetch match results
+      if (isCup || isChampionsLeague || isIntl) {
         fetchAllRows<MatchResult>("results", {
           select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID,SeasonID,LeagueID,IsNeutralSite",
           filters: [{ method: "eq", args: ["LeagueID", lid] }],
@@ -232,10 +236,19 @@ export default function LeaguePage() {
     let i = 0;
     while (i < weeks.length) {
       const w1Matches = weekGroups.get(weeks[i])!;
+      const isLastWeek = i === weeks.length - 1;
+      // International comps: last week with 2 matches = Final + 3rd-place playoff
+      if (isIntl && isLastWeek && w1Matches.length === 2) {
+        const sorted = [...w1Matches].sort((a, b) => (a.MatchID || 0) - (b.MatchID || 0));
+        rounds.push({ name: "3rd Place Playoff", matches: [sorted[0]] });
+        rounds.push({ name: "Final", matches: [sorted[1]] });
+        i++;
+        continue;
+      }
       // Check if next week has same number of matches (two-leg)
       if (i + 1 < weeks.length) {
         const w2Matches = weekGroups.get(weeks[i + 1])!;
-        if (w1Matches.length === w2Matches.length && w1Matches.length > 1) {
+        if (w1Matches.length === w2Matches.length && w1Matches.length > 1 && !isIntl) {
           // Two-leg round
           rounds.push({ name: roundNames(w1Matches.length), matches: [...w1Matches, ...w2Matches] });
           i += 2;
@@ -246,6 +259,42 @@ export default function LeaguePage() {
       i++;
     }
     return rounds;
+  };
+
+  // Build a simple bracket visualization from rounds
+  const BracketDisplay = ({ rounds }: { rounds: { name: string; matches: MatchResult[] }[] }) => {
+    // exclude 3rd Place Playoff from bracket
+    const bracketRounds = rounds.filter(r => r.name !== "3rd Place Playoff");
+    if (bracketRounds.length === 0) return null;
+    return (
+      <div className="border border-border rounded overflow-x-auto bg-card p-3">
+        <div className="flex gap-3 min-w-max">
+          {bracketRounds.map((round, ri) => (
+            <div key={ri} className="flex flex-col justify-around gap-2 min-w-[180px]">
+              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-center">{round.name}</p>
+              {round.matches.map((m, mi) => {
+                const hName = m.HomeTeamID ? teamMap.get(m.HomeTeamID) || `Team ${m.HomeTeamID}` : "TBD";
+                const aName = m.AwayTeamID ? teamMap.get(m.AwayTeamID) || `Team ${m.AwayTeamID}` : "TBD";
+                const hs = m.HomeTeamScore ?? 0, as_ = m.AwayTeamScore ?? 0;
+                const hWin = hs > as_, aWin = as_ > hs;
+                return (
+                  <div key={mi} className="border border-border rounded text-xs font-sans bg-background flex-1 min-h-[52px] flex flex-col justify-center">
+                    <div className={`flex justify-between px-2 py-1 ${hWin ? "font-bold" : ""}`}>
+                      <Link to={`/team/${encodeURIComponent(hName)}`} className="text-accent hover:underline truncate">{hName}</Link>
+                      <span className="font-mono ml-2">{m.HomeTeamScore ?? "—"}</span>
+                    </div>
+                    <div className={`flex justify-between px-2 py-1 border-t border-border/50 ${aWin ? "font-bold" : ""}`}>
+                      <Link to={`/team/${encodeURIComponent(aName)}`} className="text-accent hover:underline truncate">{aName}</Link>
+                      <span className="font-mono ml-2">{m.AwayTeamScore ?? "—"}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
   };
 
   // Build CL group standings from weeks 1-6
@@ -433,6 +482,14 @@ export default function LeaguePage() {
               View History →
             </Link>
           </div>
+          {parentCompId && (
+            <p className="text-xs text-muted-foreground font-sans mt-1">
+              Qualifying tournament for{" "}
+              <Link to={`/league/${parentCompId}`} className="text-accent hover:underline font-medium">
+                view main competition →
+              </Link>
+            </p>
+          )}
           <div className="flex items-center gap-4 mt-1">
             <Link to={`/league/${league.LeagueID}/history`} className="text-sm text-accent hover:underline font-sans inline-block">
               Season-by-Season History →
@@ -441,8 +498,8 @@ export default function LeaguePage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-6">
+        <div className={`grid grid-cols-1 gap-6 ${isIntl ? "" : "lg:grid-cols-3"}`}>
+          <div className={isIntl ? "space-y-6" : "lg:col-span-2 space-y-6"}>
             {/* Domestic league standings */}
             {isDomestic && standings.length > 0 && (
               <div className="border border-border rounded overflow-hidden">
@@ -502,19 +559,22 @@ export default function LeaguePage() {
             )}
 
             {/* Cup knockout display */}
-            {isCup && seasonMatches.length > 0 && (
-              <div>
-                <h3 className="font-display text-lg font-bold text-foreground mb-3">
-                  Knockout Tournament {selectedSeason ? `— ${seasonLabel(selectedSeason)}` : ""}
-                </h3>
-                <KnockoutDisplay rounds={buildKnockoutRounds(seasonMatches)} />
-              </div>
-            )}
+            {isCup && seasonMatches.length > 0 && (() => {
+              const rounds = buildKnockoutRounds(seasonMatches);
+              return (
+                <div className="space-y-4">
+                  <h3 className="font-display text-lg font-bold text-foreground">
+                    Knockout Tournament {selectedSeason ? `— ${seasonLabel(selectedSeason)}` : ""}
+                  </h3>
+                  <BracketDisplay rounds={rounds} />
+                  <KnockoutDisplay rounds={rounds} />
+                </div>
+              );
+            })()}
 
             {/* Champions League: Group Stage + Knockouts */}
             {isChampionsLeague && seasonMatches.length > 0 && (() => {
               const groups = buildCLGroups(seasonMatches);
-              const knockoutMatches = seasonMatches.filter(m => (m.WeekID || 0) > 6);
               const knockoutRounds = buildKnockoutRounds(seasonMatches, 7);
               return (
                 <div className="space-y-6">
@@ -571,6 +631,7 @@ export default function LeaguePage() {
                   {knockoutRounds.length > 0 && (
                     <>
                       <h3 className="font-display text-lg font-bold text-foreground">Knockout Stage</h3>
+                      <BracketDisplay rounds={knockoutRounds} />
                       <KnockoutDisplay rounds={knockoutRounds} />
                     </>
                   )}
@@ -578,15 +639,19 @@ export default function LeaguePage() {
               );
             })()}
 
-            {/* Non-domestic, non-cup, non-CL (World Cup etc) — show results as knockout */}
-            {!isDomestic && !isCup && !isChampionsLeague && seasonMatches.length > 0 && (
-              <div>
-                <h3 className="font-display text-lg font-bold text-foreground mb-3">
-                  Results {selectedSeason ? `— ${seasonLabel(selectedSeason)}` : ""}
-                </h3>
-                <KnockoutDisplay rounds={buildKnockoutRounds(seasonMatches)} />
-              </div>
-            )}
+            {/* International competitions (LeagueID ≥ 20) — knockout bracket + results */}
+            {isIntl && seasonMatches.length > 0 && (() => {
+              const rounds = buildKnockoutRounds(seasonMatches);
+              return (
+                <div className="space-y-4">
+                  <h3 className="font-display text-lg font-bold text-foreground">
+                    Results {selectedSeason ? `— ${seasonLabel(selectedSeason)}` : ""}
+                  </h3>
+                  <BracketDisplay rounds={rounds} />
+                  <KnockoutDisplay rounds={rounds} />
+                </div>
+              );
+            })()}
 
             {/* Annual Awards */}
             {awardSeasons.length > 0 && (
@@ -735,7 +800,7 @@ export default function LeaguePage() {
 
           {/* Sidebar: Teams */}
           <div className="space-y-6">
-            {teams.length > 0 && (
+            {!isIntl && teams.length > 0 && (
               <div className="border border-border rounded overflow-hidden">
                 <div className="bg-table-header px-3 py-2">
                   <h3 className="font-display text-sm font-bold text-table-header-foreground">Teams</h3>
