@@ -189,7 +189,7 @@ export default function TeamPage() {
   const [h2hOpen, setH2hOpen] = useState(true);
   const [overallDebutMap, setOverallDebutMap] = useState<Map<string, number>>(new Map());
   // Maps "leagueId|seasonId" -> all matches in that tournament (for stage calculation)
-  const [allTournamentMatches, setAllTournamentMatches] = useState<Map<string, { homeId: number; awayId: number; homeScore: number; awayScore: number; weekId: number }[]>>(new Map());
+  const [allTournamentMatches, setAllTournamentMatches] = useState<Map<string, { matchId: number; homeId: number; awayId: number; homeScore: number; awayScore: number; weekId: number }[]>>(new Map());
   // Result sort
   const [resultSortKey, setResultSortKey] = useState<string>("date");
   const [resultSortDir, setResultSortDir] = useState<"asc" | "desc">("asc");
