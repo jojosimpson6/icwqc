@@ -559,19 +559,22 @@ export default function LeaguePage() {
             )}
 
             {/* Cup knockout display */}
-            {isCup && seasonMatches.length > 0 && (
-              <div>
-                <h3 className="font-display text-lg font-bold text-foreground mb-3">
-                  Knockout Tournament {selectedSeason ? `— ${seasonLabel(selectedSeason)}` : ""}
-                </h3>
-                <KnockoutDisplay rounds={buildKnockoutRounds(seasonMatches)} />
-              </div>
-            )}
+            {isCup && seasonMatches.length > 0 && (() => {
+              const rounds = buildKnockoutRounds(seasonMatches);
+              return (
+                <div className="space-y-4">
+                  <h3 className="font-display text-lg font-bold text-foreground">
+                    Knockout Tournament {selectedSeason ? `— ${seasonLabel(selectedSeason)}` : ""}
+                  </h3>
+                  <BracketDisplay rounds={rounds} />
+                  <KnockoutDisplay rounds={rounds} />
+                </div>
+              );
+            })()}
 
             {/* Champions League: Group Stage + Knockouts */}
             {isChampionsLeague && seasonMatches.length > 0 && (() => {
               const groups = buildCLGroups(seasonMatches);
-              const knockoutMatches = seasonMatches.filter(m => (m.WeekID || 0) > 6);
               const knockoutRounds = buildKnockoutRounds(seasonMatches, 7);
               return (
                 <div className="space-y-6">
@@ -628,6 +631,7 @@ export default function LeaguePage() {
                   {knockoutRounds.length > 0 && (
                     <>
                       <h3 className="font-display text-lg font-bold text-foreground">Knockout Stage</h3>
+                      <BracketDisplay rounds={knockoutRounds} />
                       <KnockoutDisplay rounds={knockoutRounds} />
                     </>
                   )}
@@ -635,15 +639,19 @@ export default function LeaguePage() {
               );
             })()}
 
-            {/* Non-domestic, non-cup, non-CL (World Cup etc) — show results as knockout */}
-            {!isDomestic && !isCup && !isChampionsLeague && seasonMatches.length > 0 && (
-              <div>
-                <h3 className="font-display text-lg font-bold text-foreground mb-3">
-                  Results {selectedSeason ? `— ${seasonLabel(selectedSeason)}` : ""}
-                </h3>
-                <KnockoutDisplay rounds={buildKnockoutRounds(seasonMatches)} />
-              </div>
-            )}
+            {/* International competitions (LeagueID ≥ 20) — knockout bracket + results */}
+            {isIntl && seasonMatches.length > 0 && (() => {
+              const rounds = buildKnockoutRounds(seasonMatches);
+              return (
+                <div className="space-y-4">
+                  <h3 className="font-display text-lg font-bold text-foreground">
+                    Results {selectedSeason ? `— ${seasonLabel(selectedSeason)}` : ""}
+                  </h3>
+                  <BracketDisplay rounds={rounds} />
+                  <KnockoutDisplay rounds={rounds} />
+                </div>
+              );
+            })()}
 
             {/* Annual Awards */}
             {awardSeasons.length > 0 && (
