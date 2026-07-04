@@ -624,6 +624,36 @@ export default function TeamPage() {
                 const allMatches = allTournamentMatches.get(`${row.LeagueID}|${row.SeasonID}`);
                 if (!allMatches || allMatches.length === 0) return "—";
 
+                // International comps (LeagueID ≥ 20): last week has Final + 3rd-place playoff.
+                // Higher MatchID = Final; lower MatchID = 3rd-place playoff.
+                if (row.LeagueID >= 20) {
+                  const teamMatches = allMatches.filter(m => m.homeId === tid || m.awayId === tid);
+                  if (teamMatches.length === 0) return "—";
+                  const maxWeek = Math.max(...allMatches.map(m => m.weekId));
+                  const lastWeekMatches = allMatches.filter(m => m.weekId === maxWeek);
+                  if (lastWeekMatches.length === 2) {
+                    const sortedLW = [...lastWeekMatches].sort((a, b) => a.matchId - b.matchId);
+                    const [thirdMatch, finalMatch] = sortedLW;
+                    const inFinal = finalMatch.homeId === tid || finalMatch.awayId === tid;
+                    const inThird = thirdMatch.homeId === tid || thirdMatch.awayId === tid;
+                    if (inFinal) {
+                      const isHome = finalMatch.homeId === tid;
+                      const won = (isHome ? finalMatch.homeScore : finalMatch.awayScore) > (isHome ? finalMatch.awayScore : finalMatch.homeScore);
+                      return won ? "🏆 Champion" : "Runner-Up";
+                    }
+                    if (inThird) {
+                      const isHome = thirdMatch.homeId === tid;
+                      const won = (isHome ? thirdMatch.homeScore : thirdMatch.awayScore) > (isHome ? thirdMatch.awayScore : thirdMatch.homeScore);
+                      return won ? "3rd Place" : "4th Place";
+                    }
+                  }
+                  // Fell short of the semifinals — use generic round labeling
+                  const lastMyWeek = Math.max(...teamMatches.map(m => m.weekId));
+                  if (lastMyWeek === maxWeek - 1) return "Semifinals";
+                  if (lastMyWeek === maxWeek - 2) return "Quarterfinals";
+                  return `Round ${lastMyWeek}`;
+                }
+
                 // For CL: knockout starts at week 7; for cups: all weeks are knockout
                 const knockoutMatches = isCL ? allMatches.filter(m => m.weekId > 6) : allMatches;
                 if (knockoutMatches.length === 0) {
