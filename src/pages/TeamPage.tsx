@@ -392,7 +392,7 @@ export default function TeamPage() {
       // Fetch ALL matches for each cup tournament (needed for stage calculation)
       const allMatchesFetches = cupPairs.map(({ seasonId, leagueId }) =>
         fetchAllRows("results", {
-          select: "HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID",
+          select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID",
           filters: [
             { method: "eq", args: ["LeagueID", leagueId] },
             { method: "eq", args: ["SeasonID", seasonId] },
@@ -404,7 +404,7 @@ export default function TeamPage() {
         Promise.all(allMatchesFetches),
       ]);
 
-      const tournamentMap = new Map<string, { homeId: number; awayId: number; homeScore: number; awayScore: number; weekId: number }[]>();
+      const tournamentMap = new Map<string, { matchId: number; homeId: number; awayId: number; homeScore: number; awayScore: number; weekId: number }[]>();
 
       cupPairs.forEach(({ seasonId, leagueId, leagueN, tier }, pi) => {
         const cupResults = allCupResults[pi] || [];
@@ -418,6 +418,7 @@ export default function TeamPage() {
         });
         // Store all tournament matches for stage display
         tournamentMap.set(`${leagueId}|${seasonId}`, allMatches.map((r: any) => ({
+          matchId: r.MatchID || 0,
           homeId: r.HomeTeamID || 0, awayId: r.AwayTeamID || 0,
           homeScore: r.HomeTeamScore || 0, awayScore: r.AwayTeamScore || 0,
           weekId: r.WeekID || 0,
