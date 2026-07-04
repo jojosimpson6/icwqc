@@ -482,6 +482,14 @@ export default function LeaguePage() {
               View History →
             </Link>
           </div>
+          {parentCompId && (
+            <p className="text-xs text-muted-foreground font-sans mt-1">
+              Qualifying tournament for{" "}
+              <Link to={`/league/${parentCompId}`} className="text-accent hover:underline font-medium">
+                view main competition →
+              </Link>
+            </p>
+          )}
           <div className="flex items-center gap-4 mt-1">
             <Link to={`/league/${league.LeagueID}/history`} className="text-sm text-accent hover:underline font-sans inline-block">
               Season-by-Season History →
