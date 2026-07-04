@@ -431,7 +431,10 @@ export default function TeamPage() {
       setAllTournamentMatches(tournamentMap);
     }
 
-    registerRows.sort((a, b) => a.SeasonID - b.SeasonID || a.LeagueID - b.LeagueID);
+    // Sort by season, then qualifying comps come before their parent competition
+    const QUAL_PARENT: Record<number, number> = { 21: 20, 23: 22, 25: 24, 27: 26, 29: 28 };
+    const rank = (lid: number) => (QUAL_PARENT[lid] != null ? QUAL_PARENT[lid] - 0.5 : lid);
+    registerRows.sort((a, b) => a.SeasonID - b.SeasonID || rank(a.LeagueID) - rank(b.LeagueID));
     setSeasonRegister(registerRows);
   }
 
