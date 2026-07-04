@@ -97,6 +97,10 @@ export default function LeaguePage() {
   const isCup = lid >= 15 && lid <= 18;
   const isChampionsLeague = lid === 19;
   const isDomestic = lid >= 1 && lid <= 14;
+  const isIntl = lid >= 20;
+  // Qualifying → parent competition mapping
+  const QUALIFYING_PARENT: Record<number, number> = { 21: 20, 23: 22, 25: 24, 27: 26, 29: 28 };
+  const parentCompId: number | null = QUALIFYING_PARENT[lid] ?? null;
 
   useEffect(() => {
     if (!id) return;
