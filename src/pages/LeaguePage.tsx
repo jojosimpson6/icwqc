@@ -800,7 +800,7 @@ export default function LeaguePage() {
 
           {/* Sidebar: Teams */}
           <div className="space-y-6">
-            {teams.length > 0 && (
+            {!isIntl && teams.length > 0 && (
               <div className="border border-border rounded overflow-hidden">
                 <div className="bg-table-header px-3 py-2">
                   <h3 className="font-display text-sm font-bold text-table-header-foreground">Teams</h3>
