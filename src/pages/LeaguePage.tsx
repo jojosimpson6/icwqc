@@ -253,26 +253,42 @@ export default function LeaguePage() {
     // For two-leg rounds, group pairs of weeks
     const rounds: { name: string; matches: MatchResult[] }[] = [];
     let i = 0;
+    let semiWinners: Set<number> = new Set();
     while (i < weeks.length) {
       const w1Matches = weekGroups.get(weeks[i])!;
       const isLastWeek = i === weeks.length - 1;
-      // International comps: last week with 2 matches = Final + 3rd-place playoff
-      if (isIntl && isLastWeek && w1Matches.length === 2) {
-        const sorted = [...w1Matches].sort((a, b) => (a.MatchID || 0) - (b.MatchID || 0));
-        rounds.push({ name: "3rd Place Playoff", matches: [sorted[0]] });
-        rounds.push({ name: "Final", matches: [sorted[1]] });
-        i++;
-        continue;
+      // Last week with 2 matches = Final + 3rd-place playoff.
+      // Final = the match between the two semifinal winners.
+      if (isLastWeek && w1Matches.length === 2 && semiWinners.size >= 2) {
+        const isFinal = (m: MatchResult) =>
+          m.HomeTeamID != null && semiWinners.has(m.HomeTeamID) &&
+          m.AwayTeamID != null && semiWinners.has(m.AwayTeamID);
+        const finalM = w1Matches.find(isFinal);
+        const thirdM = w1Matches.find(m => m !== finalM);
+        if (finalM && thirdM) {
+          rounds.push({ name: "3rd Place Playoff", matches: [thirdM] });
+          rounds.push({ name: "Final", matches: [finalM] });
+          i++;
+          continue;
+        }
       }
-      // Check if next week has same number of matches (two-leg)
+      // Two-leg round detection (non-intl)
       if (i + 1 < weeks.length) {
         const w2Matches = weekGroups.get(weeks[i + 1])!;
         if (w1Matches.length === w2Matches.length && w1Matches.length > 1 && !isIntl) {
-          // Two-leg round
           rounds.push({ name: roundNames(w1Matches.length), matches: [...w1Matches, ...w2Matches] });
           i += 2;
           continue;
         }
+      }
+      // Capture semifinal winners for identifying the Final next round
+      if (w1Matches.length === 2) {
+        semiWinners = new Set();
+        w1Matches.forEach(m => {
+          const hs = m.HomeTeamScore ?? 0, as_ = m.AwayTeamScore ?? 0;
+          if (hs > as_ && m.HomeTeamID != null) semiWinners.add(m.HomeTeamID);
+          else if (as_ > hs && m.AwayTeamID != null) semiWinners.add(m.AwayTeamID);
+        });
       }
       rounds.push({ name: roundNames(w1Matches.length), matches: w1Matches });
       i++;
@@ -280,41 +296,68 @@ export default function LeaguePage() {
     return rounds;
   };
 
-  // Build a simple bracket visualization from rounds
+  // Cleaner bracket visualization (Wikipedia-style with connector lines)
   const BracketDisplay = ({ rounds }: { rounds: { name: string; matches: MatchResult[] }[] }) => {
-    // exclude 3rd Place Playoff from bracket
     const bracketRounds = rounds.filter(r => r.name !== "3rd Place Playoff");
+    const thirdPlace = rounds.find(r => r.name === "3rd Place Playoff");
     if (bracketRounds.length === 0) return null;
-    return (
-      <div className="border border-border rounded overflow-x-auto bg-card p-3">
-        <div className="flex gap-3 min-w-max">
-          {bracketRounds.map((round, ri) => (
-            <div key={ri} className="flex flex-col justify-around gap-2 min-w-[180px]">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-center">{round.name}</p>
-              {round.matches.map((m, mi) => {
-                const hName = m.HomeTeamID ? teamMap.get(m.HomeTeamID) || `Team ${m.HomeTeamID}` : "TBD";
-                const aName = m.AwayTeamID ? teamMap.get(m.AwayTeamID) || `Team ${m.AwayTeamID}` : "TBD";
-                const hs = m.HomeTeamScore ?? 0, as_ = m.AwayTeamScore ?? 0;
-                const hWin = hs > as_, aWin = as_ > hs;
-                return (
-                  <div key={mi} className="border border-border rounded text-xs font-sans bg-background flex-1 min-h-[52px] flex flex-col justify-center">
-                    <div className={`flex justify-between px-2 py-1 ${hWin ? "font-bold" : ""}`}>
-                      <Link to={`/team/${encodeURIComponent(hName)}`} className="text-accent hover:underline truncate">{hName}</Link>
-                      <span className="font-mono ml-2">{m.HomeTeamScore ?? "—"}</span>
-                    </div>
-                    <div className={`flex justify-between px-2 py-1 border-t border-border/50 ${aWin ? "font-bold" : ""}`}>
-                      <Link to={`/team/${encodeURIComponent(aName)}`} className="text-accent hover:underline truncate">{aName}</Link>
-                      <span className="font-mono ml-2">{m.AwayTeamScore ?? "—"}</span>
-                    </div>
-                  </div>
-                );
-              })}
+
+    const MatchBox = ({ m }: { m: MatchResult }) => {
+      const hName = m.HomeTeamID ? teamMap.get(m.HomeTeamID) || `Team ${m.HomeTeamID}` : "TBD";
+      const aName = m.AwayTeamID ? teamMap.get(m.AwayTeamID) || `Team ${m.AwayTeamID}` : "TBD";
+      const hs = m.HomeTeamScore ?? 0, as_ = m.AwayTeamScore ?? 0;
+      const played = m.HomeTeamScore != null && m.AwayTeamScore != null;
+      const hWin = played && hs > as_, aWin = played && as_ > hs;
+      return (
+        <Link to={m.MatchID ? `/match/${m.MatchID}` : "#"} className="block group">
+          <div className="border border-border rounded bg-background overflow-hidden shadow-sm group-hover:border-accent transition-colors">
+            <div className={`flex items-center justify-between px-2.5 py-1.5 ${hWin ? "bg-secondary/50" : ""}`}>
+              <span className={`truncate text-xs ${hWin ? "font-bold text-foreground" : "text-foreground/80"}`}>{hName}</span>
+              <span className={`font-mono text-xs ml-2 ${hWin ? "font-bold" : "text-muted-foreground"}`}>{played ? hs : "—"}</span>
             </div>
-          ))}
+            <div className={`flex items-center justify-between px-2.5 py-1.5 border-t border-border/60 ${aWin ? "bg-secondary/50" : ""}`}>
+              <span className={`truncate text-xs ${aWin ? "font-bold text-foreground" : "text-foreground/80"}`}>{aName}</span>
+              <span className={`font-mono text-xs ml-2 ${aWin ? "font-bold" : "text-muted-foreground"}`}>{played ? as_ : "—"}</span>
+            </div>
+          </div>
+        </Link>
+      );
+    };
+
+    return (
+      <div className="border border-border rounded bg-gradient-to-br from-card to-secondary/10 overflow-x-auto">
+        <div className="flex gap-6 p-6 min-w-max items-stretch">
+          {bracketRounds.map((round, ri) => {
+            const gapClass = ri === 0 ? "gap-3" : ri === 1 ? "gap-16" : ri === 2 ? "gap-40" : "gap-64";
+            return (
+              <div key={ri} className="flex flex-col min-w-[210px]">
+                <div className="bg-primary/10 border border-primary/20 rounded px-3 py-1.5 mb-4 text-center">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-primary">{round.name}</p>
+                </div>
+                <div className={`flex flex-col justify-around flex-1 ${gapClass}`}>
+                  {round.matches.map((m, mi) => (
+                    <div key={mi} className="relative">
+                      <MatchBox m={m} />
+                      {ri < bracketRounds.length - 1 && (
+                        <div className="absolute top-1/2 -right-3 w-3 border-t-2 border-border" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
+        {thirdPlace && (
+          <div className="border-t border-border p-4 bg-background/50">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2 text-center">3rd Place Playoff</p>
+            <div className="max-w-[240px] mx-auto"><MatchBox m={thirdPlace.matches[0]} /></div>
+          </div>
+        )}
       </div>
     );
   };
+
 
   // Build CL group standings from weeks 1-6
   const buildCLGroups = (matches: MatchResult[]) => {
