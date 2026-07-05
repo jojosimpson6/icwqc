@@ -156,8 +156,8 @@ export default function LeaguePage() {
         setPlayerPosMap(ppm);
       }
 
-      // For cups/CL/international, fetch match results
-      if (isCup || isChampionsLeague || isIntl) {
+      // For any non-domestic, fetch match results
+      if (!isDomestic) {
         fetchAllRows<MatchResult>("results", {
           select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID,SeasonID,LeagueID,IsNeutralSite",
           filters: [{ method: "eq", args: ["LeagueID", lid] }],
@@ -165,14 +165,29 @@ export default function LeaguePage() {
         }).then(results => {
           setMatchResults(results);
           const seasons = [...new Set(results.map(r => r.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number)) as number[];
-          if (!isDomestic) {
-            setAvailableSeasons(seasons);
-            if (seasons.length > 0) setSelectedSeason(seasons[0]);
-          }
+          setAvailableSeasons(seasons);
+          if (seasons.length > 0) setSelectedSeason(seasons[0]);
         });
       }
     });
   }, [id]);
+
+  // For qualifying comps, load parent-competition teams to detect advancers
+  useEffect(() => {
+    if (!isQualifying || !parentCompId || !selectedSeason) { setAdvancedTeams(new Set()); return; }
+    fetchAllRows<any>("results", {
+      select: '"HomeTeamID","AwayTeamID","SeasonID"',
+      filters: [
+        { method: "eq", args: ["LeagueID", parentCompId] },
+        { method: "in", args: ["SeasonID", [selectedSeason, selectedSeason + 1]] },
+      ],
+    }).then(rows => {
+      const s = new Set<number>();
+      (rows || []).forEach((r: any) => { if (r.HomeTeamID) s.add(r.HomeTeamID); if (r.AwayTeamID) s.add(r.AwayTeamID); });
+      setAdvancedTeams(s);
+    }).catch(() => setAdvancedTeams(new Set()));
+  }, [isQualifying, parentCompId, selectedSeason]);
+
 
   const seasonStandings = standings.filter(s => s.SeasonID === selectedSeason);
 
