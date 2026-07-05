@@ -55,12 +55,32 @@ interface IntlResult {
   AwayTeamScore: number | null;
   SeasonID: number | null;
   LeagueID: number | null;
+  WeekID: number | null;
   SnitchCaughtTime: number | null;
 }
 
 function seasonLabel(id: number): string {
   return `${id - 1}–${String(id).slice(-2)}`;
 }
+
+// Round label for an international match — uses fixed week structure for main knockouts.
+function roundLabel(leagueId: number | null, weekId: number | null, won: boolean): string {
+  if (!leagueId || weekId == null) return "";
+  // Qualifying comps
+  if ([21, 23, 25, 27, 29].includes(leagueId)) return "Group Stage";
+  // Friendlies
+  if (leagueId === 30) return "Friendly";
+  // Main international knockouts: W1=R16, W2=QF, W3=SF, W4=Final or 3rd Place
+  if ([20, 22, 24, 26, 28].includes(leagueId)) {
+    if (weekId === 1) return "Round of 16";
+    if (weekId === 2) return "Quarterfinal";
+    if (weekId === 3) return "Semifinal";
+    if (weekId === 4) return won ? "Final" : "3rd Place";
+  }
+  // Domestic cups: fall back to week number
+  return `Week ${weekId}`;
+}
+
 
 export default function NationPage() {
   const { id } = useParams();
