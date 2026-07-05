@@ -171,7 +171,12 @@ export default function SchedulePage() {
         });
       });
 
+      // Track MatchIDs already present in results so scheduled_matches doesn't duplicate them
+      const playedIds = new Set<number>();
+      (pastRows || []).forEach((r: any) => { if (r.MatchID != null) playedIds.add(r.MatchID); });
+
       (futRows || []).forEach((r: any) => {
+        if (r.MatchID != null && playedIds.has(r.MatchID)) return;
         list.push({
           MatchID: r.MatchID,
           SeasonID: r.SeasonID,
@@ -185,6 +190,7 @@ export default function SchedulePage() {
           played: false,
         });
       });
+
 
       setGames(list);
       setLoading(false);
