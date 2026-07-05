@@ -55,12 +55,29 @@ interface IntlResult {
   AwayTeamScore: number | null;
   SeasonID: number | null;
   LeagueID: number | null;
+  WeekID: number | null;
   SnitchCaughtTime: number | null;
 }
 
 function seasonLabel(id: number): string {
   return `${id - 1}–${String(id).slice(-2)}`;
 }
+
+// Round label for an international match — uses fixed week structure for main knockouts.
+function roundLabel(leagueId: number | null, weekId: number | null, isFinal: boolean): string {
+  if (!leagueId || weekId == null) return "";
+  if ([21, 23, 25, 27, 29].includes(leagueId)) return "Group Stage";
+  if (leagueId === 30) return "Friendly";
+  if ([20, 22, 24, 26, 28].includes(leagueId)) {
+    if (weekId === 1) return "Round of 16";
+    if (weekId === 2) return "Quarterfinal";
+    if (weekId === 3) return "Semifinal";
+    if (weekId === 4) return isFinal ? "Final" : "3rd Place Playoff";
+  }
+  return `Week ${weekId}`;
+}
+
+
 
 export default function NationPage() {
   const { id } = useParams();
@@ -73,6 +90,40 @@ export default function NationPage() {
   const [leagueMap, setLeagueMap] = useState<Map<number, string>>(new Map());
   const [nationalTeam, setNationalTeam] = useState<{ TeamID: number; FullName: string; PrimaryColor: string | null; logo_url: string | null } | null>(null);
   const [matchRosterPlayers, setMatchRosterPlayers] = useState<{ PlayerID: number; PlayerName: string; Position: string }[]>([]);
+  const [semiWinnersMap, setSemiWinnersMap] = useState<Map<string, Set<number>>>(new Map());
+
+  // For each (season, league) the nation appears in W4, load W3 winners to distinguish Final vs 3rd-place.
+  useEffect(() => {
+    const keys = new Set<string>();
+    intlResults.forEach(r => {
+      if (r.WeekID === 4 && r.LeagueID && [20, 22, 24, 26, 28].includes(r.LeagueID) && r.SeasonID) {
+        keys.add(`${r.SeasonID}|${r.LeagueID}`);
+      }
+    });
+    if (keys.size === 0) { setSemiWinnersMap(new Map()); return; }
+    const pairs = [...keys].map(k => k.split("|").map(Number));
+    const seasons = [...new Set(pairs.map(p => p[0]))];
+    const leagues = [...new Set(pairs.map(p => p[1]))];
+    fetchAllRows<any>("results", {
+      select: '"HomeTeamID","AwayTeamID","HomeTeamScore","AwayTeamScore","SeasonID","LeagueID","WeekID"',
+      filters: [
+        { method: "in", args: ["LeagueID", leagues] },
+        { method: "in", args: ["SeasonID", seasons] },
+        { method: "eq", args: ["WeekID", 3] },
+      ],
+    }).then(rows => {
+      const m = new Map<string, Set<number>>();
+      (rows || []).forEach((r: any) => {
+        const key = `${r.SeasonID}|${r.LeagueID}`;
+        if (!m.has(key)) m.set(key, new Set());
+        const hs = r.HomeTeamScore ?? 0, as_ = r.AwayTeamScore ?? 0;
+        if (hs > as_ && r.HomeTeamID) m.get(key)!.add(r.HomeTeamID);
+        else if (as_ > hs && r.AwayTeamID) m.get(key)!.add(r.AwayTeamID);
+      });
+      setSemiWinnersMap(m);
+    }).catch(() => {});
+  }, [intlResults]);
+
 
   useEffect(() => {
     if (!id) return;
@@ -115,7 +166,7 @@ export default function NationPage() {
 
         // Fetch intl results for this national team specifically
         fetchAllRows("results", {
-          select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,SnitchCaughtTime,HomeChaser1ID,HomeChaser2ID,HomeChaser3ID,HomeKeeperID,HomeSeekerID,HomeBeater1ID,HomeBeater2ID,AwayChaser1ID,AwayChaser2ID,AwayChaser3ID,AwayKeeperID,AwaySeekerID,AwayBeater1ID,AwayBeater2ID",
+          select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,WeekID,SnitchCaughtTime,HomeChaser1ID,HomeChaser2ID,HomeChaser3ID,HomeKeeperID,HomeSeekerID,HomeBeater1ID,HomeBeater2ID,AwayChaser1ID,AwayChaser2ID,AwayChaser3ID,AwayKeeperID,AwaySeekerID,AwayBeater1ID,AwayBeater2ID",
           filters: [{ method: "or", args: [`HomeTeamID.eq.${natTeam.TeamID},AwayTeamID.eq.${natTeam.TeamID}`] }],
           order: { column: "MatchID", ascending: false },
         }).then(async (rData) => {
@@ -409,6 +460,7 @@ export default function NationPage() {
                       <tr className="bg-secondary">
                         <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
                         <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Competition</th>
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Round</th>
                         <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Home</th>
                         <th className="px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">Score</th>
                         <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Away</th>
@@ -423,11 +475,23 @@ export default function NationPage() {
                         const isNatHome = r.HomeTeamID === nationalTeam?.TeamID;
                         const natScore = isNatHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
                         const oppScore = isNatHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
-                        const won = nationalTeam && natScore > oppScore;
+                        const won = !!(nationalTeam && natScore > oppScore);
+                        // W4 Final vs 3rd: match is Final if both teams won their semifinal
+                        let isFinalMatch = false;
+                        if (r.WeekID === 4 && r.LeagueID && r.SeasonID) {
+                          const winners = semiWinnersMap.get(`${r.SeasonID}|${r.LeagueID}`);
+                          if (winners && r.HomeTeamID && r.AwayTeamID) {
+                            isFinalMatch = winners.has(r.HomeTeamID) && winners.has(r.AwayTeamID);
+                          }
+                        }
+                        const round = roundLabel(r.LeagueID, r.WeekID, isFinalMatch);
                         return (
                           <tr key={r.MatchID} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
                             <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{r.SeasonID ? seasonLabel(r.SeasonID) : "—"}</td>
-                            <td className="px-3 py-1.5 text-xs text-muted-foreground">{compName}</td>
+                            <td className="px-3 py-1.5 text-xs">
+                              {r.LeagueID ? <Link to={`/league/${r.LeagueID}`} className="text-accent hover:underline">{compName}</Link> : compName}
+                            </td>
+                            <td className="px-3 py-1.5 text-xs text-muted-foreground">{round}</td>
                             <td className={`px-3 py-1.5 text-accent hover:underline ${isNatHome && won ? "font-bold" : ""}`}>
                               <Link to={`/team/${encodeURIComponent(homeName)}`}>{homeName}</Link>
                             </td>
@@ -447,6 +511,7 @@ export default function NationPage() {
                   </table>
                 </div>
               </div>
+
             ) : (
               <p className="text-muted-foreground font-sans text-sm italic">No international results found.</p>
             )}

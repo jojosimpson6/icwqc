@@ -645,13 +645,21 @@ export default function PlayerProfile() {
   const domesticLeagueNames = new Set(
     [...leagueNameMap.entries()].filter(([id]) => id >= 1 && id <= 14).map(([, name]) => name)
   );
+  // International league names (LeagueID >= 20 — cups + qualifiers + friendlies)
+  const intlLeagueNames = new Set(
+    [...leagueNameMap.entries()].filter(([id]) => id >= 20).map(([, name]) => name)
+  );
   const hasDomesticComps = allComps.some(c => domesticLeagueNames.has(c));
+  const hasIntlComps = allComps.some(c => intlLeagueNames.has(c));
 
   const filteredStats = compFilter === "all"
     ? sortedStats
     : compFilter === "domestic"
     ? sortedStats.filter(s => s.LeagueName && domesticLeagueNames.has(s.LeagueName))
+    : compFilter === "international"
+    ? sortedStats.filter(s => s.LeagueName && intlLeagueNames.has(s.LeagueName))
     : sortedStats.filter(s => s.LeagueName === compFilter);
+
 
   // Career bests per competition (for gold shading)
   // Key is either the league name OR "domestic" for all domestic leagues pooled
@@ -847,7 +855,9 @@ export default function PlayerProfile() {
                 >
                   <option value="all">All Competitions</option>
                   {hasDomesticComps && <option value="domestic">All League Matches</option>}
+                  {hasIntlComps && <option value="international">All International</option>}
                   {allComps.map(c => <option key={c} value={c}>{c}</option>)}
+
                 </select>
               )}
             </div>

@@ -97,10 +97,14 @@ export default function LeaguePage() {
   const isCup = lid >= 15 && lid <= 18;
   const isChampionsLeague = lid === 19;
   const isDomestic = lid >= 1 && lid <= 14;
-  const isIntl = lid >= 20;
   // Qualifying → parent competition mapping
   const QUALIFYING_PARENT: Record<number, number> = { 21: 20, 23: 22, 25: 24, 27: 26, 29: 28 };
+  const isQualifying = lid in QUALIFYING_PARENT;
+  const isIntl = lid >= 20 && !isQualifying && lid !== 30; // 30 = friendlies
+  const isFriendly = lid === 30;
   const parentCompId: number | null = QUALIFYING_PARENT[lid] ?? null;
+  const [advancedTeams, setAdvancedTeams] = useState<Set<number>>(new Set());
+
 
   useEffect(() => {
     if (!id) return;
@@ -152,8 +156,8 @@ export default function LeaguePage() {
         setPlayerPosMap(ppm);
       }
 
-      // For cups/CL/international, fetch match results
-      if (isCup || isChampionsLeague || isIntl) {
+      // For any non-domestic, fetch match results
+      if (!isDomestic) {
         fetchAllRows<MatchResult>("results", {
           select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID,SeasonID,LeagueID,IsNeutralSite",
           filters: [{ method: "eq", args: ["LeagueID", lid] }],
@@ -161,14 +165,29 @@ export default function LeaguePage() {
         }).then(results => {
           setMatchResults(results);
           const seasons = [...new Set(results.map(r => r.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number)) as number[];
-          if (!isDomestic) {
-            setAvailableSeasons(seasons);
-            if (seasons.length > 0) setSelectedSeason(seasons[0]);
-          }
+          setAvailableSeasons(seasons);
+          if (seasons.length > 0) setSelectedSeason(seasons[0]);
         });
       }
     });
   }, [id]);
+
+  // For qualifying comps, load parent-competition teams to detect advancers
+  useEffect(() => {
+    if (!isQualifying || !parentCompId || !selectedSeason) { setAdvancedTeams(new Set()); return; }
+    fetchAllRows<any>("results", {
+      select: '"HomeTeamID","AwayTeamID","SeasonID"',
+      filters: [
+        { method: "eq", args: ["LeagueID", parentCompId] },
+        { method: "in", args: ["SeasonID", [selectedSeason, selectedSeason + 1]] },
+      ],
+    }).then(rows => {
+      const s = new Set<number>();
+      (rows || []).forEach((r: any) => { if (r.HomeTeamID) s.add(r.HomeTeamID); if (r.AwayTeamID) s.add(r.AwayTeamID); });
+      setAdvancedTeams(s);
+    }).catch(() => setAdvancedTeams(new Set()));
+  }, [isQualifying, parentCompId, selectedSeason]);
+
 
   const seasonStandings = standings.filter(s => s.SeasonID === selectedSeason);
 
@@ -234,26 +253,42 @@ export default function LeaguePage() {
     // For two-leg rounds, group pairs of weeks
     const rounds: { name: string; matches: MatchResult[] }[] = [];
     let i = 0;
+    let semiWinners: Set<number> = new Set();
     while (i < weeks.length) {
       const w1Matches = weekGroups.get(weeks[i])!;
       const isLastWeek = i === weeks.length - 1;
-      // International comps: last week with 2 matches = Final + 3rd-place playoff
-      if (isIntl && isLastWeek && w1Matches.length === 2) {
-        const sorted = [...w1Matches].sort((a, b) => (a.MatchID || 0) - (b.MatchID || 0));
-        rounds.push({ name: "3rd Place Playoff", matches: [sorted[0]] });
-        rounds.push({ name: "Final", matches: [sorted[1]] });
-        i++;
-        continue;
+      // Last week with 2 matches = Final + 3rd-place playoff.
+      // Final = the match between the two semifinal winners.
+      if (isLastWeek && w1Matches.length === 2 && semiWinners.size >= 2) {
+        const isFinal = (m: MatchResult) =>
+          m.HomeTeamID != null && semiWinners.has(m.HomeTeamID) &&
+          m.AwayTeamID != null && semiWinners.has(m.AwayTeamID);
+        const finalM = w1Matches.find(isFinal);
+        const thirdM = w1Matches.find(m => m !== finalM);
+        if (finalM && thirdM) {
+          rounds.push({ name: "3rd Place Playoff", matches: [thirdM] });
+          rounds.push({ name: "Final", matches: [finalM] });
+          i++;
+          continue;
+        }
       }
-      // Check if next week has same number of matches (two-leg)
+      // Two-leg round detection (non-intl)
       if (i + 1 < weeks.length) {
         const w2Matches = weekGroups.get(weeks[i + 1])!;
         if (w1Matches.length === w2Matches.length && w1Matches.length > 1 && !isIntl) {
-          // Two-leg round
           rounds.push({ name: roundNames(w1Matches.length), matches: [...w1Matches, ...w2Matches] });
           i += 2;
           continue;
         }
+      }
+      // Capture semifinal winners for identifying the Final next round
+      if (w1Matches.length === 2) {
+        semiWinners = new Set();
+        w1Matches.forEach(m => {
+          const hs = m.HomeTeamScore ?? 0, as_ = m.AwayTeamScore ?? 0;
+          if (hs > as_ && m.HomeTeamID != null) semiWinners.add(m.HomeTeamID);
+          else if (as_ > hs && m.AwayTeamID != null) semiWinners.add(m.AwayTeamID);
+        });
       }
       rounds.push({ name: roundNames(w1Matches.length), matches: w1Matches });
       i++;
@@ -261,52 +296,80 @@ export default function LeaguePage() {
     return rounds;
   };
 
-  // Build a simple bracket visualization from rounds
+  // Cleaner bracket visualization (Wikipedia-style with connector lines)
   const BracketDisplay = ({ rounds }: { rounds: { name: string; matches: MatchResult[] }[] }) => {
-    // exclude 3rd Place Playoff from bracket
     const bracketRounds = rounds.filter(r => r.name !== "3rd Place Playoff");
+    const thirdPlace = rounds.find(r => r.name === "3rd Place Playoff");
     if (bracketRounds.length === 0) return null;
-    return (
-      <div className="border border-border rounded overflow-x-auto bg-card p-3">
-        <div className="flex gap-3 min-w-max">
-          {bracketRounds.map((round, ri) => (
-            <div key={ri} className="flex flex-col justify-around gap-2 min-w-[180px]">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground text-center">{round.name}</p>
-              {round.matches.map((m, mi) => {
-                const hName = m.HomeTeamID ? teamMap.get(m.HomeTeamID) || `Team ${m.HomeTeamID}` : "TBD";
-                const aName = m.AwayTeamID ? teamMap.get(m.AwayTeamID) || `Team ${m.AwayTeamID}` : "TBD";
-                const hs = m.HomeTeamScore ?? 0, as_ = m.AwayTeamScore ?? 0;
-                const hWin = hs > as_, aWin = as_ > hs;
-                return (
-                  <div key={mi} className="border border-border rounded text-xs font-sans bg-background flex-1 min-h-[52px] flex flex-col justify-center">
-                    <div className={`flex justify-between px-2 py-1 ${hWin ? "font-bold" : ""}`}>
-                      <Link to={`/team/${encodeURIComponent(hName)}`} className="text-accent hover:underline truncate">{hName}</Link>
-                      <span className="font-mono ml-2">{m.HomeTeamScore ?? "—"}</span>
-                    </div>
-                    <div className={`flex justify-between px-2 py-1 border-t border-border/50 ${aWin ? "font-bold" : ""}`}>
-                      <Link to={`/team/${encodeURIComponent(aName)}`} className="text-accent hover:underline truncate">{aName}</Link>
-                      <span className="font-mono ml-2">{m.AwayTeamScore ?? "—"}</span>
-                    </div>
-                  </div>
-                );
-              })}
+
+    const MatchBox = ({ m }: { m: MatchResult }) => {
+      const hName = m.HomeTeamID ? teamMap.get(m.HomeTeamID) || `Team ${m.HomeTeamID}` : "TBD";
+      const aName = m.AwayTeamID ? teamMap.get(m.AwayTeamID) || `Team ${m.AwayTeamID}` : "TBD";
+      const hs = m.HomeTeamScore ?? 0, as_ = m.AwayTeamScore ?? 0;
+      const played = m.HomeTeamScore != null && m.AwayTeamScore != null;
+      const hWin = played && hs > as_, aWin = played && as_ > hs;
+      return (
+        <Link to={m.MatchID ? `/match/${m.MatchID}` : "#"} className="block group">
+          <div className="border border-border rounded bg-background overflow-hidden shadow-sm group-hover:border-accent transition-colors">
+            <div className={`flex items-center justify-between px-2.5 py-1.5 ${hWin ? "bg-secondary/50" : ""}`}>
+              <span className={`truncate text-xs ${hWin ? "font-bold text-foreground" : "text-foreground/80"}`}>{hName}</span>
+              <span className={`font-mono text-xs ml-2 ${hWin ? "font-bold" : "text-muted-foreground"}`}>{played ? hs : "—"}</span>
             </div>
-          ))}
+            <div className={`flex items-center justify-between px-2.5 py-1.5 border-t border-border/60 ${aWin ? "bg-secondary/50" : ""}`}>
+              <span className={`truncate text-xs ${aWin ? "font-bold text-foreground" : "text-foreground/80"}`}>{aName}</span>
+              <span className={`font-mono text-xs ml-2 ${aWin ? "font-bold" : "text-muted-foreground"}`}>{played ? as_ : "—"}</span>
+            </div>
+          </div>
+        </Link>
+      );
+    };
+
+    return (
+      <div className="border border-border rounded bg-gradient-to-br from-card to-secondary/10 overflow-x-auto">
+        <div className="flex gap-6 p-6 min-w-max items-stretch">
+          {bracketRounds.map((round, ri) => {
+            const gapClass = ri === 0 ? "gap-3" : ri === 1 ? "gap-16" : ri === 2 ? "gap-40" : "gap-64";
+            return (
+              <div key={ri} className="flex flex-col min-w-[210px]">
+                <div className="bg-primary/10 border border-primary/20 rounded px-3 py-1.5 mb-4 text-center">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-primary">{round.name}</p>
+                </div>
+                <div className={`flex flex-col justify-around flex-1 ${gapClass}`}>
+                  {round.matches.map((m, mi) => (
+                    <div key={mi} className="relative">
+                      <MatchBox m={m} />
+                      {ri < bracketRounds.length - 1 && (
+                        <div className="absolute top-1/2 -right-3 w-3 border-t-2 border-border" />
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
         </div>
+        {thirdPlace && (
+          <div className="border-t border-border p-4 bg-background/50">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2 text-center">3rd Place Playoff</p>
+            <div className="max-w-[240px] mx-auto"><MatchBox m={thirdPlace.matches[0]} /></div>
+          </div>
+        )}
       </div>
     );
   };
 
-  // Build CL group standings from weeks 1-6
-  const buildCLGroups = (matches: MatchResult[]) => {
+
+  // Build group standings from matches. `maxWeek` limits to group-stage weeks (default 6 for CL).
+  const buildCLGroups = (matches: MatchResult[], maxWeek: number = 6) => {
     const seen = new Set<number>();
     const groupMatches = matches.filter(m => {
-      if ((m.WeekID || 0) > 6) return false;
+      if ((m.WeekID || 0) > maxWeek) return false;
       if (m.MatchID == null) return true;
       if (seen.has(m.MatchID)) return false;
       seen.add(m.MatchID);
       return true;
     });
+
     // Determine groups: teams that play each other are in the same group
     const teamAdj = new Map<number, Set<number>>();
     groupMatches.forEach(m => {
@@ -498,8 +561,9 @@ export default function LeaguePage() {
           </div>
         </div>
 
-        <div className={`grid grid-cols-1 gap-6 ${isIntl ? "" : "lg:grid-cols-3"}`}>
-          <div className={isIntl ? "space-y-6" : "lg:col-span-2 space-y-6"}>
+        <div className={`grid grid-cols-1 gap-6 ${(isIntl || isQualifying || isFriendly) ? "" : "lg:grid-cols-3"}`}>
+          <div className={(isIntl || isQualifying || isFriendly) ? "space-y-6" : "lg:col-span-2 space-y-6"}>
+
             {/* Domestic league standings */}
             {isDomestic && standings.length > 0 && (
               <div className="border border-border rounded overflow-hidden">
@@ -639,7 +703,7 @@ export default function LeaguePage() {
               );
             })()}
 
-            {/* International competitions (LeagueID ≥ 20) — knockout bracket + results */}
+            {/* International knockout competitions — bracket + results */}
             {isIntl && seasonMatches.length > 0 && (() => {
               const rounds = buildKnockoutRounds(seasonMatches);
               return (
@@ -652,6 +716,81 @@ export default function LeaguePage() {
                 </div>
               );
             })()}
+
+            {/* Qualifying competitions — group stage with advancer highlighting */}
+            {isQualifying && seasonMatches.length > 0 && (() => {
+              const maxW = Math.max(...seasonMatches.map(m => m.WeekID || 0));
+              const groups = buildCLGroups(seasonMatches, maxW);
+              return (
+                <div className="space-y-4">
+                  <h3 className="font-display text-lg font-bold text-foreground">
+                    Qualifying Groups {selectedSeason ? `— ${seasonLabel(selectedSeason)}` : ""}
+                  </h3>
+                  {parentCompId && (
+                    <p className="text-xs text-muted-foreground font-sans">
+                      Teams highlighted in <span className="bg-highlight/30 px-1 rounded">gold</span> advanced to the{" "}
+                      <Link to={`/league/${parentCompId}`} className="text-accent hover:underline">main competition</Link>.
+                    </p>
+                  )}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {groups.map(group => (
+                      <div key={group.label} className="border border-border rounded overflow-hidden">
+                        <div className="bg-table-header px-3 py-1.5">
+                          <h4 className="font-display text-xs font-bold text-table-header-foreground">Group {group.label}</h4>
+                        </div>
+                        <table className="w-full text-xs font-sans">
+                          <thead>
+                            <tr className="bg-secondary">
+                              <th className="px-2 py-1 text-left text-muted-foreground">#</th>
+                              <th className="px-2 py-1 text-left text-muted-foreground">Team</th>
+                              <th className="px-2 py-1 text-right text-muted-foreground">GP</th>
+                              <th className="px-2 py-1 text-right text-muted-foreground">W</th>
+                              <th className="px-2 py-1 text-right text-muted-foreground">D</th>
+                              <th className="px-2 py-1 text-right text-muted-foreground">L</th>
+                              <th className="px-2 py-1 text-right text-muted-foreground">GD</th>
+                              <th className="px-2 py-1 text-right text-muted-foreground font-bold">Pts</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {group.teams.map((tid, i) => {
+                              const s = group.stats.get(tid)!;
+                              const tName = teamMap.get(tid) || `Team ${tid}`;
+                              const advanced = advancedTeams.has(tid);
+                              return (
+                                <tr key={tid} className={`border-t border-border ${advanced ? "bg-highlight/25" : i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
+                                  <td className="px-2 py-1 font-mono text-muted-foreground">{i + 1}</td>
+                                  <td className="px-2 py-1 font-medium truncate max-w-[140px]">
+                                    <Link to={`/team/${encodeURIComponent(tName)}`} className="text-accent hover:underline">{tName}</Link>
+                                    {advanced && <span className="ml-1 text-[10px] text-primary font-bold">✓</span>}
+                                  </td>
+                                  <td className="px-2 py-1 text-right font-mono">{s.gp}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{s.w}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{s.d}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{s.l}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{s.gf - s.ga}</td>
+                                  <td className="px-2 py-1 text-right font-mono font-bold">{s.pts}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* International Friendlies — simple results list */}
+            {isFriendly && seasonMatches.length > 0 && (
+              <div className="space-y-4">
+                <h3 className="font-display text-lg font-bold text-foreground">
+                  Results {selectedSeason ? `— ${seasonLabel(selectedSeason)}` : ""}
+                </h3>
+                <KnockoutDisplay rounds={[{ name: "Friendlies", matches: seasonMatches }]} />
+              </div>
+            )}
+
 
             {/* Annual Awards */}
             {awardSeasons.length > 0 && (
@@ -800,7 +939,7 @@ export default function LeaguePage() {
 
           {/* Sidebar: Teams */}
           <div className="space-y-6">
-            {!isIntl && teams.length > 0 && (
+            {!(isIntl || isQualifying || isFriendly) && teams.length > 0 && (
               <div className="border border-border rounded overflow-hidden">
                 <div className="bg-table-header px-3 py-2">
                   <h3 className="font-display text-sm font-bold text-table-header-foreground">Teams</h3>
