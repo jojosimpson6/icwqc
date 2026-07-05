@@ -90,6 +90,40 @@ export default function NationPage() {
   const [leagueMap, setLeagueMap] = useState<Map<number, string>>(new Map());
   const [nationalTeam, setNationalTeam] = useState<{ TeamID: number; FullName: string; PrimaryColor: string | null; logo_url: string | null } | null>(null);
   const [matchRosterPlayers, setMatchRosterPlayers] = useState<{ PlayerID: number; PlayerName: string; Position: string }[]>([]);
+  const [semiWinnersMap, setSemiWinnersMap] = useState<Map<string, Set<number>>>(new Map());
+
+  // For each (season, league) the nation appears in W4, load W3 winners to distinguish Final vs 3rd-place.
+  useEffect(() => {
+    const keys = new Set<string>();
+    intlResults.forEach(r => {
+      if (r.WeekID === 4 && r.LeagueID && [20, 22, 24, 26, 28].includes(r.LeagueID) && r.SeasonID) {
+        keys.add(`${r.SeasonID}|${r.LeagueID}`);
+      }
+    });
+    if (keys.size === 0) { setSemiWinnersMap(new Map()); return; }
+    const pairs = [...keys].map(k => k.split("|").map(Number));
+    const seasons = [...new Set(pairs.map(p => p[0]))];
+    const leagues = [...new Set(pairs.map(p => p[1]))];
+    fetchAllRows<any>("results", {
+      select: '"HomeTeamID","AwayTeamID","HomeTeamScore","AwayTeamScore","SeasonID","LeagueID","WeekID"',
+      filters: [
+        { method: "in", args: ["LeagueID", leagues] },
+        { method: "in", args: ["SeasonID", seasons] },
+        { method: "eq", args: ["WeekID", 3] },
+      ],
+    }).then(rows => {
+      const m = new Map<string, Set<number>>();
+      (rows || []).forEach((r: any) => {
+        const key = `${r.SeasonID}|${r.LeagueID}`;
+        if (!m.has(key)) m.set(key, new Set());
+        const hs = r.HomeTeamScore ?? 0, as_ = r.AwayTeamScore ?? 0;
+        if (hs > as_ && r.HomeTeamID) m.get(key)!.add(r.HomeTeamID);
+        else if (as_ > hs && r.AwayTeamID) m.get(key)!.add(r.AwayTeamID);
+      });
+      setSemiWinnersMap(m);
+    }).catch(() => {});
+  }, [intlResults]);
+
 
   useEffect(() => {
     if (!id) return;
