@@ -855,7 +855,9 @@ export default function PlayerProfile() {
                 >
                   <option value="all">All Competitions</option>
                   {hasDomesticComps && <option value="domestic">All League Matches</option>}
+                  {hasIntlComps && <option value="international">All International</option>}
                   {allComps.map(c => <option key={c} value={c}>{c}</option>)}
+
                 </select>
               )}
             </div>
