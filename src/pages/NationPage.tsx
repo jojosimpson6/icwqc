@@ -460,6 +460,7 @@ export default function NationPage() {
                       <tr className="bg-secondary">
                         <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
                         <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Competition</th>
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Round</th>
                         <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Home</th>
                         <th className="px-3 py-1.5 text-center text-xs font-semibold uppercase tracking-wide text-muted-foreground">Score</th>
                         <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Away</th>
@@ -474,11 +475,23 @@ export default function NationPage() {
                         const isNatHome = r.HomeTeamID === nationalTeam?.TeamID;
                         const natScore = isNatHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
                         const oppScore = isNatHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
-                        const won = nationalTeam && natScore > oppScore;
+                        const won = !!(nationalTeam && natScore > oppScore);
+                        // W4 Final vs 3rd: match is Final if both teams won their semifinal
+                        let isFinalMatch = false;
+                        if (r.WeekID === 4 && r.LeagueID && r.SeasonID) {
+                          const winners = semiWinnersMap.get(`${r.SeasonID}|${r.LeagueID}`);
+                          if (winners && r.HomeTeamID && r.AwayTeamID) {
+                            isFinalMatch = winners.has(r.HomeTeamID) && winners.has(r.AwayTeamID);
+                          }
+                        }
+                        const round = roundLabel(r.LeagueID, r.WeekID, isFinalMatch);
                         return (
                           <tr key={r.MatchID} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
                             <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{r.SeasonID ? seasonLabel(r.SeasonID) : "—"}</td>
-                            <td className="px-3 py-1.5 text-xs text-muted-foreground">{compName}</td>
+                            <td className="px-3 py-1.5 text-xs">
+                              {r.LeagueID ? <Link to={`/league/${r.LeagueID}`} className="text-accent hover:underline">{compName}</Link> : compName}
+                            </td>
+                            <td className="px-3 py-1.5 text-xs text-muted-foreground">{round}</td>
                             <td className={`px-3 py-1.5 text-accent hover:underline ${isNatHome && won ? "font-bold" : ""}`}>
                               <Link to={`/team/${encodeURIComponent(homeName)}`}>{homeName}</Link>
                             </td>
@@ -498,6 +511,7 @@ export default function NationPage() {
                   </table>
                 </div>
               </div>
+
             ) : (
               <p className="text-muted-foreground font-sans text-sm italic">No international results found.</p>
             )}
