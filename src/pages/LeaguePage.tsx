@@ -359,16 +359,17 @@ export default function LeaguePage() {
   };
 
 
-  // Build CL group standings from weeks 1-6
-  const buildCLGroups = (matches: MatchResult[]) => {
+  // Build group standings from matches. `maxWeek` limits to group-stage weeks (default 6 for CL).
+  const buildCLGroups = (matches: MatchResult[], maxWeek: number = 6) => {
     const seen = new Set<number>();
     const groupMatches = matches.filter(m => {
-      if ((m.WeekID || 0) > 6) return false;
+      if ((m.WeekID || 0) > maxWeek) return false;
       if (m.MatchID == null) return true;
       if (seen.has(m.MatchID)) return false;
       seen.add(m.MatchID);
       return true;
     });
+
     // Determine groups: teams that play each other are in the same group
     const teamAdj = new Map<number, Set<number>>();
     groupMatches.forEach(m => {
