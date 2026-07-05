@@ -703,7 +703,7 @@ export default function LeaguePage() {
               );
             })()}
 
-            {/* International competitions (LeagueID ≥ 20) — knockout bracket + results */}
+            {/* International knockout competitions — bracket + results */}
             {isIntl && seasonMatches.length > 0 && (() => {
               const rounds = buildKnockoutRounds(seasonMatches);
               return (
@@ -716,6 +716,81 @@ export default function LeaguePage() {
                 </div>
               );
             })()}
+
+            {/* Qualifying competitions — group stage with advancer highlighting */}
+            {isQualifying && seasonMatches.length > 0 && (() => {
+              const maxW = Math.max(...seasonMatches.map(m => m.WeekID || 0));
+              const groups = buildCLGroups(seasonMatches, maxW);
+              return (
+                <div className="space-y-4">
+                  <h3 className="font-display text-lg font-bold text-foreground">
+                    Qualifying Groups {selectedSeason ? `— ${seasonLabel(selectedSeason)}` : ""}
+                  </h3>
+                  {parentCompId && (
+                    <p className="text-xs text-muted-foreground font-sans">
+                      Teams highlighted in <span className="bg-highlight/30 px-1 rounded">gold</span> advanced to the{" "}
+                      <Link to={`/league/${parentCompId}`} className="text-accent hover:underline">main competition</Link>.
+                    </p>
+                  )}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {groups.map(group => (
+                      <div key={group.label} className="border border-border rounded overflow-hidden">
+                        <div className="bg-table-header px-3 py-1.5">
+                          <h4 className="font-display text-xs font-bold text-table-header-foreground">Group {group.label}</h4>
+                        </div>
+                        <table className="w-full text-xs font-sans">
+                          <thead>
+                            <tr className="bg-secondary">
+                              <th className="px-2 py-1 text-left text-muted-foreground">#</th>
+                              <th className="px-2 py-1 text-left text-muted-foreground">Team</th>
+                              <th className="px-2 py-1 text-right text-muted-foreground">GP</th>
+                              <th className="px-2 py-1 text-right text-muted-foreground">W</th>
+                              <th className="px-2 py-1 text-right text-muted-foreground">D</th>
+                              <th className="px-2 py-1 text-right text-muted-foreground">L</th>
+                              <th className="px-2 py-1 text-right text-muted-foreground">GD</th>
+                              <th className="px-2 py-1 text-right text-muted-foreground font-bold">Pts</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {group.teams.map((tid, i) => {
+                              const s = group.stats.get(tid)!;
+                              const tName = teamMap.get(tid) || `Team ${tid}`;
+                              const advanced = advancedTeams.has(tid);
+                              return (
+                                <tr key={tid} className={`border-t border-border ${advanced ? "bg-highlight/25" : i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
+                                  <td className="px-2 py-1 font-mono text-muted-foreground">{i + 1}</td>
+                                  <td className="px-2 py-1 font-medium truncate max-w-[140px]">
+                                    <Link to={`/team/${encodeURIComponent(tName)}`} className="text-accent hover:underline">{tName}</Link>
+                                    {advanced && <span className="ml-1 text-[10px] text-primary font-bold">✓</span>}
+                                  </td>
+                                  <td className="px-2 py-1 text-right font-mono">{s.gp}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{s.w}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{s.d}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{s.l}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{s.gf - s.ga}</td>
+                                  <td className="px-2 py-1 text-right font-mono font-bold">{s.pts}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* International Friendlies — simple results list */}
+            {isFriendly && seasonMatches.length > 0 && (
+              <div className="space-y-4">
+                <h3 className="font-display text-lg font-bold text-foreground">
+                  Results {selectedSeason ? `— ${seasonLabel(selectedSeason)}` : ""}
+                </h3>
+                <KnockoutDisplay rounds={[{ name: "Friendlies", matches: seasonMatches }]} />
+              </div>
+            )}
+
 
             {/* Annual Awards */}
             {awardSeasons.length > 0 && (
