@@ -571,35 +571,15 @@ export default function PlayerProfile() {
 
   // Use detected positions for multi-position display
   const positionsPlayed = detectedPositions.length > 0 ? detectedPositions : (player.Position ? [player.Position] : []);
-  const isKeeper = positionsPlayed.includes("Keeper");
-  const isSeeker = positionsPlayed.includes("Seeker");
-  const isChaser = positionsPlayed.includes("Chaser");
-  const isBeater = positionsPlayed.includes("Beater");
+  const effectivePositions = posFilter === "all" ? positionsPlayed : positionsPlayed.filter(p => p === posFilter);
+  const isKeeper = effectivePositions.includes("Keeper");
+  const isSeeker = effectivePositions.includes("Seeker");
+  const isChaser = effectivePositions.includes("Chaser");
+  const isBeater = effectivePositions.includes("Beater");
   const positionDisplay = positionsPlayed.join("/");
 
   // Deduplicate stats: group by SeasonID+LeagueName+TeamFullName, show each unique row
   // (multi-position players have separate rows per position which is fine for the table)
-
-  // Career totals
-  const careerTotals = {
-    gp: stats.reduce((s, r) => s + (r.GamesPlayed || 0), 0),
-    goals: stats.reduce((s, r) => s + (r.Goals || 0), 0),
-    gsc: stats.reduce((s, r) => s + (r.GoldenSnitchCatches || 0), 0),
-    saves: stats.reduce((s, r) => s + (r.KeeperSaves || 0), 0),
-    shotsFaced: stats.reduce((s, r) => s + (r.KeeperShotsFaced || 0), 0),
-    minutes: stats.reduce((s, r) => s + (r.MinPlayed || 0), 0),
-    shotAtt: stats.reduce((s, r) => s + (r.ShotAtt || 0), 0),
-    shotScored: stats.reduce((s, r) => s + (r.ShotScored || 0), 0),
-    passAtt: stats.reduce((s, r) => s + (r.PassAtt || 0), 0),
-    passComp: stats.reduce((s, r) => s + (r.PassComp || 0), 0),
-    keeperPassAtt: stats.reduce((s, r) => s + (r.KeeperPassAtt || 0), 0),
-    keeperPassComp: stats.reduce((s, r) => s + (r.KeeperPassComp || 0), 0),
-    bludgersHit: stats.reduce((s, r) => s + (r.BludgersHit || 0), 0),
-    turnoversForced: stats.reduce((s, r) => s + (r.TurnoversForced || 0), 0),
-    teammatesProtected: stats.reduce((s, r) => s + (r.TeammatesProtected || 0), 0),
-    bludgerShotsFaced: stats.reduce((s, r) => s + (r.BludgerShotsFaced || 0), 0),
-    snitchSpotted: stats.reduce((s, r) => s + (r.SnitchSpotted || 0), 0),
-  };
 
   const allTimeGoals = Math.max(0, ...stats.filter(s => s.Position === "Chaser").map(s => s.Goals || 0));
   const allTimeGSC = Math.max(0, ...stats.filter(s => s.Position === "Seeker").map(s => s.GoldenSnitchCatches || 0));
