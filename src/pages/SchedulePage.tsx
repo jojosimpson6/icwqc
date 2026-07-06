@@ -192,7 +192,23 @@ export default function SchedulePage() {
       });
 
 
-      setGames(list);
+      // Final safety dedup — by MatchID first, then by (date|home|away) for rows without MatchID
+      const seenMatchId = new Set<number>();
+      const seenSig = new Set<string>();
+      const deduped: Game[] = [];
+      for (const g of list) {
+        if (g.MatchID != null) {
+          if (seenMatchId.has(g.MatchID)) continue;
+          seenMatchId.add(g.MatchID);
+        } else {
+          const sig = `${g.Matchday}|${g.LeagueID}|${g.HomeTeamID}|${g.AwayTeamID}`;
+          if (seenSig.has(sig)) continue;
+          seenSig.add(sig);
+        }
+        deduped.push(g);
+      }
+
+      setGames(deduped);
       setLoading(false);
 
       // jump to the month containing today, or earliest game if outside range
