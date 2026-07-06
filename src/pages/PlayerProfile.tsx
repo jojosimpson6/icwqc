@@ -170,6 +170,7 @@ export default function PlayerProfile() {
   const [matchLogSortKey, setMatchLogSortKey] = useState<string>("date");
   const [matchLogSortDir, setMatchLogSortDir] = useState<"asc" | "desc">("asc");
   const [compFilter, setCompFilter] = useState<string>("all");
+  const [posFilter, setPosFilter] = useState<string>("all");
   const [detectedPositions, setDetectedPositions] = useState<string[]>([]);
   const [playerAwards, setPlayerAwards] = useState<{ awardname: string; placement: number; seasonid: number; leagueid: number; leagueName?: string }[]>([]);
   const [leagueNameMap, setLeagueNameMap] = useState<Map<number, string>>(new Map());
@@ -570,35 +571,15 @@ export default function PlayerProfile() {
 
   // Use detected positions for multi-position display
   const positionsPlayed = detectedPositions.length > 0 ? detectedPositions : (player.Position ? [player.Position] : []);
-  const isKeeper = positionsPlayed.includes("Keeper");
-  const isSeeker = positionsPlayed.includes("Seeker");
-  const isChaser = positionsPlayed.includes("Chaser");
-  const isBeater = positionsPlayed.includes("Beater");
+  const effectivePositions = posFilter === "all" ? positionsPlayed : positionsPlayed.filter(p => p === posFilter);
+  const isKeeper = effectivePositions.includes("Keeper");
+  const isSeeker = effectivePositions.includes("Seeker");
+  const isChaser = effectivePositions.includes("Chaser");
+  const isBeater = effectivePositions.includes("Beater");
   const positionDisplay = positionsPlayed.join("/");
 
   // Deduplicate stats: group by SeasonID+LeagueName+TeamFullName, show each unique row
   // (multi-position players have separate rows per position which is fine for the table)
-
-  // Career totals
-  const careerTotals = {
-    gp: stats.reduce((s, r) => s + (r.GamesPlayed || 0), 0),
-    goals: stats.reduce((s, r) => s + (r.Goals || 0), 0),
-    gsc: stats.reduce((s, r) => s + (r.GoldenSnitchCatches || 0), 0),
-    saves: stats.reduce((s, r) => s + (r.KeeperSaves || 0), 0),
-    shotsFaced: stats.reduce((s, r) => s + (r.KeeperShotsFaced || 0), 0),
-    minutes: stats.reduce((s, r) => s + (r.MinPlayed || 0), 0),
-    shotAtt: stats.reduce((s, r) => s + (r.ShotAtt || 0), 0),
-    shotScored: stats.reduce((s, r) => s + (r.ShotScored || 0), 0),
-    passAtt: stats.reduce((s, r) => s + (r.PassAtt || 0), 0),
-    passComp: stats.reduce((s, r) => s + (r.PassComp || 0), 0),
-    keeperPassAtt: stats.reduce((s, r) => s + (r.KeeperPassAtt || 0), 0),
-    keeperPassComp: stats.reduce((s, r) => s + (r.KeeperPassComp || 0), 0),
-    bludgersHit: stats.reduce((s, r) => s + (r.BludgersHit || 0), 0),
-    turnoversForced: stats.reduce((s, r) => s + (r.TurnoversForced || 0), 0),
-    teammatesProtected: stats.reduce((s, r) => s + (r.TeammatesProtected || 0), 0),
-    bludgerShotsFaced: stats.reduce((s, r) => s + (r.BludgerShotsFaced || 0), 0),
-    snitchSpotted: stats.reduce((s, r) => s + (r.SnitchSpotted || 0), 0),
-  };
 
   const allTimeGoals = Math.max(0, ...stats.filter(s => s.Position === "Chaser").map(s => s.Goals || 0));
   const allTimeGSC = Math.max(0, ...stats.filter(s => s.Position === "Seeker").map(s => s.GoldenSnitchCatches || 0));
@@ -652,13 +633,35 @@ export default function PlayerProfile() {
   const hasDomesticComps = allComps.some(c => domesticLeagueNames.has(c));
   const hasIntlComps = allComps.some(c => intlLeagueNames.has(c));
 
-  const filteredStats = compFilter === "all"
+  const compScoped = compFilter === "all"
     ? sortedStats
     : compFilter === "domestic"
     ? sortedStats.filter(s => s.LeagueName && domesticLeagueNames.has(s.LeagueName))
     : compFilter === "international"
     ? sortedStats.filter(s => s.LeagueName && intlLeagueNames.has(s.LeagueName))
     : sortedStats.filter(s => s.LeagueName === compFilter);
+  const filteredStats = posFilter === "all" ? compScoped : compScoped.filter(s => s.Position === posFilter);
+
+  // Career totals — reflect current comp + position filter
+  const careerTotals = {
+    gp: filteredStats.reduce((s, r) => s + (r.GamesPlayed || 0), 0),
+    goals: filteredStats.reduce((s, r) => s + (r.Goals || 0), 0),
+    gsc: filteredStats.reduce((s, r) => s + (r.GoldenSnitchCatches || 0), 0),
+    saves: filteredStats.reduce((s, r) => s + (r.KeeperSaves || 0), 0),
+    shotsFaced: filteredStats.reduce((s, r) => s + (r.KeeperShotsFaced || 0), 0),
+    minutes: filteredStats.reduce((s, r) => s + (r.MinPlayed || 0), 0),
+    shotAtt: filteredStats.reduce((s, r) => s + (r.ShotAtt || 0), 0),
+    shotScored: filteredStats.reduce((s, r) => s + (r.ShotScored || 0), 0),
+    passAtt: filteredStats.reduce((s, r) => s + (r.PassAtt || 0), 0),
+    passComp: filteredStats.reduce((s, r) => s + (r.PassComp || 0), 0),
+    keeperPassAtt: filteredStats.reduce((s, r) => s + (r.KeeperPassAtt || 0), 0),
+    keeperPassComp: filteredStats.reduce((s, r) => s + (r.KeeperPassComp || 0), 0),
+    bludgersHit: filteredStats.reduce((s, r) => s + (r.BludgersHit || 0), 0),
+    turnoversForced: filteredStats.reduce((s, r) => s + (r.TurnoversForced || 0), 0),
+    teammatesProtected: filteredStats.reduce((s, r) => s + (r.TeammatesProtected || 0), 0),
+    bludgerShotsFaced: filteredStats.reduce((s, r) => s + (r.BludgerShotsFaced || 0), 0),
+    snitchSpotted: filteredStats.reduce((s, r) => s + (r.SnitchSpotted || 0), 0),
+  };
 
 
   // Career bests per competition (for gold shading)
@@ -847,19 +850,31 @@ export default function PlayerProfile() {
           <div className="border border-border rounded overflow-hidden">
             <div className="bg-table-header px-3 py-2 flex items-center justify-between flex-wrap gap-2">
               <h3 className="font-display text-sm font-bold text-table-header-foreground">Season-by-Season Statistics</h3>
-              {allComps.length > 1 && (
-                <select
-                  value={compFilter}
-                  onChange={e => setCompFilter(e.target.value)}
-                  className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
-                >
-                  <option value="all">All Competitions</option>
-                  {hasDomesticComps && <option value="domestic">All League Matches</option>}
-                  {hasIntlComps && <option value="international">All International</option>}
-                  {allComps.map(c => <option key={c} value={c}>{c}</option>)}
-
-                </select>
-              )}
+              <div className="flex flex-wrap gap-2">
+                {positionsPlayed.length > 1 && (
+                  <select
+                    value={posFilter}
+                    onChange={e => setPosFilter(e.target.value)}
+                    className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
+                    title="Filter by position"
+                  >
+                    <option value="all">All Positions</option>
+                    {positionsPlayed.map(p => <option key={p} value={p}>{p} only</option>)}
+                  </select>
+                )}
+                {allComps.length > 1 && (
+                  <select
+                    value={compFilter}
+                    onChange={e => setCompFilter(e.target.value)}
+                    className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
+                  >
+                    <option value="all">All Competitions</option>
+                    {hasDomesticComps && <option value="domestic">All League Matches</option>}
+                    {hasIntlComps && <option value="international">All International</option>}
+                    {allComps.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                )}
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm font-sans">

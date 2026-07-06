@@ -211,13 +211,15 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
       if (cancelled) return;
       const byId = new Map(data.map(t => [t.TeamID, t]));
       const base = initialSlotsRef.current || [];
-      const next = [...base];
-      ids.slice(0, 2).forEach((id, i) => {
+      // Ensure at least ids.length slots exist
+      const next: TeamSlot[] = [...base];
+      while (next.length < Math.max(ids.length, 2)) next.push(emptyTeamSlot());
+      ids.forEach((id, i) => {
         const t = byId.get(id);
         if (t) next[i] = { ...next[i], team: t, results: [], standings: [], loading: true };
       });
       setSlots(next);
-      ids.slice(0, 2).forEach((id, i) => {
+      ids.forEach((id, i) => {
         const t = byId.get(id);
         if (t) loadTeamData(next[i].id, t);
       });
@@ -225,6 +227,13 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function addSlot() {
+    setSlots(prev => (prev.length >= 6 ? prev : [...prev, emptyTeamSlot()]));
+  }
+  function removeSlot(slotId: string) {
+    setSlots(prev => (prev.length <= 2 ? prev : prev.filter(s => s.id !== slotId)));
+  }
 
   // All-time head-to-head, independent of each slot's selected scope.
   useEffect(() => {
@@ -369,7 +378,7 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
         Compare any two teams' records, head-to-head history, and competition results across any span of seasons.
       </p>
 
-      <div className="flex flex-wrap gap-4 mb-6">
+      <div className="flex flex-wrap gap-4 mb-4">
         {slots.map((slot, idx) => {
           const d = derived[idx];
           const color = SLOT_COLORS[idx % SLOT_COLORS.length];
@@ -377,7 +386,12 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
             <div key={slot.id} className={`flex-1 min-w-[280px] border border-border border-t-4 ${color.border} rounded p-4 bg-card`}>
               {!slot.team ? (
                 <>
-                  <label className="block text-xs font-sans font-semibold uppercase tracking-wide text-muted-foreground mb-1">Team {idx + 1}</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-sans font-semibold uppercase tracking-wide text-muted-foreground">Team {idx + 1}</label>
+                    {slots.length > 2 && (
+                      <button type="button" onClick={() => removeSlot(slot.id)} className="text-[11px] text-muted-foreground hover:text-destructive">Remove</button>
+                    )}
+                  </div>
                   <TeamSearchBox onSelect={t => selectTeam(idx, slot.id, t)} />
                 </>
               ) : (
@@ -392,10 +406,14 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
                         <p className="text-xs text-muted-foreground font-sans truncate">{slot.team.City}{slot.team.Country ? `, ${slot.team.Country}` : ""}</p>
                       </div>
                     </div>
-                    <button type="button" onClick={() => clearSlotTeam(slot.id)} className="text-[11px] font-sans text-muted-foreground hover:text-accent shrink-0">
-                      Change
-                    </button>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <button type="button" onClick={() => clearSlotTeam(slot.id)} className="text-[11px] font-sans text-muted-foreground hover:text-accent">Change</button>
+                      {slots.length > 2 && (
+                        <button type="button" onClick={() => removeSlot(slot.id)} className="text-[11px] font-sans text-muted-foreground hover:text-destructive">Remove</button>
+                      )}
+                    </div>
                   </div>
+
 
                   {slot.loading ? (
                     <p className="text-xs text-muted-foreground italic font-sans">Loading record…</p>
@@ -484,12 +502,107 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
         })}
       </div>
 
+      {slots.length < 6 && (
+        <div className="mb-6">
+          <button
+            type="button"
+            onClick={addSlot}
+            className="text-xs font-sans px-3 py-1.5 border border-dashed border-border rounded hover:border-accent hover:text-accent transition-colors"
+          >
+            + Add another team
+          </button>
+        </div>
+      )}
+
       {activeIndexes.length === 0 && (
         <div className="border border-border rounded p-12 text-center text-muted-foreground font-sans">
           <p className="text-lg font-medium mb-2">Select two teams to compare</p>
           <p className="text-sm">Search for teams above — pick any season, range, or career span for each.</p>
         </div>
       )}
+
+      {/* Record-against matrix (visible when 2+ teams selected) */}
+      {activeIndexes.length >= 2 && (() => {
+        const teams = activeIndexes.map(i => ({ idx: i, team: slots[i].team!, results: slots[i].results }));
+        // Build W-D-L for team A vs team B from A's own results
+        const cell = (a: typeof teams[0], b: typeof teams[0]) => {
+          let w = 0, d = 0, l = 0;
+          a.results.forEach(r => {
+            if (r.HomeTeamScore == null || r.AwayTeamScore == null) return;
+            const isHome = r.HomeTeamID === a.team.TeamID && r.AwayTeamID === b.team.TeamID;
+            const isAway = r.AwayTeamID === a.team.TeamID && r.HomeTeamID === b.team.TeamID;
+            if (!isHome && !isAway) return;
+            const ts = isHome ? r.HomeTeamScore : r.AwayTeamScore;
+            const os = isHome ? r.AwayTeamScore : r.HomeTeamScore;
+            if (ts > os) w++; else if (ts < os) l++; else d++;
+          });
+          return { w, d, l, gp: w + d + l };
+        };
+        const anyMatchups = teams.some((a, i) => teams.some((b, j) => i !== j && cell(a, b).gp > 0));
+        if (!anyMatchups) return null;
+        return (
+          <div className="border border-border rounded overflow-hidden mb-6">
+            <div className="bg-table-header px-3 py-2">
+              <h3 className="font-display text-sm font-bold text-table-header-foreground">Record Against Matrix</h3>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm font-sans border-collapse">
+                <thead>
+                  <tr className="bg-secondary">
+                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</th>
+                    {teams.map(t => (
+                      <th
+                        key={t.team.TeamID}
+                        className="px-2 py-1.5 text-center text-xs font-semibold uppercase tracking-wide border-l border-border"
+                        style={t.team.PrimaryColor ? { color: t.team.PrimaryColor } : undefined}
+                        title={t.team.FullName}
+                      >
+                        {t.team.FullName.length > 3 ? t.team.FullName.split(" ").map(w => w[0]).join("").slice(0, 3).toUpperCase() : t.team.FullName.toUpperCase()}
+                      </th>
+                    ))}
+                    <th className="px-2 py-1.5 text-center text-xs font-semibold uppercase tracking-wide border-l border-border">Total</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {teams.map((rowTeam, ri) => {
+                    let tw = 0, td = 0, tl = 0;
+                    return (
+                      <tr key={rowTeam.team.TeamID} className={`border-t border-border ${ri % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
+                        <td className="px-3 py-1.5 font-medium">
+                          <Link to={`/team/${encodeURIComponent(rowTeam.team.FullName)}`} className={`hover:underline ${SLOT_COLORS[rowTeam.idx % SLOT_COLORS.length].text}`}>
+                            {rowTeam.team.FullName}
+                          </Link>
+                        </td>
+                        {teams.map(colTeam => {
+                          if (colTeam.team.TeamID === rowTeam.team.TeamID) {
+                            return <td key={colTeam.team.TeamID} className="px-2 py-1.5 text-center text-muted-foreground border-l border-border bg-muted/30">—</td>;
+                          }
+                          const c = cell(rowTeam, colTeam);
+                          tw += c.w; td += c.d; tl += c.l;
+                          if (c.gp === 0) return <td key={colTeam.team.TeamID} className="px-2 py-1.5 text-center text-muted-foreground border-l border-border">—</td>;
+                          const winPct = c.gp > 0 ? c.w / c.gp : 0;
+                          const bg = winPct > 0.5 ? "bg-emerald-500/10" : winPct < 0.5 ? "bg-red-500/10" : "";
+                          return (
+                            <td key={colTeam.team.TeamID} className={`px-2 py-1.5 text-center font-mono border-l border-border ${bg}`}>
+                              {c.w}–{c.d > 0 ? `${c.d}–` : ""}{c.l}
+                            </td>
+                          );
+                        })}
+                        <td className="px-2 py-1.5 text-center font-mono font-bold border-l border-border">
+                          {tw}–{td > 0 ? `${td}–` : ""}{tl}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-[11px] text-muted-foreground font-sans px-3 py-2 border-t border-border bg-secondary/30">
+              Each cell shows the row team's all-time record against the column team (W–D–L, draws omitted when zero).
+            </p>
+          </div>
+        );
+      })()}
 
       {activeIndexes.length >= 1 && (
         <div className="space-y-6">

@@ -266,12 +266,24 @@ export default function LeagueHistory() {
           }
 
           // International comps: last week (typically week 4) contains both
-          // the Final and the 3rd-place playoff. Lower MatchID = 3rd, higher = Final.
-          if (INTL_FINAL_THIRD_IDS.has(lid) && sortedWeeks.length > 0) {
+          // the Final and the 3rd-place playoff. The Final is the match between
+          // the two semifinal winners; the other is the 3rd-place playoff.
+          if (INTL_FINAL_THIRD_IDS.has(lid) && sortedWeeks.length >= 2) {
             const lastWeek = sortedWeeks[sortedWeeks.length - 1];
+            const semiWeek = sortedWeeks[sortedWeeks.length - 2];
             const lastMatches = weekGroups.get(lastWeek) || [];
-            if (lastMatches.length === 2) {
-              const [thirdMatch, finalMatch] = [...lastMatches].sort((a, b) => (a.MatchID || 0) - (b.MatchID || 0));
+            const semiMatches = weekGroups.get(semiWeek) || [];
+            if (lastMatches.length === 2 && semiMatches.length === 2) {
+              const semiWinners = new Set<number>();
+              semiMatches.forEach((m: any) => {
+                const hs = m.HomeTeamScore || 0, as = m.AwayTeamScore || 0;
+                if (hs >= as && m.HomeTeamID) semiWinners.add(m.HomeTeamID);
+                else if (as > hs && m.AwayTeamID) semiWinners.add(m.AwayTeamID);
+              });
+              const finalMatch = lastMatches.find((m: any) =>
+                semiWinners.has(m.HomeTeamID) && semiWinners.has(m.AwayTeamID)
+              ) || lastMatches[lastMatches.length - 1];
+              const thirdMatch = lastMatches.find((m: any) => m !== finalMatch)!;
               const fHomeWin = (finalMatch.HomeTeamScore || 0) >= (finalMatch.AwayTeamScore || 0);
               const tHomeWin = (thirdMatch.HomeTeamScore || 0) >= (thirdMatch.AwayTeamScore || 0);
               const champion = tMap[fHomeWin ? finalMatch.HomeTeamID : finalMatch.AwayTeamID] || null;

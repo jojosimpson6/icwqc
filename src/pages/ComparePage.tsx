@@ -37,7 +37,7 @@ export default function ComparePage() {
     const v = searchParams.get(`p${n}`);
     return v ? parseInt(v, 10) : null;
   });
-  const initialTeamIds = [1, 2].map(n => {
+  const initialTeamIds = [1, 2, 3, 4, 5, 6].map(n => {
     const v = searchParams.get(`t${n}`);
     return v ? parseInt(v, 10) : null;
   });
