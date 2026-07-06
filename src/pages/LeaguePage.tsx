@@ -296,50 +296,109 @@ export default function LeaguePage() {
     return rounds;
   };
 
-  // Cleaner bracket visualization (Wikipedia-style with connector lines)
+  // Cleaner bracket visualization (Wikipedia-style with connector lines).
+  // Each round column has the same total height so subsequent rounds' matches
+  // naturally center between the pair of feeder matches (via justify-around).
   const BracketDisplay = ({ rounds }: { rounds: { name: string; matches: MatchResult[] }[] }) => {
     const bracketRounds = rounds.filter(r => r.name !== "3rd Place Playoff");
     const thirdPlace = rounds.find(r => r.name === "3rd Place Playoff");
     if (bracketRounds.length === 0) return null;
 
-    const MatchBox = ({ m }: { m: MatchResult }) => {
-      const hName = m.HomeTeamID ? teamMap.get(m.HomeTeamID) || `Team ${m.HomeTeamID}` : "TBD";
-      const aName = m.AwayTeamID ? teamMap.get(m.AwayTeamID) || `Team ${m.AwayTeamID}` : "TBD";
-      const hs = m.HomeTeamScore ?? 0, as_ = m.AwayTeamScore ?? 0;
-      const played = m.HomeTeamScore != null && m.AwayTeamScore != null;
-      const hWin = played && hs > as_, aWin = played && as_ > hs;
+    // Group matches in a round by unordered team pair (detects 2-leg ties for CL etc.)
+    const pairMatches = (matches: MatchResult[]) => {
+      const byPair = new Map<string, MatchResult[]>();
+      const order: string[] = [];
+      matches.forEach(m => {
+        const a = m.HomeTeamID ?? 0, b = m.AwayTeamID ?? 0;
+        const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+        if (!byPair.has(key)) { byPair.set(key, []); order.push(key); }
+        byPair.get(key)!.push(m);
+      });
+      return order.map(k => byPair.get(k)!);
+    };
+
+    const TieBox = ({ legs }: { legs: MatchResult[] }) => {
+      // Determine the "home team" of the tie as the home team of leg 1 for display,
+      // and aggregate goals across all legs.
+      const first = legs[0];
+      const hId = first.HomeTeamID, aId = first.AwayTeamID;
+      const hName = hId ? teamMap.get(hId) || `Team ${hId}` : "TBD";
+      const aName = aId ? teamMap.get(aId) || `Team ${aId}` : "TBD";
+      let hAgg = 0, aAgg = 0, played = true;
+      const legLine: string[] = [];
+      legs.forEach(m => {
+        if (m.HomeTeamScore == null || m.AwayTeamScore == null) { played = false; return; }
+        const isSwapped = m.HomeTeamID === aId;
+        const hs = isSwapped ? m.AwayTeamScore : m.HomeTeamScore;
+        const as_ = isSwapped ? m.HomeTeamScore : m.AwayTeamScore;
+        hAgg += hs; aAgg += as_;
+        legLine.push(`${hs}–${as_}`);
+      });
+      const hWin = played && hAgg > aAgg, aWin = played && aAgg > hAgg;
+      const primary = legs[0];
       return (
-        <Link to={m.MatchID ? `/match/${m.MatchID}` : "#"} className="block group">
+        <Link to={primary.MatchID ? `/match/${primary.MatchID}` : "#"} className="block group">
           <div className="border border-border rounded bg-background overflow-hidden shadow-sm group-hover:border-accent transition-colors">
             <div className={`flex items-center justify-between px-2.5 py-1.5 ${hWin ? "bg-secondary/50" : ""}`}>
               <span className={`truncate text-xs ${hWin ? "font-bold text-foreground" : "text-foreground/80"}`}>{hName}</span>
-              <span className={`font-mono text-xs ml-2 ${hWin ? "font-bold" : "text-muted-foreground"}`}>{played ? hs : "—"}</span>
+              <span className={`font-mono text-xs ml-2 ${hWin ? "font-bold" : "text-muted-foreground"}`}>{played ? hAgg : "—"}</span>
             </div>
             <div className={`flex items-center justify-between px-2.5 py-1.5 border-t border-border/60 ${aWin ? "bg-secondary/50" : ""}`}>
               <span className={`truncate text-xs ${aWin ? "font-bold text-foreground" : "text-foreground/80"}`}>{aName}</span>
-              <span className={`font-mono text-xs ml-2 ${aWin ? "font-bold" : "text-muted-foreground"}`}>{played ? as_ : "—"}</span>
+              <span className={`font-mono text-xs ml-2 ${aWin ? "font-bold" : "text-muted-foreground"}`}>{played ? aAgg : "—"}</span>
             </div>
+            {legs.length > 1 && (
+              <div className="px-2.5 py-1 text-[10px] font-mono text-muted-foreground border-t border-border/60 bg-secondary/20 text-center">
+                Legs: {legLine.join(" · ")}
+              </div>
+            )}
           </div>
         </Link>
       );
     };
 
+    // Fixed vertical scaffolding so successive rounds align. Each first-round tie
+    // gets a "slot" of TIE_SLOT_PX, and later-round ties occupy pow(2, ri) slots.
+    const TIE_SLOT_PX = 68;
+    const firstRoundTies = pairMatches(bracketRounds[0].matches).length;
+    const totalHeight = Math.max(1, firstRoundTies) * TIE_SLOT_PX;
+
     return (
       <div className="border border-border rounded bg-gradient-to-br from-card to-secondary/10 overflow-x-auto">
-        <div className="flex gap-6 p-6 min-w-max items-stretch">
+        <div className="flex gap-8 p-6 min-w-max items-stretch">
           {bracketRounds.map((round, ri) => {
-            const gapClass = ri === 0 ? "gap-3" : ri === 1 ? "gap-16" : ri === 2 ? "gap-40" : "gap-64";
+            const ties = pairMatches(round.matches);
             return (
               <div key={ri} className="flex flex-col min-w-[210px]">
                 <div className="bg-primary/10 border border-primary/20 rounded px-3 py-1.5 mb-4 text-center">
                   <p className="text-[10px] font-bold uppercase tracking-wider text-primary">{round.name}</p>
                 </div>
-                <div className={`flex flex-col justify-around flex-1 ${gapClass}`}>
-                  {round.matches.map((m, mi) => (
-                    <div key={mi} className="relative">
-                      <MatchBox m={m} />
+                <div
+                  className="flex flex-col justify-around"
+                  style={{ height: `${totalHeight}px` }}
+                >
+                  {ties.map((legs, ti) => (
+                    <div key={ti} className="relative">
+                      <TieBox legs={legs} />
                       {ri < bracketRounds.length - 1 && (
-                        <div className="absolute top-1/2 -right-3 w-3 border-t-2 border-border" />
+                        <>
+                          {/* horizontal stub out of this match */}
+                          <div className="absolute top-1/2 left-full w-4 h-px bg-border" />
+                          {/* vertical connector — half up from top match, half down from bottom match to pair */}
+                          {ti % 2 === 0 ? (
+                            <div
+                              className="absolute left-[calc(100%+16px)] top-1/2 w-px bg-border"
+                              style={{ height: `${TIE_SLOT_PX * Math.pow(2, ri)}px` }}
+                            />
+                          ) : null}
+                          {/* horizontal stub into next round match (only for even-index top of pair) */}
+                          {ti % 2 === 0 && (
+                            <div
+                              className="absolute left-[calc(100%+16px)] w-4 h-px bg-border"
+                              style={{ top: `calc(50% + ${(TIE_SLOT_PX * Math.pow(2, ri)) / 2}px)` }}
+                            />
+                          )}
+                        </>
                       )}
                     </div>
                   ))}
@@ -351,12 +410,13 @@ export default function LeaguePage() {
         {thirdPlace && (
           <div className="border-t border-border p-4 bg-background/50">
             <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2 text-center">3rd Place Playoff</p>
-            <div className="max-w-[240px] mx-auto"><MatchBox m={thirdPlace.matches[0]} /></div>
+            <div className="max-w-[240px] mx-auto"><TieBox legs={pairMatches(thirdPlace.matches)[0] || thirdPlace.matches} /></div>
           </div>
         )}
       </div>
     );
   };
+
 
 
   // Build group standings from matches. `maxWeek` limits to group-stage weeks (default 6 for CL).
