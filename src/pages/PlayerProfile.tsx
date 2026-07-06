@@ -850,19 +850,31 @@ export default function PlayerProfile() {
           <div className="border border-border rounded overflow-hidden">
             <div className="bg-table-header px-3 py-2 flex items-center justify-between flex-wrap gap-2">
               <h3 className="font-display text-sm font-bold text-table-header-foreground">Season-by-Season Statistics</h3>
-              {allComps.length > 1 && (
-                <select
-                  value={compFilter}
-                  onChange={e => setCompFilter(e.target.value)}
-                  className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
-                >
-                  <option value="all">All Competitions</option>
-                  {hasDomesticComps && <option value="domestic">All League Matches</option>}
-                  {hasIntlComps && <option value="international">All International</option>}
-                  {allComps.map(c => <option key={c} value={c}>{c}</option>)}
-
-                </select>
-              )}
+              <div className="flex flex-wrap gap-2">
+                {positionsPlayed.length > 1 && (
+                  <select
+                    value={posFilter}
+                    onChange={e => setPosFilter(e.target.value)}
+                    className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
+                    title="Filter by position"
+                  >
+                    <option value="all">All Positions</option>
+                    {positionsPlayed.map(p => <option key={p} value={p}>{p} only</option>)}
+                  </select>
+                )}
+                {allComps.length > 1 && (
+                  <select
+                    value={compFilter}
+                    onChange={e => setCompFilter(e.target.value)}
+                    className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
+                  >
+                    <option value="all">All Competitions</option>
+                    {hasDomesticComps && <option value="domestic">All League Matches</option>}
+                    {hasIntlComps && <option value="international">All International</option>}
+                    {allComps.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                )}
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm font-sans">
