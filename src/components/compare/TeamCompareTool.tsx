@@ -211,13 +211,15 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
       if (cancelled) return;
       const byId = new Map(data.map(t => [t.TeamID, t]));
       const base = initialSlotsRef.current || [];
-      const next = [...base];
-      ids.slice(0, 2).forEach((id, i) => {
+      // Ensure at least ids.length slots exist
+      const next: TeamSlot[] = [...base];
+      while (next.length < Math.max(ids.length, 2)) next.push(emptyTeamSlot());
+      ids.forEach((id, i) => {
         const t = byId.get(id);
         if (t) next[i] = { ...next[i], team: t, results: [], standings: [], loading: true };
       });
       setSlots(next);
-      ids.slice(0, 2).forEach((id, i) => {
+      ids.forEach((id, i) => {
         const t = byId.get(id);
         if (t) loadTeamData(next[i].id, t);
       });
@@ -225,6 +227,13 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  function addSlot() {
+    setSlots(prev => (prev.length >= 6 ? prev : [...prev, emptyTeamSlot()]));
+  }
+  function removeSlot(slotId: string) {
+    setSlots(prev => (prev.length <= 2 ? prev : prev.filter(s => s.id !== slotId)));
+  }
 
   // All-time head-to-head, independent of each slot's selected scope.
   useEffect(() => {
