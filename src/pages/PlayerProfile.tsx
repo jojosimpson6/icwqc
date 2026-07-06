@@ -170,6 +170,7 @@ export default function PlayerProfile() {
   const [matchLogSortKey, setMatchLogSortKey] = useState<string>("date");
   const [matchLogSortDir, setMatchLogSortDir] = useState<"asc" | "desc">("asc");
   const [compFilter, setCompFilter] = useState<string>("all");
+  const [posFilter, setPosFilter] = useState<string>("all");
   const [detectedPositions, setDetectedPositions] = useState<string[]>([]);
   const [playerAwards, setPlayerAwards] = useState<{ awardname: string; placement: number; seasonid: number; leagueid: number; leagueName?: string }[]>([]);
   const [leagueNameMap, setLeagueNameMap] = useState<Map<number, string>>(new Map());
