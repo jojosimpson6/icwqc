@@ -633,13 +633,35 @@ export default function PlayerProfile() {
   const hasDomesticComps = allComps.some(c => domesticLeagueNames.has(c));
   const hasIntlComps = allComps.some(c => intlLeagueNames.has(c));
 
-  const filteredStats = compFilter === "all"
+  const compScoped = compFilter === "all"
     ? sortedStats
     : compFilter === "domestic"
     ? sortedStats.filter(s => s.LeagueName && domesticLeagueNames.has(s.LeagueName))
     : compFilter === "international"
     ? sortedStats.filter(s => s.LeagueName && intlLeagueNames.has(s.LeagueName))
     : sortedStats.filter(s => s.LeagueName === compFilter);
+  const filteredStats = posFilter === "all" ? compScoped : compScoped.filter(s => s.Position === posFilter);
+
+  // Career totals — reflect current comp + position filter
+  const careerTotals = {
+    gp: filteredStats.reduce((s, r) => s + (r.GamesPlayed || 0), 0),
+    goals: filteredStats.reduce((s, r) => s + (r.Goals || 0), 0),
+    gsc: filteredStats.reduce((s, r) => s + (r.GoldenSnitchCatches || 0), 0),
+    saves: filteredStats.reduce((s, r) => s + (r.KeeperSaves || 0), 0),
+    shotsFaced: filteredStats.reduce((s, r) => s + (r.KeeperShotsFaced || 0), 0),
+    minutes: filteredStats.reduce((s, r) => s + (r.MinPlayed || 0), 0),
+    shotAtt: filteredStats.reduce((s, r) => s + (r.ShotAtt || 0), 0),
+    shotScored: filteredStats.reduce((s, r) => s + (r.ShotScored || 0), 0),
+    passAtt: filteredStats.reduce((s, r) => s + (r.PassAtt || 0), 0),
+    passComp: filteredStats.reduce((s, r) => s + (r.PassComp || 0), 0),
+    keeperPassAtt: filteredStats.reduce((s, r) => s + (r.KeeperPassAtt || 0), 0),
+    keeperPassComp: filteredStats.reduce((s, r) => s + (r.KeeperPassComp || 0), 0),
+    bludgersHit: filteredStats.reduce((s, r) => s + (r.BludgersHit || 0), 0),
+    turnoversForced: filteredStats.reduce((s, r) => s + (r.TurnoversForced || 0), 0),
+    teammatesProtected: filteredStats.reduce((s, r) => s + (r.TeammatesProtected || 0), 0),
+    bludgerShotsFaced: filteredStats.reduce((s, r) => s + (r.BludgerShotsFaced || 0), 0),
+    snitchSpotted: filteredStats.reduce((s, r) => s + (r.SnitchSpotted || 0), 0),
+  };
 
 
   // Career bests per competition (for gold shading)
