@@ -378,7 +378,7 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
         Compare any two teams' records, head-to-head history, and competition results across any span of seasons.
       </p>
 
-      <div className="flex flex-wrap gap-4 mb-6">
+      <div className="flex flex-wrap gap-4 mb-4">
         {slots.map((slot, idx) => {
           const d = derived[idx];
           const color = SLOT_COLORS[idx % SLOT_COLORS.length];
@@ -386,7 +386,12 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
             <div key={slot.id} className={`flex-1 min-w-[280px] border border-border border-t-4 ${color.border} rounded p-4 bg-card`}>
               {!slot.team ? (
                 <>
-                  <label className="block text-xs font-sans font-semibold uppercase tracking-wide text-muted-foreground mb-1">Team {idx + 1}</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-sans font-semibold uppercase tracking-wide text-muted-foreground">Team {idx + 1}</label>
+                    {slots.length > 2 && (
+                      <button type="button" onClick={() => removeSlot(slot.id)} className="text-[11px] text-muted-foreground hover:text-destructive">Remove</button>
+                    )}
+                  </div>
                   <TeamSearchBox onSelect={t => selectTeam(idx, slot.id, t)} />
                 </>
               ) : (
@@ -401,10 +406,14 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
                         <p className="text-xs text-muted-foreground font-sans truncate">{slot.team.City}{slot.team.Country ? `, ${slot.team.Country}` : ""}</p>
                       </div>
                     </div>
-                    <button type="button" onClick={() => clearSlotTeam(slot.id)} className="text-[11px] font-sans text-muted-foreground hover:text-accent shrink-0">
-                      Change
-                    </button>
+                    <div className="flex flex-col items-end gap-1 shrink-0">
+                      <button type="button" onClick={() => clearSlotTeam(slot.id)} className="text-[11px] font-sans text-muted-foreground hover:text-accent">Change</button>
+                      {slots.length > 2 && (
+                        <button type="button" onClick={() => removeSlot(slot.id)} className="text-[11px] font-sans text-muted-foreground hover:text-destructive">Remove</button>
+                      )}
+                    </div>
                   </div>
+
 
                   {slot.loading ? (
                     <p className="text-xs text-muted-foreground italic font-sans">Loading record…</p>
