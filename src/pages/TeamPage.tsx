@@ -786,14 +786,14 @@ export default function TeamPage() {
 
         {/* Tabs */}
         <div className="flex gap-2 mb-4 border-b border-border">
-          {(["register", "results", "roster", "alltime"] as const).map(tab => (
+          {(["register", "results", "roster", "h2h", "alltime"] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={`px-4 py-2 text-sm font-sans font-medium border-b-2 -mb-px transition-colors ${activeTab === tab ? "text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
               style={activeTab === tab && safeTextColor ? { borderColor: primaryColor || safeTextColor, color: safeTextColor } : activeTab === tab ? {} : undefined}
             >
-              {tab === "register" ? "Season Register" : tab === "results" ? "Results" : tab === "roster" ? "Roster & Stats" : "All-Time"}
+              {tab === "register" ? "Season Register" : tab === "results" ? "Results" : tab === "roster" ? "Roster & Stats" : tab === "h2h" ? "Head-to-Head" : "All-Time"}
             </button>
           ))}
         </div>
