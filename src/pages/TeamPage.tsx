@@ -176,7 +176,7 @@ export default function TeamPage() {
   const [players, setPlayers] = useState<PlayerInfo[]>([]);
   const [nations, setNations] = useState<Map<number, string>>(new Map());
   const [seasonRegister, setSeasonRegister] = useState<SeasonRegisterRow[]>([]);
-  const [activeTab, setActiveTab] = useState<"register" | "results" | "roster" | "alltime">("register");
+  const [activeTab, setActiveTab] = useState<"register" | "results" | "roster" | "alltime" | "h2h">("register");
   const [rosterSeasonId, setRosterSeasonId] = useState<number | null>(null);
   const [resultsSeasonId, setResultsSeasonId] = useState<number | "all">("all");
   const [matchResults, setMatchResults] = useState<MatchResult[]>([]);
@@ -625,23 +625,29 @@ export default function TeamPage() {
                 if (!allMatches || allMatches.length === 0) return "—";
 
                 // International comps (LeagueID ≥ 20): last week has Final + 3rd-place playoff.
-                // Higher MatchID = Final; lower MatchID = 3rd-place playoff.
+                // Final = match between the two semifinal winners; other = 3rd-place playoff.
                 if (row.LeagueID >= 20) {
                   const teamMatches = allMatches.filter(m => m.homeId === tid || m.awayId === tid);
                   if (teamMatches.length === 0) return "—";
                   const maxWeek = Math.max(...allMatches.map(m => m.weekId));
                   const lastWeekMatches = allMatches.filter(m => m.weekId === maxWeek);
-                  if (lastWeekMatches.length === 2) {
-                    const sortedLW = [...lastWeekMatches].sort((a, b) => a.matchId - b.matchId);
-                    const [thirdMatch, finalMatch] = sortedLW;
-                    const inFinal = finalMatch.homeId === tid || finalMatch.awayId === tid;
-                    const inThird = thirdMatch.homeId === tid || thirdMatch.awayId === tid;
-                    if (inFinal) {
+                  const semiMatches = allMatches.filter(m => m.weekId === maxWeek - 1);
+                  if (lastWeekMatches.length === 2 && semiMatches.length === 2) {
+                    const semiWinners = new Set<number>();
+                    semiMatches.forEach(m => {
+                      if (m.homeScore >= m.awayScore && m.homeId) semiWinners.add(m.homeId);
+                      else if (m.awayScore > m.homeScore && m.awayId) semiWinners.add(m.awayId);
+                    });
+                    const finalMatch = lastWeekMatches.find(m =>
+                      m.homeId && m.awayId && semiWinners.has(m.homeId) && semiWinners.has(m.awayId)
+                    );
+                    const thirdMatch = lastWeekMatches.find(m => m !== finalMatch);
+                    if (finalMatch && (finalMatch.homeId === tid || finalMatch.awayId === tid)) {
                       const isHome = finalMatch.homeId === tid;
                       const won = (isHome ? finalMatch.homeScore : finalMatch.awayScore) > (isHome ? finalMatch.awayScore : finalMatch.homeScore);
                       return won ? "🏆 Champion" : "Runner-Up";
                     }
-                    if (inThird) {
+                    if (thirdMatch && (thirdMatch.homeId === tid || thirdMatch.awayId === tid)) {
                       const isHome = thirdMatch.homeId === tid;
                       const won = (isHome ? thirdMatch.homeScore : thirdMatch.awayScore) > (isHome ? thirdMatch.awayScore : thirdMatch.homeScore);
                       return won ? "3rd Place" : "4th Place";
@@ -780,14 +786,14 @@ export default function TeamPage() {
 
         {/* Tabs */}
         <div className="flex gap-2 mb-4 border-b border-border">
-          {(["register", "results", "roster", "alltime"] as const).map(tab => (
+          {(["register", "results", "roster", "h2h", "alltime"] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
               className={`px-4 py-2 text-sm font-sans font-medium border-b-2 -mb-px transition-colors ${activeTab === tab ? "text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
               style={activeTab === tab && safeTextColor ? { borderColor: primaryColor || safeTextColor, color: safeTextColor } : activeTab === tab ? {} : undefined}
             >
-              {tab === "register" ? "Season Register" : tab === "results" ? "Results" : tab === "roster" ? "Roster & Stats" : "All-Time"}
+              {tab === "register" ? "Season Register" : tab === "results" ? "Results" : tab === "roster" ? "Roster & Stats" : tab === "h2h" ? "Head-to-Head" : "All-Time"}
             </button>
           ))}
         </div>
@@ -1138,6 +1144,97 @@ export default function TeamPage() {
             </div>
           </div>
         )}
+
+        {activeTab === "h2h" && (() => {
+          const tid = team?.TeamID;
+          type H2H = { oppId: number; gp: number; w: number; d: number; l: number; gf: number; ga: number };
+          const map = new Map<number, H2H>();
+          matchResults.forEach(r => {
+            if (r.HomeTeamScore === null || r.AwayTeamScore === null) return;
+            const isHome = r.HomeTeamID === tid;
+            const isAway = r.AwayTeamID === tid;
+            if (!isHome && !isAway) return;
+            const oppId = isHome ? r.AwayTeamID : r.HomeTeamID;
+            if (!oppId) return;
+            const ts = isHome ? r.HomeTeamScore : r.AwayTeamScore;
+            const os = isHome ? r.AwayTeamScore : r.HomeTeamScore;
+            const cur = map.get(oppId) || { oppId, gp: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0 };
+            cur.gp++; cur.gf += ts; cur.ga += os;
+            if (ts > os) cur.w++; else if (ts < os) cur.l++; else cur.d++;
+            map.set(oppId, cur);
+          });
+          const rows = [...map.values()]
+            .map(r => ({ ...r, name: teamMapState.get(r.oppId) || `Team ${r.oppId}`, winPct: r.gp ? (r.w + r.d * 0.5) / r.gp : 0 }))
+            .sort((a, b) => b.gp - a.gp || b.winPct - a.winPct);
+
+          if (rows.length === 0) {
+            return <p className="text-muted-foreground font-sans text-sm">No completed matches yet.</p>;
+          }
+
+          const totals = rows.reduce((acc, r) => ({
+            gp: acc.gp + r.gp, w: acc.w + r.w, d: acc.d + r.d, l: acc.l + r.l, gf: acc.gf + r.gf, ga: acc.ga + r.ga,
+          }), { gp: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0 });
+
+          return (
+            <div className="border border-border rounded overflow-hidden">
+              <div className="px-3 py-2" style={headerStyle || undefined}>
+                <h3 className={`font-display text-sm font-bold ${headerStyle ? "" : "text-table-header-foreground"}`}
+                  style={!headerStyle ? undefined : { color: headerStyle.color }}>
+                  All-Time Record vs. Every Opponent
+                </h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm font-sans">
+                  <thead>
+                    <tr className="bg-secondary">
+                      <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Opponent</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GP</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">W</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">D</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">L</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Win%</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GF</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GA</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GD</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r, i) => (
+                      <tr key={r.oppId} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
+                        <td className="px-3 py-1.5">
+                          <Link to={`/team/${r.oppId}`} className="text-accent hover:underline font-medium">{r.name}</Link>
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-mono">{r.gp}</td>
+                        <td className="px-3 py-1.5 text-right font-mono text-emerald-600 dark:text-emerald-400">{r.w}</td>
+                        <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{r.d}</td>
+                        <td className="px-3 py-1.5 text-right font-mono text-red-600 dark:text-red-400">{r.l}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{(r.winPct * 100).toFixed(1)}%</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{r.gf}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{r.ga}</td>
+                        <td className={`px-3 py-1.5 text-right font-mono ${r.gf - r.ga > 0 ? "text-emerald-600 dark:text-emerald-400" : r.gf - r.ga < 0 ? "text-red-600 dark:text-red-400" : ""}`}>
+                          {r.gf - r.ga > 0 ? "+" : ""}{r.gf - r.ga}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-border bg-secondary/60 font-semibold">
+                      <td className="px-3 py-1.5">Total ({rows.length} opponents)</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{totals.gp}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{totals.w}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{totals.d}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{totals.l}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{totals.gp ? (((totals.w + totals.d * 0.5) / totals.gp) * 100).toFixed(1) : "0.0"}%</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{totals.gf}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{totals.ga}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{totals.gf - totals.ga > 0 ? "+" : ""}{totals.gf - totals.ga}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          );
+        })()}
 
         {activeTab === "alltime" && (() => {
           // Aggregate all-time stats across all seasons for this team
