@@ -625,23 +625,29 @@ export default function TeamPage() {
                 if (!allMatches || allMatches.length === 0) return "—";
 
                 // International comps (LeagueID ≥ 20): last week has Final + 3rd-place playoff.
-                // Higher MatchID = Final; lower MatchID = 3rd-place playoff.
+                // Final = match between the two semifinal winners; other = 3rd-place playoff.
                 if (row.LeagueID >= 20) {
                   const teamMatches = allMatches.filter(m => m.homeId === tid || m.awayId === tid);
                   if (teamMatches.length === 0) return "—";
                   const maxWeek = Math.max(...allMatches.map(m => m.weekId));
                   const lastWeekMatches = allMatches.filter(m => m.weekId === maxWeek);
-                  if (lastWeekMatches.length === 2) {
-                    const sortedLW = [...lastWeekMatches].sort((a, b) => a.matchId - b.matchId);
-                    const [thirdMatch, finalMatch] = sortedLW;
-                    const inFinal = finalMatch.homeId === tid || finalMatch.awayId === tid;
-                    const inThird = thirdMatch.homeId === tid || thirdMatch.awayId === tid;
-                    if (inFinal) {
+                  const semiMatches = allMatches.filter(m => m.weekId === maxWeek - 1);
+                  if (lastWeekMatches.length === 2 && semiMatches.length === 2) {
+                    const semiWinners = new Set<number>();
+                    semiMatches.forEach(m => {
+                      if (m.homeScore >= m.awayScore && m.homeId) semiWinners.add(m.homeId);
+                      else if (m.awayScore > m.homeScore && m.awayId) semiWinners.add(m.awayId);
+                    });
+                    const finalMatch = lastWeekMatches.find(m =>
+                      m.homeId && m.awayId && semiWinners.has(m.homeId) && semiWinners.has(m.awayId)
+                    );
+                    const thirdMatch = lastWeekMatches.find(m => m !== finalMatch);
+                    if (finalMatch && (finalMatch.homeId === tid || finalMatch.awayId === tid)) {
                       const isHome = finalMatch.homeId === tid;
                       const won = (isHome ? finalMatch.homeScore : finalMatch.awayScore) > (isHome ? finalMatch.awayScore : finalMatch.homeScore);
                       return won ? "🏆 Champion" : "Runner-Up";
                     }
-                    if (inThird) {
+                    if (thirdMatch && (thirdMatch.homeId === tid || thirdMatch.awayId === tid)) {
                       const isHome = thirdMatch.homeId === tid;
                       const won = (isHome ? thirdMatch.homeScore : thirdMatch.awayScore) > (isHome ? thirdMatch.awayScore : thirdMatch.homeScore);
                       return won ? "3rd Place" : "4th Place";
