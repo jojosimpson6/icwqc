@@ -1145,6 +1145,97 @@ export default function TeamPage() {
           </div>
         )}
 
+        {activeTab === "h2h" && (() => {
+          const tid = team?.TeamID;
+          type H2H = { oppId: number; gp: number; w: number; d: number; l: number; gf: number; ga: number };
+          const map = new Map<number, H2H>();
+          matchResults.forEach(r => {
+            if (r.HomeTeamScore === null || r.AwayTeamScore === null) return;
+            const isHome = r.HomeTeamID === tid;
+            const isAway = r.AwayTeamID === tid;
+            if (!isHome && !isAway) return;
+            const oppId = isHome ? r.AwayTeamID : r.HomeTeamID;
+            if (!oppId) return;
+            const ts = isHome ? r.HomeTeamScore : r.AwayTeamScore;
+            const os = isHome ? r.AwayTeamScore : r.HomeTeamScore;
+            const cur = map.get(oppId) || { oppId, gp: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0 };
+            cur.gp++; cur.gf += ts; cur.ga += os;
+            if (ts > os) cur.w++; else if (ts < os) cur.l++; else cur.d++;
+            map.set(oppId, cur);
+          });
+          const rows = [...map.values()]
+            .map(r => ({ ...r, name: teamMapState.get(r.oppId) || `Team ${r.oppId}`, winPct: r.gp ? (r.w + r.d * 0.5) / r.gp : 0 }))
+            .sort((a, b) => b.gp - a.gp || b.winPct - a.winPct);
+
+          if (rows.length === 0) {
+            return <p className="text-muted-foreground font-sans text-sm">No completed matches yet.</p>;
+          }
+
+          const totals = rows.reduce((acc, r) => ({
+            gp: acc.gp + r.gp, w: acc.w + r.w, d: acc.d + r.d, l: acc.l + r.l, gf: acc.gf + r.gf, ga: acc.ga + r.ga,
+          }), { gp: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0 });
+
+          return (
+            <div className="border border-border rounded overflow-hidden">
+              <div className="px-3 py-2" style={headerStyle || undefined}>
+                <h3 className={`font-display text-sm font-bold ${headerStyle ? "" : "text-table-header-foreground"}`}
+                  style={!headerStyle ? undefined : { color: headerStyle.color }}>
+                  All-Time Record vs. Every Opponent
+                </h3>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm font-sans">
+                  <thead>
+                    <tr className="bg-secondary">
+                      <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Opponent</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GP</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">W</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">D</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">L</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Win%</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GF</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GA</th>
+                      <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GD</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((r, i) => (
+                      <tr key={r.oppId} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
+                        <td className="px-3 py-1.5">
+                          <Link to={`/team/${r.oppId}`} className="text-accent hover:underline font-medium">{r.name}</Link>
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-mono">{r.gp}</td>
+                        <td className="px-3 py-1.5 text-right font-mono text-emerald-600 dark:text-emerald-400">{r.w}</td>
+                        <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{r.d}</td>
+                        <td className="px-3 py-1.5 text-right font-mono text-red-600 dark:text-red-400">{r.l}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{(r.winPct * 100).toFixed(1)}%</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{r.gf}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{r.ga}</td>
+                        <td className={`px-3 py-1.5 text-right font-mono ${r.gf - r.ga > 0 ? "text-emerald-600 dark:text-emerald-400" : r.gf - r.ga < 0 ? "text-red-600 dark:text-red-400" : ""}`}>
+                          {r.gf - r.ga > 0 ? "+" : ""}{r.gf - r.ga}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-border bg-secondary/60 font-semibold">
+                      <td className="px-3 py-1.5">Total ({rows.length} opponents)</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{totals.gp}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{totals.w}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{totals.d}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{totals.l}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{totals.gp ? (((totals.w + totals.d * 0.5) / totals.gp) * 100).toFixed(1) : "0.0"}%</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{totals.gf}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{totals.ga}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{totals.gf - totals.ga > 0 ? "+" : ""}{totals.gf - totals.ga}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            </div>
+          );
+        })()}
+
         {activeTab === "alltime" && (() => {
           // Aggregate all-time stats across all seasons for this team
           const allTimeMap = new Map<string, { gp: number; goals: number; gsc: number; saves: number; positions: Set<string> }>();
