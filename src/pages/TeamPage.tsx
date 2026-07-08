@@ -1209,10 +1209,10 @@ export default function TeamPage() {
                         <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{r.d}</td>
                         <td className="px-3 py-1.5 text-right font-mono text-red-600 dark:text-red-400">{r.l}</td>
                         <td className="px-3 py-1.5 text-right font-mono">{(r.winPct * 100).toFixed(1)}%</td>
-                        <td className="px-3 py-1.5 text-right font-mono">{r.gf}</td>
-                        <td className="px-3 py-1.5 text-right font-mono">{r.ga}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{Math.round(r.gf / 10)}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{Math.round(r.ga / 10)}</td>
                         <td className={`px-3 py-1.5 text-right font-mono ${r.gf - r.ga > 0 ? "text-emerald-600 dark:text-emerald-400" : r.gf - r.ga < 0 ? "text-red-600 dark:text-red-400" : ""}`}>
-                          {r.gf - r.ga > 0 ? "+" : ""}{r.gf - r.ga}
+                          {r.gf - r.ga > 0 ? "+" : ""}{Math.round((r.gf - r.ga) / 10)}
                         </td>
                       </tr>
                     ))}
