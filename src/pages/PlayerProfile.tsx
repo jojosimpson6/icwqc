@@ -506,6 +506,39 @@ export default function PlayerProfile() {
             return;
           }
 
+          // New-format international comps (LeagueID 20, 22, 24, 26, 28):
+          // final week has 2 matches (Final + 3rd-place playoff). Final = match
+          // between the two semifinal (previous week) winners.
+          if (INTL_SEMI_IDS.has(lid)) {
+            const maxWeek = Math.max(...sortedWeeks);
+            const lastWeekMatches = weekGroups.get(maxWeek) || [];
+            const semiMatches = weekGroups.get(maxWeek - 1) || [];
+            if (lastWeekMatches.length === 2 && semiMatches.length === 2) {
+              const semiWinners = new Set<number>();
+              semiMatches.forEach((m: any) => {
+                const hs = m.HomeTeamScore || 0, as = m.AwayTeamScore || 0;
+                if (hs >= as && m.HomeTeamID) semiWinners.add(m.HomeTeamID);
+                else if (as > hs && m.AwayTeamID) semiWinners.add(m.AwayTeamID);
+              });
+              const finalMatch = lastWeekMatches.find((m: any) =>
+                m.HomeTeamID && m.AwayTeamID && semiWinners.has(m.HomeTeamID) && semiWinners.has(m.AwayTeamID)
+              );
+              if (finalMatch) {
+                const hs = finalMatch.HomeTeamScore || 0, as = finalMatch.AwayTeamScore || 0;
+                const champId = hs >= as ? finalMatch.HomeTeamID : finalMatch.AwayTeamID;
+                if (champId) champByKey.set(key, teamNameById.get(champId) || "");
+              }
+            } else if (lastWeekMatches.length === 1) {
+              // Single-match final week fallback
+              const m = lastWeekMatches[0];
+              const hs = m.HomeTeamScore || 0, as = m.AwayTeamScore || 0;
+              const champId = hs >= as ? m.HomeTeamID : m.AwayTeamID;
+              if (champId) champByKey.set(key, teamNameById.get(champId) || "");
+            }
+            return;
+          }
+
+
           // Knockout: aggregate goals across final weeks (consecutive 1-match weeks)
           const finalWeeks: number[] = [];
           for (let i = sortedWeeks.length - 1; i >= 0; i--) {
