@@ -1225,9 +1225,9 @@ export default function TeamPage() {
                       <td className="px-3 py-1.5 text-right font-mono">{totals.d}</td>
                       <td className="px-3 py-1.5 text-right font-mono">{totals.l}</td>
                       <td className="px-3 py-1.5 text-right font-mono">{totals.gp ? (((totals.w + totals.d * 0.5) / totals.gp) * 100).toFixed(1) : "0.0"}%</td>
-                      <td className="px-3 py-1.5 text-right font-mono">{totals.gf}</td>
-                      <td className="px-3 py-1.5 text-right font-mono">{totals.ga}</td>
-                      <td className="px-3 py-1.5 text-right font-mono">{totals.gf - totals.ga > 0 ? "+" : ""}{totals.gf - totals.ga}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{Math.round(totals.gf / 10)}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{Math.round(totals.ga / 10)}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{totals.gf - totals.ga > 0 ? "+" : ""}{Math.round((totals.gf - totals.ga) / 10)}</td>
                     </tr>
                   </tfoot>
                 </table>
