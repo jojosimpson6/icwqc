@@ -382,8 +382,9 @@ export default function PlayerProfile() {
   // round-robin leagues via the standings table.
   // Knockout/cup competitions (winner determined by results final, not standings).
   // LeagueID 21 = Quidditch World Cup Qualification — explicitly excluded from championship credit.
-  const CUP_IDS_SET = new Set([15, 16, 17, 18, 19, 20]);
-  const EXCLUDED_LEAGUE_IDS = new Set([21]);
+  const CUP_IDS_SET = new Set([15, 16, 17, 18, 19, 20, 22, 24, 26, 28]);
+  const EXCLUDED_LEAGUE_IDS = new Set([21, 23, 25, 27, 29, 30]);
+  const INTL_SEMI_IDS = new Set([20, 22, 24, 26, 28]);
   useEffect(() => {
     if (!stats.length || leagueNameMap.size === 0) { setTeamCompWins([]); return; }
     const leagueIdByName = new Map<string, number>();
@@ -504,6 +505,39 @@ export default function PlayerProfile() {
             if (ranked[0]) champByKey.set(key, teamNameById.get(ranked[0][0]) || "");
             return;
           }
+
+          // New-format international comps (LeagueID 20, 22, 24, 26, 28):
+          // final week has 2 matches (Final + 3rd-place playoff). Final = match
+          // between the two semifinal (previous week) winners.
+          if (INTL_SEMI_IDS.has(lid)) {
+            const maxWeek = Math.max(...sortedWeeks);
+            const lastWeekMatches = weekGroups.get(maxWeek) || [];
+            const semiMatches = weekGroups.get(maxWeek - 1) || [];
+            if (lastWeekMatches.length === 2 && semiMatches.length === 2) {
+              const semiWinners = new Set<number>();
+              semiMatches.forEach((m: any) => {
+                const hs = m.HomeTeamScore || 0, as = m.AwayTeamScore || 0;
+                if (hs >= as && m.HomeTeamID) semiWinners.add(m.HomeTeamID);
+                else if (as > hs && m.AwayTeamID) semiWinners.add(m.AwayTeamID);
+              });
+              const finalMatch = lastWeekMatches.find((m: any) =>
+                m.HomeTeamID && m.AwayTeamID && semiWinners.has(m.HomeTeamID) && semiWinners.has(m.AwayTeamID)
+              );
+              if (finalMatch) {
+                const hs = finalMatch.HomeTeamScore || 0, as = finalMatch.AwayTeamScore || 0;
+                const champId = hs >= as ? finalMatch.HomeTeamID : finalMatch.AwayTeamID;
+                if (champId) champByKey.set(key, teamNameById.get(champId) || "");
+              }
+            } else if (lastWeekMatches.length === 1) {
+              // Single-match final week fallback
+              const m = lastWeekMatches[0];
+              const hs = m.HomeTeamScore || 0, as = m.AwayTeamScore || 0;
+              const champId = hs >= as ? m.HomeTeamID : m.AwayTeamID;
+              if (champId) champByKey.set(key, teamNameById.get(champId) || "");
+            }
+            return;
+          }
+
 
           // Knockout: aggregate goals across final weeks (consecutive 1-match weeks)
           const finalWeeks: number[] = [];

@@ -740,8 +740,8 @@ export default function LeaguePage() {
                                   <td className="px-2 py-1 text-right font-mono">{s.w}</td>
                                   <td className="px-2 py-1 text-right font-mono">{s.d}</td>
                                   <td className="px-2 py-1 text-right font-mono">{s.l}</td>
-                                  <td className="px-2 py-1 text-right font-mono">{s.gf}</td>
-                                  <td className="px-2 py-1 text-right font-mono">{s.ga}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{Math.round(s.gf / 10)}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{Math.round(s.ga / 10)}</td>
                                   <td className="px-2 py-1 text-right font-mono font-bold">{s.pts}</td>
                                 </tr>
                               );
@@ -827,7 +827,7 @@ export default function LeaguePage() {
                                   <td className="px-2 py-1 text-right font-mono">{s.w}</td>
                                   <td className="px-2 py-1 text-right font-mono">{s.d}</td>
                                   <td className="px-2 py-1 text-right font-mono">{s.l}</td>
-                                  <td className="px-2 py-1 text-right font-mono">{s.gf - s.ga}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{Math.round((s.gf - s.ga) / 10)}</td>
                                   <td className="px-2 py-1 text-right font-mono font-bold">{s.pts}</td>
                                 </tr>
                               );

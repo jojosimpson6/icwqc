@@ -617,12 +617,76 @@ export default function TeamPage() {
               const gd = (row.GoalsFor || 0) - (row.GoalsAgainst || 0);
               const posClass = row.isChampion ? "font-bold text-yellow-500" : "";
               // Compute stage reached for cup/CL competitions
+              const QUAL_PARENT_MAP: Record<number, number> = { 21: 20, 23: 22, 25: 24, 27: 26, 29: 28 };
+              const isQualifier = row.LeagueID in QUAL_PARENT_MAP;
               const stageReached = !isDomestic ? (() => {
                 const tid = team?.TeamID;
                 if (!tid) return "—";
 
                 const allMatches = allTournamentMatches.get(`${row.LeagueID}|${row.SeasonID}`);
                 if (!allMatches || allMatches.length === 0) return "—";
+
+                // Qualifying competitions: show group placing + advancement to parent comp
+                if (isQualifier) {
+                  const parentLid = QUAL_PARENT_MAP[row.LeagueID];
+                  const advanced = rows.some(r => r.SeasonID === row.SeasonID && r.LeagueID === parentLid);
+                  // BFS group build from group-stage matches (exclude any playoff week)
+                  // For qualifiers all weeks are group matches.
+                  const adj = new Map<number, Set<number>>();
+                  allMatches.forEach(m => {
+                    if (!m.homeId || !m.awayId) return;
+                    if (!adj.has(m.homeId)) adj.set(m.homeId, new Set());
+                    if (!adj.has(m.awayId)) adj.set(m.awayId, new Set());
+                    adj.get(m.homeId)!.add(m.awayId);
+                    adj.get(m.awayId)!.add(m.homeId);
+                  });
+                  const visited = new Set<number>();
+                  const groups: number[][] = [];
+                  for (const t of adj.keys()) {
+                    if (visited.has(t)) continue;
+                    const g: number[] = []; const q = [t];
+                    while (q.length) {
+                      const x = q.shift()!;
+                      if (visited.has(x)) continue;
+                      visited.add(x); g.push(x);
+                      adj.get(x)?.forEach(n => { if (!visited.has(n)) q.push(n); });
+                    }
+                    groups.push(g.sort((a, b) => a - b));
+                  }
+                  groups.sort((a, b) => a[0] - b[0]);
+                  const myGroupIdx = groups.findIndex(g => g.includes(tid));
+                  if (myGroupIdx < 0) return advanced ? "Advanced" : "Group Stage";
+                  const groupTeams = groups[myGroupIdx];
+                  const teamSet = new Set(groupTeams);
+                  const stats = new Map<number, { pts: number; gf: number; ga: number }>();
+                  groupTeams.forEach(t => stats.set(t, { pts: 0, gf: 0, ga: 0 }));
+                  allMatches.forEach(m => {
+                    if (!teamSet.has(m.homeId) || !teamSet.has(m.awayId)) return;
+                    const h = stats.get(m.homeId)!; const a = stats.get(m.awayId)!;
+                    h.gf += m.homeScore; h.ga += m.awayScore;
+                    a.gf += m.awayScore; a.ga += m.homeScore;
+                    if (m.homeScore > m.awayScore) {
+                      const diff = m.homeScore - m.awayScore;
+                      const bonus = diff > 150 ? 5 : diff > 100 ? 3 : diff > 50 ? 1 : 0;
+                      h.pts += 2 + bonus;
+                    } else if (m.awayScore > m.homeScore) {
+                      const diff = m.awayScore - m.homeScore;
+                      const bonus = diff > 150 ? 5 : diff > 100 ? 3 : diff > 50 ? 1 : 0;
+                      a.pts += 2 + bonus;
+                    } else {
+                      h.pts += 1; a.pts += 1;
+                    }
+                  });
+                  const sorted = [...groupTeams].sort((a, b) => {
+                    const sa = stats.get(a)!, sb = stats.get(b)!;
+                    if (sb.pts !== sa.pts) return sb.pts - sa.pts;
+                    return (sb.gf - sb.ga) - (sa.gf - sa.ga);
+                  });
+                  const pos = sorted.indexOf(tid) + 1;
+                  const groupLabel = String.fromCharCode(65 + myGroupIdx);
+                  const posLabel = pos === 1 ? "1st" : pos === 2 ? "2nd" : pos === 3 ? "3rd" : `${pos}th`;
+                  return `${posLabel} in Group ${groupLabel}${advanced ? " · ✓ Advanced" : ""}`;
+                }
 
                 // International comps (LeagueID ≥ 20): last week has Final + 3rd-place playoff.
                 // Final = match between the two semifinal winners; other = 3rd-place playoff.
@@ -1209,10 +1273,10 @@ export default function TeamPage() {
                         <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{r.d}</td>
                         <td className="px-3 py-1.5 text-right font-mono text-red-600 dark:text-red-400">{r.l}</td>
                         <td className="px-3 py-1.5 text-right font-mono">{(r.winPct * 100).toFixed(1)}%</td>
-                        <td className="px-3 py-1.5 text-right font-mono">{r.gf}</td>
-                        <td className="px-3 py-1.5 text-right font-mono">{r.ga}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{Math.round(r.gf / 10)}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{Math.round(r.ga / 10)}</td>
                         <td className={`px-3 py-1.5 text-right font-mono ${r.gf - r.ga > 0 ? "text-emerald-600 dark:text-emerald-400" : r.gf - r.ga < 0 ? "text-red-600 dark:text-red-400" : ""}`}>
-                          {r.gf - r.ga > 0 ? "+" : ""}{r.gf - r.ga}
+                          {r.gf - r.ga > 0 ? "+" : ""}{Math.round((r.gf - r.ga) / 10)}
                         </td>
                       </tr>
                     ))}
@@ -1225,9 +1289,9 @@ export default function TeamPage() {
                       <td className="px-3 py-1.5 text-right font-mono">{totals.d}</td>
                       <td className="px-3 py-1.5 text-right font-mono">{totals.l}</td>
                       <td className="px-3 py-1.5 text-right font-mono">{totals.gp ? (((totals.w + totals.d * 0.5) / totals.gp) * 100).toFixed(1) : "0.0"}%</td>
-                      <td className="px-3 py-1.5 text-right font-mono">{totals.gf}</td>
-                      <td className="px-3 py-1.5 text-right font-mono">{totals.ga}</td>
-                      <td className="px-3 py-1.5 text-right font-mono">{totals.gf - totals.ga > 0 ? "+" : ""}{totals.gf - totals.ga}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{Math.round(totals.gf / 10)}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{Math.round(totals.ga / 10)}</td>
+                      <td className="px-3 py-1.5 text-right font-mono">{totals.gf - totals.ga > 0 ? "+" : ""}{Math.round((totals.gf - totals.ga) / 10)}</td>
                     </tr>
                   </tfoot>
                 </table>
