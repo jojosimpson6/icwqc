@@ -382,8 +382,9 @@ export default function PlayerProfile() {
   // round-robin leagues via the standings table.
   // Knockout/cup competitions (winner determined by results final, not standings).
   // LeagueID 21 = Quidditch World Cup Qualification — explicitly excluded from championship credit.
-  const CUP_IDS_SET = new Set([15, 16, 17, 18, 19, 20]);
-  const EXCLUDED_LEAGUE_IDS = new Set([21]);
+  const CUP_IDS_SET = new Set([15, 16, 17, 18, 19, 20, 22, 24, 26, 28]);
+  const EXCLUDED_LEAGUE_IDS = new Set([21, 23, 25, 27, 29, 30]);
+  const INTL_SEMI_IDS = new Set([20, 22, 24, 26, 28]);
   useEffect(() => {
     if (!stats.length || leagueNameMap.size === 0) { setTeamCompWins([]); return; }
     const leagueIdByName = new Map<string, number>();
