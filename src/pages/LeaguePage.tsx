@@ -8,6 +8,13 @@ import { getLeagueTierLabel } from "@/lib/helpers";
 import { useSortableTable } from "@/hooks/useSortableTable";
 import { fetchAllRows } from "@/lib/fetchAll";
 
+function ymdLocal(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 interface League {
   LeagueID: number;
   LeagueName: string | null;
@@ -91,6 +98,7 @@ export default function LeaguePage() {
   const [matchResults, setMatchResults] = useState<MatchResult[]>([]);
   const [teamMap, setTeamMap] = useState<Map<number, string>>(new Map());
   const [matchDayMap, setMatchDayMap] = useState<Map<string, string>>(new Map());
+  const [upcomingFixtures, setUpcomingFixtures] = useState<{ MatchID: number | null; SeasonID: number; LeagueID: number; WeekID: number; HomeTeamID: number | null; AwayTeamID: number | null; Matchday: string; TeamsDetermined: boolean }[]>([]);
   const [awardsOpen, setAwardsOpen] = useState(false);
 
   const lid = id ? parseInt(id) : 0;
@@ -163,11 +171,26 @@ export default function LeaguePage() {
           filters: [{ method: "eq", args: ["LeagueID", lid] }],
           order: { column: "MatchID", ascending: true },
         }).then(results => {
-          setMatchResults(results);
-          const seasons = [...new Set(results.map(r => r.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number)) as number[];
+          // Never surface a match as "played" before its actual scheduled date —
+          // this dataset has final scores pre-populated for future fixtures, so
+          // without this filter future results/stats would leak through.
+          const todayStr = ymdLocal(new Date());
+          const playedOnly = results.filter(r => {
+            const d = mdm.get(`${r.SeasonID}|${r.LeagueID}|${r.WeekID}`);
+            return !d || d <= todayStr;
+          });
+          setMatchResults(playedOnly);
+          const seasons = [...new Set(playedOnly.map(r => r.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number)) as number[];
           setAvailableSeasons(seasons);
           if (seasons.length > 0) setSelectedSeason(seasons[0]);
         });
+
+        // Upcoming fixtures for this league (date always shown; teams hidden until determined)
+        fetchAllRows<any>("scheduled_matches", {
+          select: '"MatchID","SeasonID","LeagueID","WeekID","HomeTeamID","AwayTeamID","Matchday","TeamsDetermined"',
+          filters: [{ method: "eq", args: ["LeagueID", lid] }],
+          order: { column: "Matchday", ascending: true },
+        }).then(rows => setUpcomingFixtures(rows || [])).catch(() => setUpcomingFixtures([]));
       }
     });
   }, [id]);
@@ -360,14 +383,38 @@ export default function LeaguePage() {
     // Fixed vertical scaffolding so successive rounds align. Each first-round tie
     // gets a "slot" of TIE_SLOT_PX, and later-round ties occupy pow(2, ri) slots.
     const TIE_SLOT_PX = 68;
-    const firstRoundTies = pairMatches(bracketRounds[0].matches).length;
+
+    // Compute each round's ties, then reorder every round (except the last) so that
+    // ties[2k] and ties[2k+1] are the two feeder ties whose winners actually meet in
+    // ties[k] of the following round. Without this, ties are left in raw match-list
+    // order and the connector lines can point at the wrong box in the next column.
+    const allTies: MatchResult[][][] = bracketRounds.map(r => pairMatches(r.matches));
+    for (let ri = allTies.length - 2; ri >= 0; ri--) {
+      const nextTies = allTies[ri + 1];
+      const current = allTies[ri];
+      const used = new Set<number>();
+      const reordered: MatchResult[][] = [];
+      nextTies.forEach(nt => {
+        const leg = nt[0];
+        [leg.HomeTeamID, leg.AwayTeamID].forEach(teamId => {
+          if (teamId == null) return;
+          const idx = current.findIndex((tie, i) => !used.has(i) && tie.some(m => m.HomeTeamID === teamId || m.AwayTeamID === teamId));
+          if (idx !== -1) { used.add(idx); reordered.push(current[idx]); }
+        });
+      });
+      // Any ties we couldn't place (e.g. missing/TBD data) — append at the end so nothing is dropped.
+      current.forEach((tie, i) => { if (!used.has(i)) reordered.push(tie); });
+      allTies[ri] = reordered;
+    }
+
+    const firstRoundTies = allTies[0]?.length || 0;
     const totalHeight = Math.max(1, firstRoundTies) * TIE_SLOT_PX;
 
     return (
       <div className="border border-border rounded bg-gradient-to-br from-card to-secondary/10 overflow-x-auto">
         <div className="flex gap-8 p-6 min-w-max items-stretch">
           {bracketRounds.map((round, ri) => {
-            const ties = pairMatches(round.matches);
+            const ties = allTies[ri];
             return (
               <div key={ri} className="flex flex-col min-w-[210px]">
                 <div className="bg-primary/10 border border-primary/20 rounded px-3 py-1.5 mb-4 text-center">
@@ -623,6 +670,43 @@ export default function LeaguePage() {
 
         <div className={`grid grid-cols-1 gap-6 ${(isIntl || isQualifying || isFriendly) ? "" : "lg:grid-cols-3"}`}>
           <div className={(isIntl || isQualifying || isFriendly) ? "space-y-6" : "lg:col-span-2 space-y-6"}>
+
+            {/* Upcoming fixtures — date always shown; teams hidden until determined (e.g. an earlier knockout round hasn't been played yet) */}
+            {!isDomestic && upcomingFixtures.filter(f => f.SeasonID === selectedSeason).length > 0 && (
+              <div className="border border-border rounded overflow-hidden">
+                <div className="bg-table-header px-3 py-2">
+                  <h3 className="font-display text-sm font-bold text-table-header-foreground">Upcoming Fixtures</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm font-sans">
+                    <thead>
+                      <tr className="bg-secondary">
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Date</th>
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Matchup</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {upcomingFixtures.filter(f => f.SeasonID === selectedSeason).map((f, i) => (
+                        <tr key={f.MatchID ?? i} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
+                          <td className="px-3 py-1.5 font-mono text-muted-foreground">{f.Matchday}</td>
+                          <td className="px-3 py-1.5">
+                            {f.TeamsDetermined && f.HomeTeamID != null && f.AwayTeamID != null ? (
+                              <>
+                                <Link to={`/team/${encodeURIComponent(teamMap.get(f.HomeTeamID) || "")}`} className="text-accent hover:underline">{teamMap.get(f.HomeTeamID) || `Team ${f.HomeTeamID}`}</Link>
+                                {" vs "}
+                                <Link to={`/team/${encodeURIComponent(teamMap.get(f.AwayTeamID) || "")}`} className="text-accent hover:underline">{teamMap.get(f.AwayTeamID) || `Team ${f.AwayTeamID}`}</Link>
+                              </>
+                            ) : (
+                              <span className="italic text-muted-foreground">Match scheduled — teams TBD (pending earlier rounds)</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             {/* Domestic league standings */}
             {isDomestic && standings.length > 0 && (

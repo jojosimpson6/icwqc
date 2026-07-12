@@ -23,6 +23,7 @@ interface PlayerRow {
 }
 
 interface StatRow {
+  PlayerID: number | null;
   PlayerName: string | null;
   FullName: string | null;
   GamesPlayed: number | null;
@@ -90,7 +91,11 @@ export default function NationPage() {
   const [leagueMap, setLeagueMap] = useState<Map<number, string>>(new Map());
   const [nationalTeam, setNationalTeam] = useState<{ TeamID: number; FullName: string; PrimaryColor: string | null; logo_url: string | null } | null>(null);
   const [matchRosterPlayers, setMatchRosterPlayers] = useState<{ PlayerID: number; PlayerName: string; Position: string }[]>([]);
+  const [matchRosterSeason, setMatchRosterSeason] = useState<number | null>(null);
   const [semiWinnersMap, setSemiWinnersMap] = useState<Map<string, Set<number>>>(new Map());
+  const [intlCompFilter, setIntlCompFilter] = useState<number | "all">("all");
+  const [natCaptainMap, setNatCaptainMap] = useState<Map<number, number>>(new Map()); // SeasonID -> CaptainPlayerID
+  const [natManagerHistory, setNatManagerHistory] = useState<{ SeasonID: number; ManagerID: number; FirstName: string; LastName: string; FormerPlayerFlag: boolean }[]>([]);
 
   // For each (season, league) the nation appears in W4, load W3 winners to distinguish Final vs 3rd-place.
   useEffect(() => {
@@ -164,6 +169,36 @@ export default function NationPage() {
       if (natTeam) {
         setNationalTeam({ TeamID: natTeam.TeamID, FullName: natTeam.FullName, PrimaryColor: natTeam.PrimaryColor, logo_url: natTeam.logo_url });
 
+        fetchAllRows("team_captains", {
+          select: "SeasonID, CaptainPlayerID",
+          filters: [{ method: "eq", args: ["TeamID", natTeam.TeamID] }],
+        }).then((capRows: any) => {
+          const cm = new Map<number, number>();
+          (capRows || []).forEach((r: any) => { if (r.SeasonID && r.CaptainPlayerID) cm.set(r.SeasonID, r.CaptainPlayerID); });
+          setNatCaptainMap(cm);
+        });
+
+        fetchAllRows("team_managers", {
+          select: "SeasonID, ManagerID",
+          filters: [{ method: "eq", args: ["TeamID", natTeam.TeamID] }],
+          order: { column: "SeasonID", ascending: true },
+        }).then((tmRows: any) => {
+          const managerIds = [...new Set((tmRows || []).map((r: any) => r.ManagerID))];
+          if (managerIds.length === 0) { setNatManagerHistory([]); return; }
+          fetchAllRows("managers", {
+            select: "ManagerID, FirstName, LastName, FormerPlayerFlag",
+            filters: [{ method: "in", args: ["ManagerID", managerIds] }],
+          }).then((mgrRows: any) => {
+            const mgrById = new Map<number, any>();
+            (mgrRows || []).forEach((m: any) => mgrById.set(m.ManagerID, m));
+            const combined = (tmRows || []).map((r: any) => {
+              const m = mgrById.get(r.ManagerID);
+              return m ? { SeasonID: r.SeasonID, ManagerID: r.ManagerID, FirstName: m.FirstName, LastName: m.LastName, FormerPlayerFlag: m.FormerPlayerFlag } : null;
+            }).filter(Boolean);
+            setNatManagerHistory(combined as any);
+          });
+        });
+
         // Fetch intl results for this national team specifically
         fetchAllRows("results", {
           select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,WeekID,SnitchCaughtTime,HomeChaser1ID,HomeChaser2ID,HomeChaser3ID,HomeKeeperID,HomeSeekerID,HomeBeater1ID,HomeBeater2ID,AwayChaser1ID,AwayChaser2ID,AwayChaser3ID,AwayKeeperID,AwaySeekerID,AwayBeater1ID,AwayBeater2ID",
@@ -175,6 +210,7 @@ export default function NationPage() {
             // Get most recent match and extract 7 players
             const mostRecent = rData[0] as any;
             if (mostRecent) {
+              setMatchRosterSeason(mostRecent.SeasonID || null);
               const isHome = mostRecent.HomeTeamID === natTeam.TeamID;
               const prefix = isHome ? "Home" : "Away";
               const playerIds = [
@@ -200,8 +236,8 @@ export default function NationPage() {
       }
 
       if (playerData && playerData.length > 0) {
-        const playerNames = playerData.map((p: any) => p.PlayerName).filter(Boolean);
-        fetchAllRows("player_season_stats", { select: "*", filters: [{ method: "in", args: ["PlayerName", playerNames] }] }).then((statsData) => {
+        const playerIds = (playerData as PlayerRow[]).map(p => p.PlayerID);
+        fetchAllRows("player_season_stats", { select: "*", filters: [{ method: "in", args: ["PlayerID", playerIds] }] }).then((statsData) => {
           if (!statsData) return;
 
           const recordMap = new Map<number, CareerRecord>();
@@ -219,14 +255,8 @@ export default function NationPage() {
             });
           });
 
-          const playerNameToId = new Map<string, number>();
-          (playerData as PlayerRow[]).forEach(p => {
-            if (p.PlayerName) playerNameToId.set(p.PlayerName, p.PlayerID);
-          });
-
           (statsData as StatRow[]).forEach(s => {
-            if (!s.PlayerName) return;
-            const pid = playerNameToId.get(s.PlayerName);
+            const pid = s.PlayerID;
             if (!pid) return;
             const rec = recordMap.get(pid);
             if (!rec) return;
@@ -334,8 +364,14 @@ export default function NationPage() {
           <p className="text-sm text-muted-foreground font-sans mt-1">
             {players.length} registered players
             {nationalTeam && (
-              <> · National Team: <Link to={`/team/${encodeURIComponent(nationalTeam.FullName)}`} className="text-accent hover:underline">{nationalTeam.FullName}</Link></>
+              <> · National Team: <span className="font-medium">{nationalTeam.FullName}</span></>
             )}
+            {natManagerHistory.length > 0 && (() => {
+              const current = natManagerHistory[natManagerHistory.length - 1];
+              return (
+                <> · Manager: <Link to={`/manager/${current.ManagerID}`} className="text-accent hover:underline">{current.FirstName} {current.LastName}</Link></>
+              );
+            })()}
             {natTeamRecord && (
               <> · Intl Record: {natTeamRecord.w}W–{natTeamRecord.l}L{natTeamRecord.d > 0 ? `–${natTeamRecord.d}D` : ""}</>
             )}
@@ -377,6 +413,12 @@ export default function NationPage() {
                         <tr key={p.PlayerID} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
                           <td className="px-3 py-1.5 font-medium text-accent hover:underline">
                             <Link to={`/player/${p.PlayerID}`}>{p.PlayerName}</Link>
+                            {matchRosterSeason != null && natCaptainMap.get(matchRosterSeason) === p.PlayerID && (
+                              <span
+                                className="ml-1.5 inline-flex items-center justify-center w-4 h-4 text-[10px] font-bold rounded-full border border-accent text-accent align-middle"
+                                title="Team Captain"
+                              >C</span>
+                            )}
                           </td>
                           <td className="px-3 py-1.5 text-muted-foreground">{p.Position}</td>
                         </tr>
@@ -451,8 +493,23 @@ export default function NationPage() {
           <div className="space-y-4">
             {intlResults.length > 0 ? (
               <div className="border border-border rounded overflow-hidden">
-                <div className="bg-table-header px-3 py-2">
+                <div className="bg-table-header px-3 py-2 flex items-center justify-between flex-wrap gap-2">
                   <h3 className="font-display text-sm font-bold text-table-header-foreground">International Match History</h3>
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-sans text-table-header-foreground/80">Competition:</label>
+                    <select
+                      className="text-xs font-sans border border-border rounded px-2 py-1 bg-background text-foreground"
+                      value={intlCompFilter}
+                      onChange={e => setIntlCompFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
+                    >
+                      <option value="all">All Competitions</option>
+                      {[...new Map(intlResults.filter(r => r.LeagueID).map(r => [r.LeagueID as number, leagueMap.get(r.LeagueID as number) || `League ${r.LeagueID}`])).entries()]
+                        .sort((a, b) => a[1].localeCompare(b[1]))
+                        .map(([lid, lname]) => (
+                          <option key={lid} value={lid}>{lname}</option>
+                        ))}
+                    </select>
+                  </div>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm font-sans">
@@ -468,7 +525,7 @@ export default function NationPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {intlResults.map((r, i) => {
+                      {intlResults.filter(r => intlCompFilter === "all" || r.LeagueID === intlCompFilter).map((r, i) => {
                         const homeName = r.HomeTeamID ? teamMap.get(r.HomeTeamID) || `Team ${r.HomeTeamID}` : "Unknown";
                         const awayName = r.AwayTeamID ? teamMap.get(r.AwayTeamID) || `Team ${r.AwayTeamID}` : "Unknown";
                         const compName = r.LeagueID ? leagueMap.get(r.LeagueID) || "" : "";

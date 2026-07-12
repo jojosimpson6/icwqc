@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, Navigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
@@ -188,6 +188,9 @@ export default function TeamPage() {
   const [resultsOpen, setResultsOpen] = useState(true);
   const [h2hOpen, setH2hOpen] = useState(true);
   const [overallDebutMap, setOverallDebutMap] = useState<Map<string, number>>(new Map());
+  const [captainMap, setCaptainMap] = useState<Map<number, number>>(new Map()); // SeasonID -> CaptainPlayerID
+  const [managerHistory, setManagerHistory] = useState<{ SeasonID: number; ManagerID: number; FirstName: string; LastName: string; FormerPlayerFlag: boolean }[]>([]);
+  const [intlCompetitionFilter, setIntlCompetitionFilter] = useState<number | "all">("all");
   // Maps "leagueId|seasonId" -> all matches in that tournament (for stage calculation)
   const [allTournamentMatches, setAllTournamentMatches] = useState<Map<string, { matchId: number; homeId: number; awayId: number; homeScore: number; awayScore: number; weekId: number }[]>>(new Map());
   // Result sort
@@ -224,6 +227,38 @@ export default function TeamPage() {
         }).then((rData) => {
             if (rData) setMatchResults(rData as MatchResult[]);
           });
+
+        // Captaincy history
+        fetchAllRows("team_captains", {
+          select: "SeasonID, CaptainPlayerID",
+          filters: [{ method: "eq", args: ["TeamID", teamData.TeamID] }],
+        }).then((capRows: any) => {
+          const cm = new Map<number, number>();
+          (capRows || []).forEach((r: any) => { if (r.SeasonID && r.CaptainPlayerID) cm.set(r.SeasonID, r.CaptainPlayerID); });
+          setCaptainMap(cm);
+        });
+
+        // Manager history (join team_managers -> managers client-side)
+        fetchAllRows("team_managers", {
+          select: "SeasonID, ManagerID",
+          filters: [{ method: "eq", args: ["TeamID", teamData.TeamID] }],
+          order: { column: "SeasonID", ascending: true },
+        }).then((tmRows: any) => {
+          const managerIds = [...new Set((tmRows || []).map((r: any) => r.ManagerID))];
+          if (managerIds.length === 0) { setManagerHistory([]); return; }
+          fetchAllRows("managers", {
+            select: "ManagerID, FirstName, LastName, FormerPlayerFlag",
+            filters: [{ method: "in", args: ["ManagerID", managerIds] }],
+          }).then((mgrRows: any) => {
+            const mgrById = new Map<number, any>();
+            (mgrRows || []).forEach((m: any) => mgrById.set(m.ManagerID, m));
+            const combined = (tmRows || []).map((r: any) => {
+              const m = mgrById.get(r.ManagerID);
+              return m ? { SeasonID: r.SeasonID, ManagerID: r.ManagerID, FirstName: m.FirstName, LastName: m.LastName, FormerPlayerFlag: m.FormerPlayerFlag } : null;
+            }).filter(Boolean);
+            setManagerHistory(combined as any);
+          });
+        });
       }
 
       const tm = new Map<number, string>();
@@ -547,7 +582,12 @@ export default function TeamPage() {
   const domesticRegister = seasonRegister.filter(r => r.LeagueID >= 1 && r.LeagueID <= 14);
   const cupRegister = seasonRegister.filter(r => r.LeagueID >= 15 && r.LeagueID <= 18);
   const championsLeagueRegister = seasonRegister.filter(r => r.LeagueID === 19);
-  const internationalRegister = seasonRegister.filter(r => r.LeagueID >= 20);
+  const internationalRegisterAll = seasonRegister.filter(r => r.LeagueID >= 20);
+  const intlCompetitionOptions = [...new Map(internationalRegisterAll.map(r => [r.LeagueID, r.LeagueName])).entries()]
+    .sort((a, b) => a[1].localeCompare(b[1]));
+  const internationalRegister = intlCompetitionFilter === "all"
+    ? internationalRegisterAll
+    : internationalRegisterAll.filter(r => r.LeagueID === intlCompetitionFilter);
 
   // Team color styling with contrast-aware text
   const primaryColor = team?.PrimaryColor || null;
@@ -587,6 +627,12 @@ export default function TeamPage() {
         <SiteFooter />
       </div>
     );
+  }
+
+  // National teams (TeamID > 999, by convention TeamID = NationID + 1000) are
+  // consolidated into the nation's page rather than having a separate team page.
+  if (team.TeamID > 999) {
+    return <Navigate to={`/nation/${team.TeamID - 1000}`} replace />;
   }
 
   const RegisterTable = ({ rows, title, isDomestic, isCL }: { rows: SeasonRegisterRow[]; title: string; isDomestic?: boolean; isCL?: boolean }) => (
@@ -835,11 +881,19 @@ export default function TeamPage() {
               </Link>
             </p>
           )}
-          {/* Coach placeholder */}
-          <p className="text-sm font-sans mt-1">
-            <span className="text-muted-foreground">Coach: </span>
-            <span className="text-foreground italic">TBD</span>
-          </p>
+          {/* Current manager */}
+          {managerHistory.length > 0 && (() => {
+            const current = managerHistory[managerHistory.length - 1];
+            return (
+              <p className="text-sm font-sans mt-1">
+                <span className="text-muted-foreground">Manager: </span>
+                <Link to={`/manager/${current.ManagerID}`} className="text-accent hover:underline font-medium">
+                  {current.FirstName} {current.LastName}
+                </Link>
+                {current.FormerPlayerFlag && <span className="text-xs text-muted-foreground italic"> (former player)</span>}
+              </p>
+            );
+          })()}
           {primaryColor && (
             <div className="flex gap-2 mt-2">
               <div className="w-6 h-6 rounded border border-border" style={{ backgroundColor: primaryColor }} title="Primary" />
@@ -867,7 +921,24 @@ export default function TeamPage() {
             {domesticRegister.length > 0 && <RegisterTable rows={domesticRegister} title="Domestic League Register" isDomestic />}
             {cupRegister.length > 0 && <RegisterTable rows={cupRegister} title="Cup Competition Register" />}
             {championsLeagueRegister.length > 0 && <RegisterTable rows={championsLeagueRegister} title="Champions League Register" isCL />}
-            {internationalRegister.length > 0 && <RegisterTable rows={internationalRegister} title="International Competition Register" />}
+            {internationalRegisterAll.length > 0 && (
+              <div className="space-y-3">
+                <div className="flex items-center gap-3">
+                  <label className="text-sm font-sans text-muted-foreground">Filter by competition:</label>
+                  <select
+                    className="text-sm font-sans border border-border rounded px-2 py-1 bg-background text-foreground"
+                    value={intlCompetitionFilter}
+                    onChange={e => setIntlCompetitionFilter(e.target.value === "all" ? "all" : Number(e.target.value))}
+                  >
+                    <option value="all">All Competitions</option>
+                    {intlCompetitionOptions.map(([lid, lname]) => (
+                      <option key={lid} value={lid}>{lname}</option>
+                    ))}
+                  </select>
+                </div>
+                <RegisterTable rows={internationalRegister} title="International Competition Register" />
+              </div>
+            )}
             {seasonRegister.length === 0 && <p className="text-muted-foreground font-sans text-sm">No season data available.</p>}
           </div>
         )}
@@ -1065,6 +1136,12 @@ export default function TeamPage() {
                           <tr key={i} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
                             <td className="px-3 py-1.5 font-medium text-accent hover:underline">
                               {pid ? <Link to={`/player/${pid}`}>{p.PlayerName}</Link> : p.PlayerName}
+                              {pid && rosterSeasonId != null && captainMap.get(rosterSeasonId) === pid && (
+                                <span
+                                  className="ml-1.5 inline-flex items-center justify-center w-4 h-4 text-[10px] font-bold rounded-full border border-accent text-accent align-middle"
+                                  title="Team Captain"
+                                >C</span>
+                              )}
                             </td>
                             <td className="px-3 py-1.5 text-muted-foreground">{posDisplay}</td>
                             <td className="px-3 py-1.5 text-right font-mono">{p.GamesPlayed}</td>
@@ -1112,6 +1189,12 @@ export default function TeamPage() {
                           <tr key={i} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
                             <td className="px-3 py-1.5 font-medium text-accent hover:underline">
                               {pid ? <Link to={`/player/${pid}`}>{p.PlayerName}</Link> : p.PlayerName}
+                              {pid && rosterSeasonId != null && captainMap.get(rosterSeasonId) === pid && (
+                                <span
+                                  className="ml-1.5 inline-flex items-center justify-center w-4 h-4 text-[10px] font-bold rounded-full border border-accent text-accent align-middle"
+                                  title="Team Captain"
+                                >C</span>
+                              )}
                             </td>
                             <td className="px-3 py-1.5 text-muted-foreground text-xs">{posDisplay}</td>
                             <td className="px-3 py-1.5 text-right font-mono text-xs">{(p as any)._age ?? "—"}</td>
@@ -1164,6 +1247,31 @@ export default function TeamPage() {
                   </div>
                 </div>
               )}
+
+              {managerHistory.length > 0 && (() => {
+                const seasonManagers = managerHistory.filter(m => m.SeasonID === rosterSeasonId);
+                if (seasonManagers.length === 0) return null;
+                return (
+                  <div className="border border-border rounded overflow-hidden">
+                    <div className="px-3 py-2" style={headerStyle || undefined}>
+                      <h3 className={`font-display text-sm font-bold ${headerStyle ? "" : "text-table-header-foreground"}`}
+                        style={!headerStyle ? undefined : { color: headerStyle.color }}>
+                        {rosterSeasonId ? `${seasonLabel(rosterSeasonId)} Manager` : "Manager"}
+                      </h3>
+                    </div>
+                    <div className="bg-card p-3 space-y-2 text-sm font-sans">
+                      {seasonManagers.map(m => (
+                        <div key={m.ManagerID} className="flex justify-between items-center">
+                          <Link to={`/manager/${m.ManagerID}`} className="font-medium text-accent hover:underline">
+                            {m.FirstName} {m.LastName}
+                          </Link>
+                          {m.FormerPlayerFlag && <span className="text-xs text-muted-foreground italic">former player</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div className="border border-border rounded overflow-hidden">
                 <div className="px-3 py-2" style={headerStyle || undefined}>

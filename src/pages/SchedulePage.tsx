@@ -21,8 +21,8 @@ interface Game {
   LeagueID: number;
   WeekID: number;
   Matchday: string;          // YYYY-MM-DD
-  HomeTeamID: number;
-  AwayTeamID: number;
+  HomeTeamID: number | null;
+  AwayTeamID: number | null;
   HomeScore: number | null;
   AwayScore: number | null;
   played: boolean;
@@ -232,7 +232,7 @@ export default function SchedulePage() {
   // Teams available for the league filter
   const teamsForFilter = useMemo(() => {
     const ids = new Set<number>();
-    games.forEach(g => { ids.add(g.HomeTeamID); ids.add(g.AwayTeamID); });
+    games.forEach(g => { if (g.HomeTeamID != null) ids.add(g.HomeTeamID); if (g.AwayTeamID != null) ids.add(g.AwayTeamID); });
     return [...ids]
       .map(id => teamMap.get(id))
       .filter((t): t is Team => !!t)
@@ -279,7 +279,8 @@ export default function SchedulePage() {
     });
   }
 
-  function teamLabel(id: number, short = false): string {
+  function teamLabel(id: number | null, short = false): string {
+    if (id == null) return "TBD";
     const t = teamMap.get(id);
     if (!t) return `Team#${id}`;
     return (short ? (t.Nickname || t.FullName) : (t.FullName || t.Nickname)) || `Team#${id}`;
@@ -470,8 +471,8 @@ export default function SchedulePage() {
             <div className="divide-y divide-border">
               {(byDate.get(selectedDay) || []).map((g, i) => {
                 const league = leagueMap.get(g.LeagueID);
-                const home = teamMap.get(g.HomeTeamID);
-                const away = teamMap.get(g.AwayTeamID);
+                const home = g.HomeTeamID != null ? teamMap.get(g.HomeTeamID) : null;
+                const away = g.AwayTeamID != null ? teamMap.get(g.AwayTeamID) : null;
                 return (
                   <div
                     key={i}
