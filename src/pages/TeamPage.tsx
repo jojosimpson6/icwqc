@@ -882,9 +882,7 @@ export default function TeamPage() {
             </p>
           )}
           {/* Current manager & captain */}
-          <p className="text-sm font-mono mt-1 bg-yellow-200 text-black p-1">
-  DEBUG: captainMap.size={captainMap.size}, managerHistory.length={managerHistory.length}, TeamID={team.TeamID}
-</p>
+
           {managerHistory.length > 0 && (() => {
             const current = managerHistory[managerHistory.length - 1];
             return (
