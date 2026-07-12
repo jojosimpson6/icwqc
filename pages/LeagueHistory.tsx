@@ -47,7 +47,10 @@ const MEDAL = {
 } as const;
 
 // LeagueIDs that are cup/knockout competitions (not round-robin)
-const CUP_IDS = new Set([15,16,17,18,19,20,21]);
+const CUP_IDS = new Set([15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30]);
+// International competitions where the last week (typically week 4) contains
+// both the Final and the 3rd-Place Playoff.
+const INTL_FINAL_THIRD_IDS = new Set([20,21,22,23,24,25,26,27,28,29,30]);
 
 // Build round labels: Final/Semis/Quarters are descriptive; earlier rounds get ordinal names.
 function buildRoundLabels(weekGroups: Map<number, any[]>, sortedWeeks: number[]): Map<number, string> {
@@ -229,6 +232,68 @@ export default function LeagueHistory() {
             weekGroups.get(w)!.push(m);
           });
           const sortedWeeks = [...weekGroups.keys()].sort((a,b)=>a-b);
+
+          // Americas Cup (LeagueID 17): Final is a round-robin in weeks 6, 7, 8.
+          // Rank by wins, tiebreaker = goal difference.
+          if (lid === 17) {
+            const finalWeeks = [6, 7, 8].filter(w => weekGroups.has(w));
+            if (!finalWeeks.length) return;
+            const stats = new Map<number,{w:number;gf:number;ga:number}>();
+            const bump = (id:number) => { if (!stats.has(id)) stats.set(id,{w:0,gf:0,ga:0}); return stats.get(id)!; };
+            finalWeeks.forEach(fw => {
+              (weekGroups.get(fw)||[]).forEach((m:any) => {
+                if (!m.HomeTeamID || !m.AwayTeamID) return;
+                const h = bump(m.HomeTeamID), a = bump(m.AwayTeamID);
+                const hs = m.HomeTeamScore||0, as = m.AwayTeamScore||0;
+                h.gf += hs; h.ga += as; a.gf += as; a.ga += hs;
+                if (hs > as) h.w += 1;
+                else if (as > hs) a.w += 1;
+              });
+            });
+            const ranked = [...stats.entries()].sort((a,b) => {
+              if (b[1].w !== a[1].w) return b[1].w - a[1].w;
+              return (b[1].gf - b[1].ga) - (a[1].gf - a[1].ga);
+            });
+            summaries.push({
+              seasonId: sid,
+              champion: ranked[0] ? (tMap[ranked[0][0]]||null) : null,
+              runnerUp: ranked[1] ? (tMap[ranked[1][0]]||null) : null,
+              third:    ranked[2] ? (tMap[ranked[2][0]]||null) : null,
+              isCupFinal: true,
+              teams: [],
+            });
+            return;
+          }
+
+          // International comps: last week (typically week 4) contains both
+          // the Final and the 3rd-place playoff. The Final is the match between
+          // the two semifinal winners; the other is the 3rd-place playoff.
+          if (INTL_FINAL_THIRD_IDS.has(lid) && sortedWeeks.length >= 2) {
+            const lastWeek = sortedWeeks[sortedWeeks.length - 1];
+            const semiWeek = sortedWeeks[sortedWeeks.length - 2];
+            const lastMatches = weekGroups.get(lastWeek) || [];
+            const semiMatches = weekGroups.get(semiWeek) || [];
+            if (lastMatches.length === 2 && semiMatches.length === 2) {
+              const semiWinners = new Set<number>();
+              semiMatches.forEach((m: any) => {
+                const hs = m.HomeTeamScore || 0, as = m.AwayTeamScore || 0;
+                if (hs >= as && m.HomeTeamID) semiWinners.add(m.HomeTeamID);
+                else if (as > hs && m.AwayTeamID) semiWinners.add(m.AwayTeamID);
+              });
+              const finalMatch = lastMatches.find((m: any) =>
+                semiWinners.has(m.HomeTeamID) && semiWinners.has(m.AwayTeamID)
+              ) || lastMatches[lastMatches.length - 1];
+              const thirdMatch = lastMatches.find((m: any) => m !== finalMatch)!;
+              const fHomeWin = (finalMatch.HomeTeamScore || 0) >= (finalMatch.AwayTeamScore || 0);
+              const tHomeWin = (thirdMatch.HomeTeamScore || 0) >= (thirdMatch.AwayTeamScore || 0);
+              const champion = tMap[fHomeWin ? finalMatch.HomeTeamID : finalMatch.AwayTeamID] || null;
+              const runnerUp = tMap[fHomeWin ? finalMatch.AwayTeamID : finalMatch.HomeTeamID] || null;
+              const third = tMap[tHomeWin ? thirdMatch.HomeTeamID : thirdMatch.AwayTeamID] || null;
+              summaries.push({ seasonId: sid, champion, runnerUp, third, isCupFinal: true, teams: [] });
+              return;
+            }
+          }
+
 
           // Map each week to its round label, collapsing consecutive two-leg rounds
           const weekToRound = buildRoundLabels(weekGroups, sortedWeeks);

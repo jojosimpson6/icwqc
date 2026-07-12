@@ -28,7 +28,9 @@ interface StatLine {
   PlayerID: number | null;
   PlayerName: string | null;
   SeasonID: number | null;
+  LeagueID: number | null;
   LeagueName: string | null;
+  TeamID: number | null;
   TeamFullName: string | null;
   Position: string | null;
   Nation: string | null;
@@ -159,6 +161,8 @@ export default function PlayerProfile() {
   const [player, setPlayer] = useState<Player | null>(null);
   const [nation, setNation] = useState<string>("");
   const [stats, setStats] = useState<StatLine[]>([]);
+  const [captainSeasons, setCaptainSeasons] = useState<Set<number>>(new Set());
+  const [managerCareerId, setManagerCareerId] = useState<number | null>(null);
   const [mostRecentTeam, setMostRecentTeam] = useState<string>("");
   const [leagueLeaders, setLeagueLeaders] = useState<LeagueLeaderEntry[]>([]);
   const [leagueMaxes, setLeagueMaxes] = useState<Map<string, Map<string, number>>>(new Map());
@@ -168,9 +172,11 @@ export default function PlayerProfile() {
   const [matchLogSortKey, setMatchLogSortKey] = useState<string>("date");
   const [matchLogSortDir, setMatchLogSortDir] = useState<"asc" | "desc">("asc");
   const [compFilter, setCompFilter] = useState<string>("all");
+  const [posFilter, setPosFilter] = useState<string>("all");
   const [detectedPositions, setDetectedPositions] = useState<string[]>([]);
   const [playerAwards, setPlayerAwards] = useState<{ awardname: string; placement: number; seasonid: number; leagueid: number; leagueName?: string }[]>([]);
   const [leagueNameMap, setLeagueNameMap] = useState<Map<number, string>>(new Map());
+  const [teamCompWins, setTeamCompWins] = useState<{ leagueId: number; leagueName: string; seasonId: number; teamName: string }[]>([]);
   useEffect(() => {
     if (!id) return;
     const pid = parseInt(id);
@@ -185,6 +191,19 @@ export default function PlayerProfile() {
             .then(({ data: nd }) => { if (nd?.[0]) setNation(nd[0].Nation || ""); });
         }
       }
+    });
+
+    // Captaincy history
+    fetchAllRows("team_captains", {
+      select: "SeasonID",
+      filters: [{ method: "eq", args: ["CaptainPlayerID", pid] }],
+    }).then((rows: any) => {
+      setCaptainSeasons(new Set((rows || []).map((r: any) => r.SeasonID).filter(Boolean)));
+    });
+
+    // Did this player go on to manage?
+    supabase.from("managers").select("ManagerID").eq("FormerPlayerID", pid).limit(1).then(({ data }) => {
+      if (data?.[0]) setManagerCareerId((data[0] as any).ManagerID);
     });
 
     // Fetch player awards + league name map
@@ -372,6 +391,218 @@ export default function PlayerProfile() {
     });
   }, [id]);
 
+  // ── Team Competition Wins ──
+  // For each (LeagueID, SeasonID, TeamName) the player appeared in, check whether that team
+  // won the competition that season. Cup leagues (CUP_IDS) are resolved via results final;
+  // round-robin leagues via the standings table.
+  // Knockout/cup competitions (winner determined by results final, not standings).
+  // LeagueID 21 = Quidditch World Cup Qualification — explicitly excluded from championship credit.
+  const CUP_IDS_SET = new Set([15, 16, 17, 18, 19, 20, 22, 24, 26, 28]);
+  const EXCLUDED_LEAGUE_IDS = new Set([21, 23, 25, 27, 29, 30]);
+  const INTL_SEMI_IDS = new Set([20, 22, 24, 26, 28]);
+  useEffect(() => {
+    if (!stats.length || leagueNameMap.size === 0) { setTeamCompWins([]); return; }
+    const leagueIdByName = new Map<string, number>();
+    leagueNameMap.forEach((name, lid) => leagueIdByName.set(name, lid));
+
+    // Unique (leagueId, seasonId, teamName) tuples this player appeared in
+    const tuples = new Map<string, { leagueId: number; seasonId: number; teamName: string }>();
+    stats.forEach(s => {
+      if (!s.LeagueName || !s.SeasonID || !s.TeamFullName) return;
+      const lid = leagueIdByName.get(s.LeagueName);
+      if (!lid || EXCLUDED_LEAGUE_IDS.has(lid)) return;
+      const key = `${lid}|${s.SeasonID}|${s.TeamFullName}`;
+      if (!tuples.has(key)) tuples.set(key, { leagueId: lid, seasonId: s.SeasonID, teamName: s.TeamFullName });
+    });
+    if (tuples.size === 0) return;
+
+    // Split into league vs cup unique (leagueId, seasonId)
+    const leagueSeasons = new Map<string, { leagueId: number; seasonId: number }>();
+    const cupSeasons = new Map<string, { leagueId: number; seasonId: number }>();
+    tuples.forEach(t => {
+      const k = `${t.leagueId}|${t.seasonId}`;
+      if (CUP_IDS_SET.has(t.leagueId)) cupSeasons.set(k, { leagueId: t.leagueId, seasonId: t.seasonId });
+      else leagueSeasons.set(k, { leagueId: t.leagueId, seasonId: t.seasonId });
+    });
+
+    (async () => {
+      const wins: { leagueId: number; leagueName: string; seasonId: number; teamName: string }[] = [];
+      const publishWins = () => {
+        const deduped = new Map<string, { leagueId: number; leagueName: string; seasonId: number; teamName: string }>();
+        wins.forEach(w => deduped.set(`${w.leagueId}|${w.seasonId}|${w.teamName}`, w));
+        setTeamCompWins([...deduped.values()].sort((a, b) =>
+          a.leagueId - b.leagueId || a.seasonId - b.seasonId || a.teamName.localeCompare(b.teamName)
+        ));
+      };
+
+      // ── Round-robin league champions via standings ──
+      if (leagueSeasons.size > 0) {
+        const champByKey = new Map<string, string>();
+        await Promise.all([...leagueSeasons.values()].map(async ({ leagueId, seasonId }) => {
+          const { data } = await supabase
+            .from("standings")
+            .select('"LeagueID","SeasonID","FullName",totalpoints')
+            .eq("SeasonID", seasonId)
+            .eq("LeagueID", leagueId)
+            .order("totalpoints", { ascending: false })
+            .limit(1);
+          const champion = data?.[0]?.FullName;
+          if (champion) champByKey.set(`${leagueId}|${seasonId}`, champion);
+        }));
+        tuples.forEach(t => {
+          if (CUP_IDS_SET.has(t.leagueId)) return;
+          const k = `${t.leagueId}|${t.seasonId}`;
+          if (champByKey.get(k) === t.teamName) {
+            wins.push({ leagueId: t.leagueId, leagueName: leagueNameMap.get(t.leagueId) || "", seasonId: t.seasonId, teamName: t.teamName });
+          }
+        });
+        publishWins();
+      }
+
+      // ── Cup champions via results ──
+      if (cupSeasons.size > 0) {
+        const cupLeagueIds = [...new Set([...cupSeasons.values()].map(v => v.leagueId))];
+        const cupSeasonIds = [...new Set([...cupSeasons.values()].map(v => v.seasonId))];
+        const resultsData = await fetchAllRows("results", {
+          select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID,SeasonID,LeagueID",
+          filters: [
+            { method: "in", args: ["LeagueID", cupLeagueIds] },
+            { method: "in", args: ["SeasonID", cupSeasonIds] },
+          ],
+        });
+        // Need team IDs → names
+        const teamIds = new Set<number>();
+        (resultsData || []).forEach((r: any) => { if (r.HomeTeamID) teamIds.add(r.HomeTeamID); if (r.AwayTeamID) teamIds.add(r.AwayTeamID); });
+        const teamNameById = new Map<number, string>();
+        if (teamIds.size > 0) {
+          const chunks = Array.from({ length: Math.ceil(teamIds.size / 100) }, (_, i) => [...teamIds].slice(i * 100, (i + 1) * 100));
+          await Promise.all(chunks.map(async ch => {
+            const { data } = await supabase.from("teams").select('"TeamID","FullName"').in("TeamID", ch);
+            (data || []).forEach((t: any) => { if (t.TeamID && t.FullName) teamNameById.set(t.TeamID, t.FullName); });
+          }));
+        }
+
+        // Group results by (leagueId, seasonId)
+        const byKey = new Map<string, any[]>();
+        (resultsData || []).forEach((r: any) => {
+          const k = `${r.LeagueID}|${r.SeasonID}`;
+          if (!cupSeasons.has(k)) return;
+          if (!byKey.has(k)) byKey.set(k, []);
+          byKey.get(k)!.push(r);
+        });
+
+        const champByKey = new Map<string, string>();
+        byKey.forEach((matches, key) => {
+          const [lidStr] = key.split("|");
+          const lid = Number(lidStr);
+          const weekGroups = new Map<number, any[]>();
+          matches.forEach(m => {
+            const w = m.WeekID || 0;
+            if (!weekGroups.has(w)) weekGroups.set(w, []);
+            weekGroups.get(w)!.push(m);
+          });
+          const sortedWeeks = [...weekGroups.keys()].sort((a, b) => a - b);
+
+          if (lid === 17) {
+            // Americas Cup round-robin final in weeks 6,7,8
+            const finalWeeks = [6, 7, 8].filter(w => weekGroups.has(w));
+            if (!finalWeeks.length) return;
+            const tally = new Map<number, { w: number; gf: number; ga: number }>();
+            const bump = (tid: number) => { if (!tally.has(tid)) tally.set(tid, { w: 0, gf: 0, ga: 0 }); return tally.get(tid)!; };
+            finalWeeks.forEach(fw => (weekGroups.get(fw) || []).forEach((m: any) => {
+              if (!m.HomeTeamID || !m.AwayTeamID) return;
+              const h = bump(m.HomeTeamID), a = bump(m.AwayTeamID);
+              const hs = m.HomeTeamScore || 0, as = m.AwayTeamScore || 0;
+              h.gf += hs; h.ga += as; a.gf += as; a.ga += hs;
+              if (hs > as) h.w += 1; else if (as > hs) a.w += 1;
+            }));
+            const ranked = [...tally.entries()].sort((a, b) => b[1].w - a[1].w || (b[1].gf - b[1].ga) - (a[1].gf - a[1].ga));
+            if (ranked[0]) champByKey.set(key, teamNameById.get(ranked[0][0]) || "");
+            return;
+          }
+
+          // New-format international comps (LeagueID 20, 22, 24, 26, 28):
+          // final week has 2 matches (Final + 3rd-place playoff). Final = match
+          // between the two semifinal (previous week) winners.
+          if (INTL_SEMI_IDS.has(lid)) {
+            const maxWeek = Math.max(...sortedWeeks);
+            const lastWeekMatches = weekGroups.get(maxWeek) || [];
+            const semiMatches = weekGroups.get(maxWeek - 1) || [];
+            if (lastWeekMatches.length === 2 && semiMatches.length === 2) {
+              const semiWinners = new Set<number>();
+              semiMatches.forEach((m: any) => {
+                const hs = m.HomeTeamScore || 0, as = m.AwayTeamScore || 0;
+                if (hs >= as && m.HomeTeamID) semiWinners.add(m.HomeTeamID);
+                else if (as > hs && m.AwayTeamID) semiWinners.add(m.AwayTeamID);
+              });
+              const finalMatch = lastWeekMatches.find((m: any) =>
+                m.HomeTeamID && m.AwayTeamID && semiWinners.has(m.HomeTeamID) && semiWinners.has(m.AwayTeamID)
+              );
+              if (finalMatch) {
+                const hs = finalMatch.HomeTeamScore || 0, as = finalMatch.AwayTeamScore || 0;
+                const champId = hs >= as ? finalMatch.HomeTeamID : finalMatch.AwayTeamID;
+                if (champId) champByKey.set(key, teamNameById.get(champId) || "");
+              }
+            } else if (lastWeekMatches.length === 1) {
+              // Single-match final week fallback
+              const m = lastWeekMatches[0];
+              const hs = m.HomeTeamScore || 0, as = m.AwayTeamScore || 0;
+              const champId = hs >= as ? m.HomeTeamID : m.AwayTeamID;
+              if (champId) champByKey.set(key, teamNameById.get(champId) || "");
+            }
+            return;
+          }
+
+
+          // Knockout: aggregate goals across final weeks (consecutive 1-match weeks)
+          const finalWeeks: number[] = [];
+          for (let i = sortedWeeks.length - 1; i >= 0; i--) {
+            const w = sortedWeeks[i];
+            if ((weekGroups.get(w) || []).length === 1) finalWeeks.unshift(w);
+            else break;
+          }
+          if (!finalWeeks.length) return;
+          // If the very last single-match week is the 3rd-place playoff, drop it
+          // Detect by checking if preceding rounds had 2 matches (semis); a 3rd-place match
+          // sits between semis and final as a lone game — but our reverse scan picks up
+          // all trailing single-match weeks. The Final is the LAST one.
+          const teamGoals = new Map<number, number>();
+          const lastFinalWeek = finalWeeks[finalWeeks.length - 1];
+          // Treat the final as weeks with same descriptive role: collapse consecutive trailing 1-match weeks
+          // that are NOT separated by a different round — already done. Aggregate goals across them.
+          finalWeeks.forEach(fw => (weekGroups.get(fw) || []).forEach((m: any) => {
+            if (m.HomeTeamID) teamGoals.set(m.HomeTeamID, (teamGoals.get(m.HomeTeamID) || 0) + (m.HomeTeamScore || 0));
+            if (m.AwayTeamID) teamGoals.set(m.AwayTeamID, (teamGoals.get(m.AwayTeamID) || 0) + (m.AwayTeamScore || 0));
+          }));
+          // If finalWeeks includes 3rd-place playoff plus final, the final winner may be wrong.
+          // Safer: just use the LAST week's match aggregate (single Final leg) if multiple
+          // single-match weeks are present and there's no preceding non-single week between them.
+          if (finalWeeks.length > 1) {
+            teamGoals.clear();
+            (weekGroups.get(lastFinalWeek) || []).forEach((m: any) => {
+              if (m.HomeTeamID) teamGoals.set(m.HomeTeamID, (teamGoals.get(m.HomeTeamID) || 0) + (m.HomeTeamScore || 0));
+              if (m.AwayTeamID) teamGoals.set(m.AwayTeamID, (teamGoals.get(m.AwayTeamID) || 0) + (m.AwayTeamScore || 0));
+            });
+          }
+          const sortedTeams = [...teamGoals.entries()].sort((a, b) => b[1] - a[1]);
+          if (sortedTeams[0]) champByKey.set(key, teamNameById.get(sortedTeams[0][0]) || "");
+        });
+
+        tuples.forEach(t => {
+          if (!CUP_IDS_SET.has(t.leagueId)) return;
+          const k = `${t.leagueId}|${t.seasonId}`;
+          if (champByKey.get(k) === t.teamName) {
+            wins.push({ leagueId: t.leagueId, leagueName: leagueNameMap.get(t.leagueId) || "", seasonId: t.seasonId, teamName: t.teamName });
+          }
+        });
+      }
+
+      publishWins();
+    })();
+  }, [stats, leagueNameMap]);
+
+
+
 
   if (!player) {
     return (
@@ -389,35 +620,15 @@ export default function PlayerProfile() {
 
   // Use detected positions for multi-position display
   const positionsPlayed = detectedPositions.length > 0 ? detectedPositions : (player.Position ? [player.Position] : []);
-  const isKeeper = positionsPlayed.includes("Keeper");
-  const isSeeker = positionsPlayed.includes("Seeker");
-  const isChaser = positionsPlayed.includes("Chaser");
-  const isBeater = positionsPlayed.includes("Beater");
+  const effectivePositions = posFilter === "all" ? positionsPlayed : positionsPlayed.filter(p => p === posFilter);
+  const isKeeper = effectivePositions.includes("Keeper");
+  const isSeeker = effectivePositions.includes("Seeker");
+  const isChaser = effectivePositions.includes("Chaser");
+  const isBeater = effectivePositions.includes("Beater");
   const positionDisplay = positionsPlayed.join("/");
 
   // Deduplicate stats: group by SeasonID+LeagueName+TeamFullName, show each unique row
   // (multi-position players have separate rows per position which is fine for the table)
-
-  // Career totals
-  const careerTotals = {
-    gp: stats.reduce((s, r) => s + (r.GamesPlayed || 0), 0),
-    goals: stats.reduce((s, r) => s + (r.Goals || 0), 0),
-    gsc: stats.reduce((s, r) => s + (r.GoldenSnitchCatches || 0), 0),
-    saves: stats.reduce((s, r) => s + (r.KeeperSaves || 0), 0),
-    shotsFaced: stats.reduce((s, r) => s + (r.KeeperShotsFaced || 0), 0),
-    minutes: stats.reduce((s, r) => s + (r.MinPlayed || 0), 0),
-    shotAtt: stats.reduce((s, r) => s + (r.ShotAtt || 0), 0),
-    shotScored: stats.reduce((s, r) => s + (r.ShotScored || 0), 0),
-    passAtt: stats.reduce((s, r) => s + (r.PassAtt || 0), 0),
-    passComp: stats.reduce((s, r) => s + (r.PassComp || 0), 0),
-    keeperPassAtt: stats.reduce((s, r) => s + (r.KeeperPassAtt || 0), 0),
-    keeperPassComp: stats.reduce((s, r) => s + (r.KeeperPassComp || 0), 0),
-    bludgersHit: stats.reduce((s, r) => s + (r.BludgersHit || 0), 0),
-    turnoversForced: stats.reduce((s, r) => s + (r.TurnoversForced || 0), 0),
-    teammatesProtected: stats.reduce((s, r) => s + (r.TeammatesProtected || 0), 0),
-    bludgerShotsFaced: stats.reduce((s, r) => s + (r.BludgerShotsFaced || 0), 0),
-    snitchSpotted: stats.reduce((s, r) => s + (r.SnitchSpotted || 0), 0),
-  };
 
   const allTimeGoals = Math.max(0, ...stats.filter(s => s.Position === "Chaser").map(s => s.Goals || 0));
   const allTimeGSC = Math.max(0, ...stats.filter(s => s.Position === "Seeker").map(s => s.GoldenSnitchCatches || 0));
@@ -436,8 +647,18 @@ export default function PlayerProfile() {
     "European Cup": 2, "All-Africa Cup": 2, "Americas Cup": 2, "Pacific Cup": 2,
     // CL third
     "Champions League": 3,
-    // International last
-    "Quidditch World Cup": 4,
+    // International: qualifying comes before its parent competition
+    "Quidditch World Cup Qualification": 4,
+    "Quidditch World Cup": 5,
+    "EIC Qualifying": 6,
+    "European International Championship": 7,
+    "Gold Cup Qualifying": 8,
+    "Gold Cup": 9,
+    "AFCON Qualifying": 10,
+    "African Continental Championship": 11,
+    "PAC Qualifying": 12,
+    "Pacfic-Asian Championships": 13,
+    "International Friendlies": 14,
   };
   const getCompOrder = (name: string | null) => compOrder[name || ""] || (name ? 5 : 99);
 
@@ -454,13 +675,43 @@ export default function PlayerProfile() {
   const domesticLeagueNames = new Set(
     [...leagueNameMap.entries()].filter(([id]) => id >= 1 && id <= 14).map(([, name]) => name)
   );
+  // International league names (LeagueID >= 20 — cups + qualifiers + friendlies)
+  const intlLeagueNames = new Set(
+    [...leagueNameMap.entries()].filter(([id]) => id >= 20).map(([, name]) => name)
+  );
   const hasDomesticComps = allComps.some(c => domesticLeagueNames.has(c));
+  const hasIntlComps = allComps.some(c => intlLeagueNames.has(c));
 
-  const filteredStats = compFilter === "all"
+  const compScoped = compFilter === "all"
     ? sortedStats
     : compFilter === "domestic"
     ? sortedStats.filter(s => s.LeagueName && domesticLeagueNames.has(s.LeagueName))
+    : compFilter === "international"
+    ? sortedStats.filter(s => s.LeagueName && intlLeagueNames.has(s.LeagueName))
     : sortedStats.filter(s => s.LeagueName === compFilter);
+  const filteredStats = posFilter === "all" ? compScoped : compScoped.filter(s => s.Position === posFilter);
+
+  // Career totals — reflect current comp + position filter
+  const careerTotals = {
+    gp: filteredStats.reduce((s, r) => s + (r.GamesPlayed || 0), 0),
+    goals: filteredStats.reduce((s, r) => s + (r.Goals || 0), 0),
+    gsc: filteredStats.reduce((s, r) => s + (r.GoldenSnitchCatches || 0), 0),
+    saves: filteredStats.reduce((s, r) => s + (r.KeeperSaves || 0), 0),
+    shotsFaced: filteredStats.reduce((s, r) => s + (r.KeeperShotsFaced || 0), 0),
+    minutes: filteredStats.reduce((s, r) => s + (r.MinPlayed || 0), 0),
+    shotAtt: filteredStats.reduce((s, r) => s + (r.ShotAtt || 0), 0),
+    shotScored: filteredStats.reduce((s, r) => s + (r.ShotScored || 0), 0),
+    passAtt: filteredStats.reduce((s, r) => s + (r.PassAtt || 0), 0),
+    passComp: filteredStats.reduce((s, r) => s + (r.PassComp || 0), 0),
+    keeperPassAtt: filteredStats.reduce((s, r) => s + (r.KeeperPassAtt || 0), 0),
+    keeperPassComp: filteredStats.reduce((s, r) => s + (r.KeeperPassComp || 0), 0),
+    bludgersHit: filteredStats.reduce((s, r) => s + (r.BludgersHit || 0), 0),
+    turnoversForced: filteredStats.reduce((s, r) => s + (r.TurnoversForced || 0), 0),
+    teammatesProtected: filteredStats.reduce((s, r) => s + (r.TeammatesProtected || 0), 0),
+    bludgerShotsFaced: filteredStats.reduce((s, r) => s + (r.BludgerShotsFaced || 0), 0),
+    snitchSpotted: filteredStats.reduce((s, r) => s + (r.SnitchSpotted || 0), 0),
+  };
+
 
   // Career bests per competition (for gold shading)
   // Key is either the league name OR "domestic" for all domestic leagues pooled
@@ -605,6 +856,13 @@ export default function PlayerProfile() {
                   </Link>
                 ) : "—"}
               </p>
+              {managerCareerId && (
+                <p className="text-sm font-sans mt-1">
+                  <Link to={`/manager/${managerCareerId}`} className="text-accent hover:underline font-medium">
+                    Went on to manage — view managerial career →
+                  </Link>
+                </p>
+              )}
               <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-sans">
                 <div>
                   <p className="text-xs text-muted-foreground uppercase tracking-wide">Born</p>
@@ -648,17 +906,31 @@ export default function PlayerProfile() {
           <div className="border border-border rounded overflow-hidden">
             <div className="bg-table-header px-3 py-2 flex items-center justify-between flex-wrap gap-2">
               <h3 className="font-display text-sm font-bold text-table-header-foreground">Season-by-Season Statistics</h3>
-              {allComps.length > 1 && (
-                <select
-                  value={compFilter}
-                  onChange={e => setCompFilter(e.target.value)}
-                  className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
-                >
-                  <option value="all">All Competitions</option>
-                  {hasDomesticComps && <option value="domestic">All League Matches</option>}
-                  {allComps.map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              )}
+              <div className="flex flex-wrap gap-2">
+                {positionsPlayed.length > 1 && (
+                  <select
+                    value={posFilter}
+                    onChange={e => setPosFilter(e.target.value)}
+                    className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
+                    title="Filter by position"
+                  >
+                    <option value="all">All Positions</option>
+                    {positionsPlayed.map(p => <option key={p} value={p}>{p} only</option>)}
+                  </select>
+                )}
+                {allComps.length > 1 && (
+                  <select
+                    value={compFilter}
+                    onChange={e => setCompFilter(e.target.value)}
+                    className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
+                  >
+                    <option value="all">All Competitions</option>
+                    {hasDomesticComps && <option value="domestic">All League Matches</option>}
+                    {hasIntlComps && <option value="international">All International</option>}
+                    {allComps.map(c => <option key={c} value={c}>{c}</option>)}
+                  </select>
+                )}
+              </div>
             </div>
             <div className="overflow-x-auto">
               <table className="w-full text-sm font-sans">
@@ -766,7 +1038,15 @@ export default function PlayerProfile() {
                         <td className={`${tdClass} font-mono text-xs`} title={s.LeagueName || ""}>{abbrevLeague(s.LeagueName)}</td>
                         <td className={`${tdClass}`}>
                           {s.TeamFullName ? (
-                            <Link to={`/team/${encodeURIComponent(s.TeamFullName)}`} className="text-accent hover:underline">{s.TeamFullName}</Link>
+                            <>
+                              <Link to={`/team/${encodeURIComponent(s.TeamFullName)}`} className="text-accent hover:underline">{s.TeamFullName}</Link>
+                              {captainSeasons.has(s.SeasonID) && (
+                                <span
+                                  className="ml-1.5 inline-flex items-center justify-center w-4 h-4 text-[10px] font-bold rounded-full border border-accent text-accent align-middle"
+                                  title="Team Captain"
+                                >C</span>
+                              )}
+                            </>
                           ) : "—"}
                         </td>
                         {positionsPlayed.length > 1 && <td className={`${tdClass} text-xs text-muted-foreground`}>{s.Position}</td>}
@@ -885,7 +1165,7 @@ export default function PlayerProfile() {
           </div>
 
           {/* Awards & Honours — Baseball Reference style */}
-          {(playerAwards.length > 0 || leagueLeaders.length > 0) && (() => {
+          {(playerAwards.length > 0 || leagueLeaders.length > 0 || teamCompWins.length > 0) && (() => {
             const plLabel = (n: number) => n === 1 ? "1st" : n === 2 ? "2nd" : n === 3 ? "3rd" : `${n}th`;
             const plColor = (n: number) =>
               n === 1 ? "text-yellow-600 dark:text-yellow-400 font-bold"
@@ -955,7 +1235,7 @@ export default function PlayerProfile() {
                   });
                   // For display: just show "TOTY 1st Team / 2nd Team" per season using placement as team#
                   // If placement > 3 it's probably a slot number — treat all as "Team of the Year" membership
-                  const totySeasons = [...totySeasonsMap.keys()].sort((a, b) => b - a);
+                  const totySeasons = [...totySeasonsMap.keys()].sort((a, b) => a - b);
 
                   if (awardGroups.size === 0 && toty.length === 0) return null;
 
@@ -967,8 +1247,9 @@ export default function PlayerProfile() {
                         <span className="text-xs text-muted-foreground font-sans">— {lname}</span>
                       </div>
 
-                      {/* Regular awards: one row per award name, columns = winning seasons grouped */}
-                      {awardGroups.size > 0 && (
+                      {/* Unified awards table: regular awards + Team of the Year share one table
+                          so columns, padding and zebra-striping line up consistently. */}
+                      {(awardGroups.size > 0 || toty.length > 0) && (
                         <div className="overflow-x-auto">
                           <table className="w-full text-sm font-sans">
                             <thead>
@@ -978,110 +1259,160 @@ export default function PlayerProfile() {
                               </tr>
                             </thead>
                             <tbody>
-                              {[...awardGroups.entries()].map(([awardName, entries], ai) => {
-                                // Sort seasons newest first; group by placement
-                                const byPl = new Map<number, AwardEntry[]>();
-                                entries.forEach(e => {
-                                  if (!byPl.has(e.placement)) byPl.set(e.placement, []);
-                                  byPl.get(e.placement)!.push(e);
-                                });
-                                const placements = [...byPl.keys()].sort();
+                              {(() => {
+                                // Build a unified row list: regular awards first, then TOTY (if any).
+                                type RowKind =
+                                  | { kind: "regular"; awardName: string; entries: AwardEntry[] }
+                                  | { kind: "toty" };
+                                const rows: RowKind[] = [...awardGroups.entries()].map(([awardName, entries]) => ({
+                                  kind: "regular" as const, awardName, entries,
+                                }));
+                                if (toty.length > 0) rows.push({ kind: "toty" as const });
 
-                                return (
-                                  <tr key={awardName} className={`border-t border-border/50 ${ai % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
-                                    <td className="px-3 py-2 font-medium text-foreground text-sm align-top">
-                                      <Link to={`/league/${lid}/award/${encodeURIComponent(awardName)}`} className="hover:text-accent hover:underline">
-                                        {awardName}
-                                      </Link>
-                                    </td>
-                                    <td className="px-3 py-2">
-                                      <div className="flex flex-wrap gap-1.5">
-                                        {placements.map(pl => {
-                                          const seasonEntries = byPl.get(pl)!.sort((a, b) => a.seasonid - b.seasonid);
-                                          return seasonEntries.map(e => (
-                                            <span
-                                              key={`${pl}-${e.seasonid}`}
-                                              title={`${plLabel(pl)} place`}
-                                              className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono
-                                                ${pl === 1 ? "bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
-                                                  : pl === 2 ? "bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300"
-                                                  : pl === 3 ? "bg-amber-700/15 border-amber-700/40 text-amber-700 dark:text-amber-500"
-                                                  : "bg-muted/40 border-border text-muted-foreground"}`}
-                                            >
-                                              <span className="font-bold">{plLabel(pl)}</span>
-                                              <span>{seasonLabel(e.seasonid)}</span>
-                                            </span>
-                                          ));
-                                        })}
-                                      </div>
-                                    </td>
-                                  </tr>
-                                );
-                              })}
+                                return rows.map((row, ai) => {
+                                  const stripeCls = ai % 2 === 1 ? "bg-table-stripe" : "bg-card";
+
+                                  if (row.kind === "regular") {
+                                    const sortedEntries = [...row.entries].sort((a, b) =>
+                                      a.seasonid - b.seasonid || a.placement - b.placement
+                                    );
+
+                                    return (
+                                      <tr key={`reg-${row.awardName}`} className={`border-t border-border/50 ${stripeCls}`}>
+                                        <td className="px-3 py-2 font-medium text-foreground text-sm align-top">
+                                          <Link to={`/league/${lid}/award/${encodeURIComponent(row.awardName)}`} className="hover:text-accent hover:underline">
+                                            {row.awardName}
+                                          </Link>
+                                        </td>
+                                        <td className="px-3 py-2">
+                                          <div className="flex flex-wrap gap-1.5">
+                                            {sortedEntries.map(e => (
+                                              <span
+                                                key={`${e.placement}-${e.seasonid}`}
+                                                title={`${plLabel(e.placement)} place`}
+                                                className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono
+                                                  ${e.placement === 1 ? "bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
+                                                    : e.placement === 2 ? "bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300"
+                                                    : e.placement === 3 ? "bg-amber-700/15 border-amber-700/40 text-amber-700 dark:text-amber-500"
+                                                    : "bg-muted/40 border-border text-muted-foreground"}`}
+                                              >
+                                                <span className="font-bold">{plLabel(e.placement)}</span>
+                                                <span>{seasonLabel(e.seasonid)}</span>
+                                              </span>
+                                            ))}
+                                          </div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  }
+
+                                  // TOTY row
+                                  return (
+                                    <tr key="toty" className={`border-t border-border/50 ${stripeCls}`}>
+                                      <td className="px-3 py-2 font-medium text-foreground text-sm align-top">
+                                        <Link to={`/league/${lid}/award/${encodeURIComponent("Team of the Year")}`} className="hover:text-accent hover:underline">
+                                          Team of the Year
+                                        </Link>
+                                      </td>
+                                      <td className="px-3 py-2">
+                                        <div className="flex flex-wrap gap-1.5">
+                                          {totySeasons.map(sid => {
+                                            const entries = totySeasonsMap.get(sid)!;
+                                            const placementCounts = new Map<number, number>();
+                                            entries.forEach(e => placementCounts.set(e.placement, (placementCounts.get(e.placement) || 0) + 1));
+                                            const maxPl = Math.max(...entries.map(e => e.placement));
+                                            const isTeamNumber = maxPl <= 3 || [...placementCounts.values()].some(c => c > 1);
+
+                                            const myPlacements = entries.map(e => e.placement).sort();
+                                            const uniquePlacements = [...new Set(myPlacements)];
+
+                                            return uniquePlacements.map(pl => (
+                                              <span
+                                                key={`toty-${sid}-${pl}`}
+                                                title={isTeamNumber ? `${plLabel(pl)} Team` : `Selection`}
+                                                className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono
+                                                  ${pl === 1 ? "bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
+                                                    : pl === 2 ? "bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300"
+                                                    : pl === 3 ? "bg-amber-700/15 border-amber-700/40 text-amber-700 dark:text-amber-500"
+                                                    : "bg-muted/40 border-border text-muted-foreground"}`}
+                                              >
+                                                {isTeamNumber && <span className="font-bold">{plLabel(pl)}</span>}
+                                                <span>{seasonLabel(sid)}</span>
+                                              </span>
+                                            ));
+                                          })}
+                                        </div>
+                                      </td>
+                                    </tr>
+                                  );
+                                });
+                              })()}
                             </tbody>
                           </table>
                         </div>
                       )}
 
-                      {/* Team of the Year: show per season, with team number */}
-                      {toty.length > 0 && (
-                        <div className={`${awardGroups.size > 0 ? "border-t border-border/50" : ""}`}>
-                          <div className="overflow-x-auto">
-                            <table className="w-full text-sm font-sans">
-                              {awardGroups.size === 0 && (
-                                <thead>
-                                  <tr className="bg-secondary/30">
-                                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground w-48">Award</th>
-                                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Seasons</th>
-                                  </tr>
-                                </thead>
-                              )}
-                              <tbody>
-                                <tr className="border-t border-border/50 bg-card">
+                    </div>
+                  );
+                })}
+
+                {/* ── Team Competition Wins ── */}
+                {teamCompWins.length > 0 && (() => {
+                  // Group by leagueId → list of { seasonId, teamName }
+                  const byLeague = new Map<number, { leagueName: string; entries: { seasonId: number; teamName: string }[] }>();
+                  teamCompWins.forEach(w => {
+                    if (!byLeague.has(w.leagueId)) byLeague.set(w.leagueId, { leagueName: w.leagueName, entries: [] });
+                    byLeague.get(w.leagueId)!.entries.push({ seasonId: w.seasonId, teamName: w.teamName });
+                  });
+                  const leagueIds = [...byLeague.keys()].sort((a, b) => a - b);
+                  return (
+                    <div className="border-t border-border">
+                      <div className="px-3 py-1.5 bg-secondary/40">
+                        <span className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Team Competition Wins</span>
+                      </div>
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-sm font-sans">
+                          <thead>
+                            <tr className="bg-secondary/30">
+                              <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground w-48">Competition</th>
+                              <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Seasons</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {leagueIds.map((lid, i) => {
+                              const grp = byLeague.get(lid)!;
+                              const sorted = [...grp.entries].sort((a, b) => a.seasonId - b.seasonId);
+                              return (
+                                <tr key={lid} className={`border-t border-border/50 ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
                                   <td className="px-3 py-2 font-medium text-foreground text-sm align-top">
-                                    <Link to={`/league/${lid}/award/${encodeURIComponent("Team of the Year")}`} className="hover:text-accent hover:underline">
-                                      Team of the Year
+                                    <Link to={`/league/${lid}`} className="hover:text-accent hover:underline">
+                                      {grp.leagueName}
                                     </Link>
                                   </td>
                                   <td className="px-3 py-2">
                                     <div className="flex flex-wrap gap-1.5">
-                                      {totySeasons.map(sid => {
-                                        const entries = totySeasonsMap.get(sid)!;
-                                        // If max placement <= 3 AND multiple players share a placement → it's team number
-                                        // Otherwise treat all as just "selection" (show no team number)
-                                        const placementCounts = new Map<number, number>();
-                                        entries.forEach(e => placementCounts.set(e.placement, (placementCounts.get(e.placement) || 0) + 1));
-                                        const maxPl = Math.max(...entries.map(e => e.placement));
-                                        const isTeamNumber = maxPl <= 3 || [...placementCounts.values()].some(c => c > 1);
-
-                                        // Get this player's placement(s) for this season
-                                        const myPlacements = entries.map(e => e.placement).sort();
-                                        const uniquePlacements = [...new Set(myPlacements)];
-
-                                        return uniquePlacements.map(pl => (
-                                          <span
-                                            key={`toty-${sid}-${pl}`}
-                                            className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono
-                                              ${pl === 1 ? "bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
-                                                : pl === 2 ? "bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300"
-                                                : "bg-amber-700/15 border-amber-700/40 text-amber-700 dark:text-amber-500"}`}
-                                          >
-                                            {isTeamNumber && <span className="font-bold">{plLabel(pl)}</span>}
-                                            <span>{seasonLabel(sid)}</span>
-                                          </span>
-                                        ));
-                                      })}
+                                      {sorted.map(e => (
+                                        <span
+                                          key={`${e.seasonId}-${e.teamName}`}
+                                          title={`${e.teamName} — Champion`}
+                                          className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
+                                        >
+                                          <span className="font-bold">1st</span>
+                                          <span>{seasonLabel(e.seasonId)}</span>
+                                          <span className="opacity-70">{e.teamName}</span>
+                                        </span>
+                                      ))}
                                     </div>
                                   </td>
                                 </tr>
-                              </tbody>
-                            </table>
-                          </div>
-                        </div>
-                      )}
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   );
-                })}
+                })()}
 
                 {/* ── Leaderboard appearances ── */}
                 {leaderGroups.size > 0 && (

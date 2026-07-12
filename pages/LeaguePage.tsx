@@ -8,6 +8,13 @@ import { getLeagueTierLabel } from "@/lib/helpers";
 import { useSortableTable } from "@/hooks/useSortableTable";
 import { fetchAllRows } from "@/lib/fetchAll";
 
+function ymdLocal(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 interface League {
   LeagueID: number;
   LeagueName: string | null;
@@ -91,12 +98,21 @@ export default function LeaguePage() {
   const [matchResults, setMatchResults] = useState<MatchResult[]>([]);
   const [teamMap, setTeamMap] = useState<Map<number, string>>(new Map());
   const [matchDayMap, setMatchDayMap] = useState<Map<string, string>>(new Map());
+  const [upcomingFixtures, setUpcomingFixtures] = useState<{ MatchID: number | null; SeasonID: number; LeagueID: number; WeekID: number; HomeTeamID: number | null; AwayTeamID: number | null; Matchday: string; TeamsDetermined: boolean }[]>([]);
   const [awardsOpen, setAwardsOpen] = useState(false);
 
   const lid = id ? parseInt(id) : 0;
   const isCup = lid >= 15 && lid <= 18;
   const isChampionsLeague = lid === 19;
   const isDomestic = lid >= 1 && lid <= 14;
+  // Qualifying → parent competition mapping
+  const QUALIFYING_PARENT: Record<number, number> = { 21: 20, 23: 22, 25: 24, 27: 26, 29: 28 };
+  const isQualifying = lid in QUALIFYING_PARENT;
+  const isIntl = lid >= 20 && !isQualifying && lid !== 30; // 30 = friendlies
+  const isFriendly = lid === 30;
+  const parentCompId: number | null = QUALIFYING_PARENT[lid] ?? null;
+  const [advancedTeams, setAdvancedTeams] = useState<Set<number>>(new Set());
+
 
   useEffect(() => {
     if (!id) return;
@@ -148,23 +164,53 @@ export default function LeaguePage() {
         setPlayerPosMap(ppm);
       }
 
-      // For cups/CL, fetch match results
-      if (isCup || isChampionsLeague || lid === 20 || lid === 21) {
+      // For any non-domestic, fetch match results
+      if (!isDomestic) {
         fetchAllRows<MatchResult>("results", {
           select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID,SeasonID,LeagueID,IsNeutralSite",
           filters: [{ method: "eq", args: ["LeagueID", lid] }],
           order: { column: "MatchID", ascending: true },
         }).then(results => {
-          setMatchResults(results);
-          const seasons = [...new Set(results.map(r => r.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number)) as number[];
-          if (!isDomestic) {
-            setAvailableSeasons(seasons);
-            if (seasons.length > 0) setSelectedSeason(seasons[0]);
-          }
+          // Never surface a match as "played" before its actual scheduled date —
+          // this dataset has final scores pre-populated for future fixtures, so
+          // without this filter future results/stats would leak through.
+          const todayStr = ymdLocal(new Date());
+          const playedOnly = results.filter(r => {
+            const d = mdm.get(`${r.SeasonID}|${r.LeagueID}|${r.WeekID}`);
+            return !d || d <= todayStr;
+          });
+          setMatchResults(playedOnly);
+          const seasons = [...new Set(playedOnly.map(r => r.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number)) as number[];
+          setAvailableSeasons(seasons);
+          if (seasons.length > 0) setSelectedSeason(seasons[0]);
         });
+
+        // Upcoming fixtures for this league (date always shown; teams hidden until determined)
+        fetchAllRows<any>("scheduled_matches", {
+          select: '"MatchID","SeasonID","LeagueID","WeekID","HomeTeamID","AwayTeamID","Matchday","TeamsDetermined"',
+          filters: [{ method: "eq", args: ["LeagueID", lid] }],
+          order: { column: "Matchday", ascending: true },
+        }).then(rows => setUpcomingFixtures(rows || [])).catch(() => setUpcomingFixtures([]));
       }
     });
   }, [id]);
+
+  // For qualifying comps, load parent-competition teams to detect advancers
+  useEffect(() => {
+    if (!isQualifying || !parentCompId || !selectedSeason) { setAdvancedTeams(new Set()); return; }
+    fetchAllRows<any>("results", {
+      select: '"HomeTeamID","AwayTeamID","SeasonID"',
+      filters: [
+        { method: "eq", args: ["LeagueID", parentCompId] },
+        { method: "in", args: ["SeasonID", [selectedSeason, selectedSeason + 1]] },
+      ],
+    }).then(rows => {
+      const s = new Set<number>();
+      (rows || []).forEach((r: any) => { if (r.HomeTeamID) s.add(r.HomeTeamID); if (r.AwayTeamID) s.add(r.AwayTeamID); });
+      setAdvancedTeams(s);
+    }).catch(() => setAdvancedTeams(new Set()));
+  }, [isQualifying, parentCompId, selectedSeason]);
+
 
   const seasonStandings = standings.filter(s => s.SeasonID === selectedSeason);
 
@@ -230,17 +276,42 @@ export default function LeaguePage() {
     // For two-leg rounds, group pairs of weeks
     const rounds: { name: string; matches: MatchResult[] }[] = [];
     let i = 0;
+    let semiWinners: Set<number> = new Set();
     while (i < weeks.length) {
       const w1Matches = weekGroups.get(weeks[i])!;
-      // Check if next week has same number of matches (two-leg)
+      const isLastWeek = i === weeks.length - 1;
+      // Last week with 2 matches = Final + 3rd-place playoff.
+      // Final = the match between the two semifinal winners.
+      if (isLastWeek && w1Matches.length === 2 && semiWinners.size >= 2) {
+        const isFinal = (m: MatchResult) =>
+          m.HomeTeamID != null && semiWinners.has(m.HomeTeamID) &&
+          m.AwayTeamID != null && semiWinners.has(m.AwayTeamID);
+        const finalM = w1Matches.find(isFinal);
+        const thirdM = w1Matches.find(m => m !== finalM);
+        if (finalM && thirdM) {
+          rounds.push({ name: "3rd Place Playoff", matches: [thirdM] });
+          rounds.push({ name: "Final", matches: [finalM] });
+          i++;
+          continue;
+        }
+      }
+      // Two-leg round detection (non-intl)
       if (i + 1 < weeks.length) {
         const w2Matches = weekGroups.get(weeks[i + 1])!;
-        if (w1Matches.length === w2Matches.length && w1Matches.length > 1) {
-          // Two-leg round
+        if (w1Matches.length === w2Matches.length && w1Matches.length > 1 && !isIntl) {
           rounds.push({ name: roundNames(w1Matches.length), matches: [...w1Matches, ...w2Matches] });
           i += 2;
           continue;
         }
+      }
+      // Capture semifinal winners for identifying the Final next round
+      if (w1Matches.length === 2) {
+        semiWinners = new Set();
+        w1Matches.forEach(m => {
+          const hs = m.HomeTeamScore ?? 0, as_ = m.AwayTeamScore ?? 0;
+          if (hs > as_ && m.HomeTeamID != null) semiWinners.add(m.HomeTeamID);
+          else if (as_ > hs && m.AwayTeamID != null) semiWinners.add(m.AwayTeamID);
+        });
       }
       rounds.push({ name: roundNames(w1Matches.length), matches: w1Matches });
       i++;
@@ -248,16 +319,164 @@ export default function LeaguePage() {
     return rounds;
   };
 
-  // Build CL group standings from weeks 1-6
-  const buildCLGroups = (matches: MatchResult[]) => {
+  // Cleaner bracket visualization (Wikipedia-style with connector lines).
+  // Each round column has the same total height so subsequent rounds' matches
+  // naturally center between the pair of feeder matches (via justify-around).
+  const BracketDisplay = ({ rounds }: { rounds: { name: string; matches: MatchResult[] }[] }) => {
+    const bracketRounds = rounds.filter(r => r.name !== "3rd Place Playoff");
+    const thirdPlace = rounds.find(r => r.name === "3rd Place Playoff");
+    if (bracketRounds.length === 0) return null;
+
+    // Group matches in a round by unordered team pair (detects 2-leg ties for CL etc.)
+    const pairMatches = (matches: MatchResult[]) => {
+      const byPair = new Map<string, MatchResult[]>();
+      const order: string[] = [];
+      matches.forEach(m => {
+        const a = m.HomeTeamID ?? 0, b = m.AwayTeamID ?? 0;
+        const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+        if (!byPair.has(key)) { byPair.set(key, []); order.push(key); }
+        byPair.get(key)!.push(m);
+      });
+      return order.map(k => byPair.get(k)!);
+    };
+
+    const TieBox = ({ legs }: { legs: MatchResult[] }) => {
+      // Determine the "home team" of the tie as the home team of leg 1 for display,
+      // and aggregate goals across all legs.
+      const first = legs[0];
+      const hId = first.HomeTeamID, aId = first.AwayTeamID;
+      const hName = hId ? teamMap.get(hId) || `Team ${hId}` : "TBD";
+      const aName = aId ? teamMap.get(aId) || `Team ${aId}` : "TBD";
+      let hAgg = 0, aAgg = 0, played = true;
+      const legLine: string[] = [];
+      legs.forEach(m => {
+        if (m.HomeTeamScore == null || m.AwayTeamScore == null) { played = false; return; }
+        const isSwapped = m.HomeTeamID === aId;
+        const hs = isSwapped ? m.AwayTeamScore : m.HomeTeamScore;
+        const as_ = isSwapped ? m.HomeTeamScore : m.AwayTeamScore;
+        hAgg += hs; aAgg += as_;
+        legLine.push(`${hs}–${as_}`);
+      });
+      const hWin = played && hAgg > aAgg, aWin = played && aAgg > hAgg;
+      const primary = legs[0];
+      return (
+        <Link to={primary.MatchID ? `/match/${primary.MatchID}` : "#"} className="block group">
+          <div className="border border-border rounded bg-background overflow-hidden shadow-sm group-hover:border-accent transition-colors">
+            <div className={`flex items-center justify-between px-2.5 py-1.5 ${hWin ? "bg-secondary/50" : ""}`}>
+              <span className={`truncate text-xs ${hWin ? "font-bold text-foreground" : "text-foreground/80"}`}>{hName}</span>
+              <span className={`font-mono text-xs ml-2 ${hWin ? "font-bold" : "text-muted-foreground"}`}>{played ? hAgg : "—"}</span>
+            </div>
+            <div className={`flex items-center justify-between px-2.5 py-1.5 border-t border-border/60 ${aWin ? "bg-secondary/50" : ""}`}>
+              <span className={`truncate text-xs ${aWin ? "font-bold text-foreground" : "text-foreground/80"}`}>{aName}</span>
+              <span className={`font-mono text-xs ml-2 ${aWin ? "font-bold" : "text-muted-foreground"}`}>{played ? aAgg : "—"}</span>
+            </div>
+            {legs.length > 1 && (
+              <div className="px-2.5 py-1 text-[10px] font-mono text-muted-foreground border-t border-border/60 bg-secondary/20 text-center">
+                Legs: {legLine.join(" · ")}
+              </div>
+            )}
+          </div>
+        </Link>
+      );
+    };
+
+    // Fixed vertical scaffolding so successive rounds align. Each first-round tie
+    // gets a "slot" of TIE_SLOT_PX, and later-round ties occupy pow(2, ri) slots.
+    const TIE_SLOT_PX = 68;
+
+    // Compute each round's ties, then reorder every round (except the last) so that
+    // ties[2k] and ties[2k+1] are the two feeder ties whose winners actually meet in
+    // ties[k] of the following round. Without this, ties are left in raw match-list
+    // order and the connector lines can point at the wrong box in the next column.
+    const allTies: MatchResult[][][] = bracketRounds.map(r => pairMatches(r.matches));
+    for (let ri = allTies.length - 2; ri >= 0; ri--) {
+      const nextTies = allTies[ri + 1];
+      const current = allTies[ri];
+      const used = new Set<number>();
+      const reordered: MatchResult[][] = [];
+      nextTies.forEach(nt => {
+        const leg = nt[0];
+        [leg.HomeTeamID, leg.AwayTeamID].forEach(teamId => {
+          if (teamId == null) return;
+          const idx = current.findIndex((tie, i) => !used.has(i) && tie.some(m => m.HomeTeamID === teamId || m.AwayTeamID === teamId));
+          if (idx !== -1) { used.add(idx); reordered.push(current[idx]); }
+        });
+      });
+      // Any ties we couldn't place (e.g. missing/TBD data) — append at the end so nothing is dropped.
+      current.forEach((tie, i) => { if (!used.has(i)) reordered.push(tie); });
+      allTies[ri] = reordered;
+    }
+
+    const firstRoundTies = allTies[0]?.length || 0;
+    const totalHeight = Math.max(1, firstRoundTies) * TIE_SLOT_PX;
+
+    return (
+      <div className="border border-border rounded bg-gradient-to-br from-card to-secondary/10 overflow-x-auto">
+        <div className="flex gap-8 p-6 min-w-max items-stretch">
+          {bracketRounds.map((round, ri) => {
+            const ties = allTies[ri];
+            return (
+              <div key={ri} className="flex flex-col min-w-[210px]">
+                <div className="bg-primary/10 border border-primary/20 rounded px-3 py-1.5 mb-4 text-center">
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-primary">{round.name}</p>
+                </div>
+                <div
+                  className="flex flex-col justify-around"
+                  style={{ height: `${totalHeight}px` }}
+                >
+                  {ties.map((legs, ti) => (
+                    <div key={ti} className="relative">
+                      <TieBox legs={legs} />
+                      {ri < bracketRounds.length - 1 && (
+                        <>
+                          {/* horizontal stub out of this match */}
+                          <div className="absolute top-1/2 left-full w-4 h-px bg-border" />
+                          {/* vertical connector — half up from top match, half down from bottom match to pair */}
+                          {ti % 2 === 0 ? (
+                            <div
+                              className="absolute left-[calc(100%+16px)] top-1/2 w-px bg-border"
+                              style={{ height: `${TIE_SLOT_PX * Math.pow(2, ri)}px` }}
+                            />
+                          ) : null}
+                          {/* horizontal stub into next round match (only for even-index top of pair) */}
+                          {ti % 2 === 0 && (
+                            <div
+                              className="absolute left-[calc(100%+16px)] w-4 h-px bg-border"
+                              style={{ top: `calc(50% + ${(TIE_SLOT_PX * Math.pow(2, ri)) / 2}px)` }}
+                            />
+                          )}
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {thirdPlace && (
+          <div className="border-t border-border p-4 bg-background/50">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-2 text-center">3rd Place Playoff</p>
+            <div className="max-w-[240px] mx-auto"><TieBox legs={pairMatches(thirdPlace.matches)[0] || thirdPlace.matches} /></div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+
+
+  // Build group standings from matches. `maxWeek` limits to group-stage weeks (default 6 for CL).
+  const buildCLGroups = (matches: MatchResult[], maxWeek: number = 6) => {
     const seen = new Set<number>();
     const groupMatches = matches.filter(m => {
-      if ((m.WeekID || 0) > 6) return false;
+      if ((m.WeekID || 0) > maxWeek) return false;
       if (m.MatchID == null) return true;
       if (seen.has(m.MatchID)) return false;
       seen.add(m.MatchID);
       return true;
     });
+
     // Determine groups: teams that play each other are in the same group
     const teamAdj = new Map<number, Set<number>>();
     groupMatches.forEach(m => {
@@ -433,6 +652,14 @@ export default function LeaguePage() {
               View History →
             </Link>
           </div>
+          {parentCompId && (
+            <p className="text-xs text-muted-foreground font-sans mt-1">
+              Qualifying tournament for{" "}
+              <Link to={`/league/${parentCompId}`} className="text-accent hover:underline font-medium">
+                view main competition →
+              </Link>
+            </p>
+          )}
           <div className="flex items-center gap-4 mt-1">
             <Link to={`/league/${league.LeagueID}/history`} className="text-sm text-accent hover:underline font-sans inline-block">
               Season-by-Season History →
@@ -441,8 +668,46 @@ export default function LeaguePage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-6">
+        <div className={`grid grid-cols-1 gap-6 ${(isIntl || isQualifying || isFriendly) ? "" : "lg:grid-cols-3"}`}>
+          <div className={(isIntl || isQualifying || isFriendly) ? "space-y-6" : "lg:col-span-2 space-y-6"}>
+
+            {/* Upcoming fixtures — date always shown; teams hidden until determined (e.g. an earlier knockout round hasn't been played yet) */}
+            {!isDomestic && upcomingFixtures.filter(f => f.SeasonID === selectedSeason).length > 0 && (
+              <div className="border border-border rounded overflow-hidden">
+                <div className="bg-table-header px-3 py-2">
+                  <h3 className="font-display text-sm font-bold text-table-header-foreground">Upcoming Fixtures</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm font-sans">
+                    <thead>
+                      <tr className="bg-secondary">
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Date</th>
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Matchup</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {upcomingFixtures.filter(f => f.SeasonID === selectedSeason).map((f, i) => (
+                        <tr key={f.MatchID ?? i} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
+                          <td className="px-3 py-1.5 font-mono text-muted-foreground">{f.Matchday}</td>
+                          <td className="px-3 py-1.5">
+                            {f.TeamsDetermined && f.HomeTeamID != null && f.AwayTeamID != null ? (
+                              <>
+                                <Link to={`/team/${encodeURIComponent(teamMap.get(f.HomeTeamID) || "")}`} className="text-accent hover:underline">{teamMap.get(f.HomeTeamID) || `Team ${f.HomeTeamID}`}</Link>
+                                {" vs "}
+                                <Link to={`/team/${encodeURIComponent(teamMap.get(f.AwayTeamID) || "")}`} className="text-accent hover:underline">{teamMap.get(f.AwayTeamID) || `Team ${f.AwayTeamID}`}</Link>
+                              </>
+                            ) : (
+                              <span className="italic text-muted-foreground">Match scheduled — teams TBD (pending earlier rounds)</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
             {/* Domestic league standings */}
             {isDomestic && standings.length > 0 && (
               <div className="border border-border rounded overflow-hidden">
@@ -502,19 +767,22 @@ export default function LeaguePage() {
             )}
 
             {/* Cup knockout display */}
-            {isCup && seasonMatches.length > 0 && (
-              <div>
-                <h3 className="font-display text-lg font-bold text-foreground mb-3">
-                  Knockout Tournament {selectedSeason ? `— ${seasonLabel(selectedSeason)}` : ""}
-                </h3>
-                <KnockoutDisplay rounds={buildKnockoutRounds(seasonMatches)} />
-              </div>
-            )}
+            {isCup && seasonMatches.length > 0 && (() => {
+              const rounds = buildKnockoutRounds(seasonMatches);
+              return (
+                <div className="space-y-4">
+                  <h3 className="font-display text-lg font-bold text-foreground">
+                    Knockout Tournament {selectedSeason ? `— ${seasonLabel(selectedSeason)}` : ""}
+                  </h3>
+                  <BracketDisplay rounds={rounds} />
+                  <KnockoutDisplay rounds={rounds} />
+                </div>
+              );
+            })()}
 
             {/* Champions League: Group Stage + Knockouts */}
             {isChampionsLeague && seasonMatches.length > 0 && (() => {
               const groups = buildCLGroups(seasonMatches);
-              const knockoutMatches = seasonMatches.filter(m => (m.WeekID || 0) > 6);
               const knockoutRounds = buildKnockoutRounds(seasonMatches, 7);
               return (
                 <div className="space-y-6">
@@ -556,8 +824,8 @@ export default function LeaguePage() {
                                   <td className="px-2 py-1 text-right font-mono">{s.w}</td>
                                   <td className="px-2 py-1 text-right font-mono">{s.d}</td>
                                   <td className="px-2 py-1 text-right font-mono">{s.l}</td>
-                                  <td className="px-2 py-1 text-right font-mono">{s.gf}</td>
-                                  <td className="px-2 py-1 text-right font-mono">{s.ga}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{Math.round(s.gf / 10)}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{Math.round(s.ga / 10)}</td>
                                   <td className="px-2 py-1 text-right font-mono font-bold">{s.pts}</td>
                                 </tr>
                               );
@@ -571,6 +839,7 @@ export default function LeaguePage() {
                   {knockoutRounds.length > 0 && (
                     <>
                       <h3 className="font-display text-lg font-bold text-foreground">Knockout Stage</h3>
+                      <BracketDisplay rounds={knockoutRounds} />
                       <KnockoutDisplay rounds={knockoutRounds} />
                     </>
                   )}
@@ -578,15 +847,94 @@ export default function LeaguePage() {
               );
             })()}
 
-            {/* Non-domestic, non-cup, non-CL (World Cup etc) — show results as knockout */}
-            {!isDomestic && !isCup && !isChampionsLeague && seasonMatches.length > 0 && (
-              <div>
-                <h3 className="font-display text-lg font-bold text-foreground mb-3">
+            {/* International knockout competitions — bracket + results */}
+            {isIntl && seasonMatches.length > 0 && (() => {
+              const rounds = buildKnockoutRounds(seasonMatches);
+              return (
+                <div className="space-y-4">
+                  <h3 className="font-display text-lg font-bold text-foreground">
+                    Results {selectedSeason ? `— ${seasonLabel(selectedSeason)}` : ""}
+                  </h3>
+                  <BracketDisplay rounds={rounds} />
+                  <KnockoutDisplay rounds={rounds} />
+                </div>
+              );
+            })()}
+
+            {/* Qualifying competitions — group stage with advancer highlighting */}
+            {isQualifying && seasonMatches.length > 0 && (() => {
+              const maxW = Math.max(...seasonMatches.map(m => m.WeekID || 0));
+              const groups = buildCLGroups(seasonMatches, maxW);
+              return (
+                <div className="space-y-4">
+                  <h3 className="font-display text-lg font-bold text-foreground">
+                    Qualifying Groups {selectedSeason ? `— ${seasonLabel(selectedSeason)}` : ""}
+                  </h3>
+                  {parentCompId && (
+                    <p className="text-xs text-muted-foreground font-sans">
+                      Teams highlighted in <span className="bg-highlight/30 px-1 rounded">gold</span> advanced to the{" "}
+                      <Link to={`/league/${parentCompId}`} className="text-accent hover:underline">main competition</Link>.
+                    </p>
+                  )}
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {groups.map(group => (
+                      <div key={group.label} className="border border-border rounded overflow-hidden">
+                        <div className="bg-table-header px-3 py-1.5">
+                          <h4 className="font-display text-xs font-bold text-table-header-foreground">Group {group.label}</h4>
+                        </div>
+                        <table className="w-full text-xs font-sans">
+                          <thead>
+                            <tr className="bg-secondary">
+                              <th className="px-2 py-1 text-left text-muted-foreground">#</th>
+                              <th className="px-2 py-1 text-left text-muted-foreground">Team</th>
+                              <th className="px-2 py-1 text-right text-muted-foreground">GP</th>
+                              <th className="px-2 py-1 text-right text-muted-foreground">W</th>
+                              <th className="px-2 py-1 text-right text-muted-foreground">D</th>
+                              <th className="px-2 py-1 text-right text-muted-foreground">L</th>
+                              <th className="px-2 py-1 text-right text-muted-foreground">GD</th>
+                              <th className="px-2 py-1 text-right text-muted-foreground font-bold">Pts</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {group.teams.map((tid, i) => {
+                              const s = group.stats.get(tid)!;
+                              const tName = teamMap.get(tid) || `Team ${tid}`;
+                              const advanced = advancedTeams.has(tid);
+                              return (
+                                <tr key={tid} className={`border-t border-border ${advanced ? "bg-highlight/25" : i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
+                                  <td className="px-2 py-1 font-mono text-muted-foreground">{i + 1}</td>
+                                  <td className="px-2 py-1 font-medium truncate max-w-[140px]">
+                                    <Link to={`/team/${encodeURIComponent(tName)}`} className="text-accent hover:underline">{tName}</Link>
+                                    {advanced && <span className="ml-1 text-[10px] text-primary font-bold">✓</span>}
+                                  </td>
+                                  <td className="px-2 py-1 text-right font-mono">{s.gp}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{s.w}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{s.d}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{s.l}</td>
+                                  <td className="px-2 py-1 text-right font-mono">{Math.round((s.gf - s.ga) / 10)}</td>
+                                  <td className="px-2 py-1 text-right font-mono font-bold">{s.pts}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* International Friendlies — simple results list */}
+            {isFriendly && seasonMatches.length > 0 && (
+              <div className="space-y-4">
+                <h3 className="font-display text-lg font-bold text-foreground">
                   Results {selectedSeason ? `— ${seasonLabel(selectedSeason)}` : ""}
                 </h3>
-                <KnockoutDisplay rounds={buildKnockoutRounds(seasonMatches)} />
+                <KnockoutDisplay rounds={[{ name: "Friendlies", matches: seasonMatches }]} />
               </div>
             )}
+
 
             {/* Annual Awards */}
             {awardSeasons.length > 0 && (
@@ -735,7 +1083,7 @@ export default function LeaguePage() {
 
           {/* Sidebar: Teams */}
           <div className="space-y-6">
-            {teams.length > 0 && (
+            {!(isIntl || isQualifying || isFriendly) && teams.length > 0 && (
               <div className="border border-border rounded overflow-hidden">
                 <div className="bg-table-header px-3 py-2">
                   <h3 className="font-display text-sm font-bold text-table-header-foreground">Teams</h3>
