@@ -881,7 +881,7 @@ export default function TeamPage() {
               </Link>
             </p>
           )}
-          {/* Current manager */}
+          {/* Current manager & captain */}
           {managerHistory.length > 0 && (() => {
             const current = managerHistory[managerHistory.length - 1];
             return (
@@ -891,6 +891,20 @@ export default function TeamPage() {
                   {current.FirstName} {current.LastName}
                 </Link>
                 {current.FormerPlayerFlag && <span className="text-xs text-muted-foreground italic"> (former player)</span>}
+              </p>
+            );
+          })()}
+          {captainMap.size > 0 && (() => {
+            const latestSeason = Math.max(...captainMap.keys());
+            const pid = captainMap.get(latestSeason);
+            const pInfo = players.find(p => p.PlayerID === pid);
+            if (!pInfo) return null;
+            return (
+              <p className="text-sm font-sans mt-1">
+                <span className="text-muted-foreground">Captain: </span>
+                <Link to={`/player/${pid}`} className="text-accent hover:underline font-medium">
+                  {pInfo.PlayerName}
+                </Link>
               </p>
             );
           })()}

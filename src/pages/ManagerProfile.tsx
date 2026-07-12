@@ -53,6 +53,7 @@ export default function ManagerProfile() {
   const [nationName, setNationName] = useState<string | null>(null);
   const [seasonRecords, setSeasonRecords] = useState<SeasonRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -133,14 +134,33 @@ export default function ManagerProfile() {
         setSeasonRecords(allRecords);
       }
       setLoading(false);
+    }).catch((err) => {
+      console.error("Failed to load manager:", err);
+      setLoadError(true);
+      setLoading(false);
     });
   }, [id]);
 
-  if (loading || !manager) {
+  if (loading) {
     return (
       <div className="min-h-screen bg-background flex flex-col pb-14 md:pb-0">
         <SiteHeader />
         <main className="flex-1 container py-8"><p className="text-muted-foreground font-sans">Loading manager...</p></main>
+        <SiteFooter />
+      </div>
+    );
+  }
+
+  if (loadError || !manager) {
+    return (
+      <div className="min-h-screen bg-background flex flex-col pb-14 md:pb-0">
+        <SiteHeader />
+        <main className="flex-1 container py-8">
+          <p className="text-muted-foreground font-sans">
+            We couldn't find that manager. If manager data was recently added, make sure the database migration
+            adding the <code>managers</code>, <code>team_captains</code>, and <code>team_managers</code> tables has been applied.
+          </p>
+        </main>
         <SiteFooter />
       </div>
     );

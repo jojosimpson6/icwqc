@@ -143,6 +143,42 @@ export type Database = {
         }
         Relationships: []
       }
+      managers: {
+        Row: {
+          ManagerID: number
+          FirstName: string
+          LastName: string
+          Gender: string
+          DOB: string
+          NationalityID: number | null
+          FormerPlayerFlag: boolean
+          FormerPlayerID: number | null
+          headshot_url: string | null
+        }
+        Insert: {
+          ManagerID: number
+          FirstName: string
+          LastName: string
+          Gender: string
+          DOB: string
+          NationalityID?: number | null
+          FormerPlayerFlag?: boolean
+          FormerPlayerID?: number | null
+          headshot_url?: string | null
+        }
+        Update: {
+          ManagerID?: number
+          FirstName?: string
+          LastName?: string
+          Gender?: string
+          DOB?: string
+          NationalityID?: number | null
+          FormerPlayerFlag?: boolean
+          FormerPlayerID?: number | null
+          headshot_url?: string | null
+        }
+        Relationships: []
+      }
       news_items: {
         Row: {
           body: string
@@ -620,6 +656,54 @@ export type Database = {
         }
         Relationships: []
       }
+      team_captains: {
+        Row: {
+          TeamID: number
+          SeasonID: number
+          CaptainPlayerID: number
+          MatchesPlayed: number
+          CaptainAppearances: number
+          AppearanceShare: number
+          SelectionMethod: string
+        }
+        Insert: {
+          TeamID: number
+          SeasonID: number
+          CaptainPlayerID: number
+          MatchesPlayed: number
+          CaptainAppearances: number
+          AppearanceShare: number
+          SelectionMethod: string
+        }
+        Update: {
+          TeamID?: number
+          SeasonID?: number
+          CaptainPlayerID?: number
+          MatchesPlayed?: number
+          CaptainAppearances?: number
+          AppearanceShare?: number
+          SelectionMethod?: string
+        }
+        Relationships: []
+      }
+      team_managers: {
+        Row: {
+          TeamID: number
+          SeasonID: number
+          ManagerID: number
+        }
+        Insert: {
+          TeamID: number
+          SeasonID: number
+          ManagerID: number
+        }
+        Update: {
+          TeamID?: number
+          SeasonID?: number
+          ManagerID?: number
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string
@@ -732,6 +816,7 @@ export type Database = {
           MatchID: number | null
           SeasonID: number | null
           WeekID: number | null
+          TeamsDetermined: boolean | null
         }
         Relationships: []
       }
