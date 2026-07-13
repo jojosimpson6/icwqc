@@ -177,6 +177,22 @@ export default function ManagerProfile() {
   const careerGames = career.wins + career.losses + career.ties;
   const careerWinPct = careerGames > 0 ? (career.wins / careerGames) : 0;
 
+  // A "stint" is a continuous run of consecutive seasons at the same team --
+  // not one row per season. E.g. Team A 2017-18, 2018-19 then Team B 2021-22,
+  // 2022-23 is 2 stints, not 4.
+  const stintCount = (() => {
+    if (stints.length === 0) return 0;
+    let count = 1;
+    for (let i = 1; i < stints.length; i++) {
+      const prev = stints[i - 1];
+      const curr = stints[i];
+      if (curr.TeamID !== prev.TeamID || curr.SeasonID !== prev.SeasonID + 1) {
+        count++;
+      }
+    }
+    return count;
+  })();
+
   return (
     <div className="min-h-screen bg-background flex flex-col pb-14 md:pb-0">
       <SiteHeader />
@@ -201,12 +217,9 @@ export default function ManagerProfile() {
                 {nationName && <>{getNationFlag(nationName)} <Link to={`/nation/${manager.NationalityID}`} className="text-accent hover:underline">{nationName}</Link> · </>}
                 {age != null && <>Age {age} · </>}
                 {manager.FormerPlayerFlag && manager.FormerPlayerID ? (
-                  <>
-                    Former player —{" "}
-                    <Link to={`/player/${manager.FormerPlayerID}`} className="text-accent hover:underline font-medium">
-                      view playing career
-                    </Link>
-                  </>
+                  <Link to={`/player/${manager.FormerPlayerID}`} className="text-accent hover:underline font-medium">
+                    View Playing Career
+                  </Link>
                 ) : (
                   <span className="italic">No playing career on record</span>
                 )}
@@ -219,7 +232,7 @@ export default function ManagerProfile() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
           <div className="border border-border rounded p-3 text-center">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Stints</p>
-            <p className="font-display text-2xl font-bold">{stints.length}</p>
+            <p className="font-display text-2xl font-bold">{stintCount}</p>
           </div>
           <div className="border border-border rounded p-3 text-center">
             <p className="text-xs text-muted-foreground uppercase tracking-wide">Record</p>

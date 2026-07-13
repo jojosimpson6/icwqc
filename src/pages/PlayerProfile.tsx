@@ -859,7 +859,7 @@ export default function PlayerProfile() {
               {managerCareerId && (
                 <p className="text-sm font-sans mt-1">
                   <Link to={`/manager/${managerCareerId}`} className="text-accent hover:underline font-medium">
-                    Went on to manage — view managerial career →
+                    View Managerial Career
                   </Link>
                 </p>
               )}

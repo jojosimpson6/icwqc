@@ -648,6 +648,7 @@ export default function TeamPage() {
           <thead>
             <tr className="bg-secondary">
               <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
+              <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Manager</th>
               <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">League</th>
               {isDomestic && <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pos</th>}
               <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GP</th>
@@ -808,6 +809,16 @@ export default function TeamPage() {
                       {seasonLabel(row.SeasonID)}
                     </button>
                   </td>
+                  <td className="px-3 py-1.5 text-xs">
+                    {(() => {
+                      const m = managerHistory.find(mh => mh.SeasonID === row.SeasonID);
+                      return m ? (
+                        <Link to={`/manager/${m.ManagerID}`} className="text-accent hover:underline">{m.FirstName} {m.LastName}</Link>
+                      ) : (
+                        <span className="text-muted-foreground">—</span>
+                      );
+                    })()}
+                  </td>
                   <td className="px-3 py-1.5 text-xs text-muted-foreground">
                     <Link to={`/league/${row.LeagueID}`} className="hover:text-accent hover:underline">{row.LeagueName}</Link>
                   </td>
@@ -882,7 +893,6 @@ export default function TeamPage() {
             </p>
           )}
           {/* Current manager & captain */}
-
           {managerHistory.length > 0 && (() => {
             const current = managerHistory[managerHistory.length - 1];
             return (
@@ -891,7 +901,6 @@ export default function TeamPage() {
                 <Link to={`/manager/${current.ManagerID}`} className="text-accent hover:underline font-medium">
                   {current.FirstName} {current.LastName}
                 </Link>
-                {current.FormerPlayerFlag && <span className="text-xs text-muted-foreground italic"> (former player)</span>}
               </p>
             );
           })()}
@@ -1280,7 +1289,6 @@ export default function TeamPage() {
                           <Link to={`/manager/${m.ManagerID}`} className="font-medium text-accent hover:underline">
                             {m.FirstName} {m.LastName}
                           </Link>
-                          {m.FormerPlayerFlag && <span className="text-xs text-muted-foreground italic">former player</span>}
                         </div>
                       ))}
                     </div>

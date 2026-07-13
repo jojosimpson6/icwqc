@@ -570,6 +570,7 @@ export default function NationPage() {
                 <thead>
                   <tr className="bg-secondary">
                     <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
+                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Manager</th>
                     <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Competition</th>
                     <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Result</th>
                     <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GP</th>
@@ -584,6 +585,16 @@ export default function NationPage() {
                   {natRegisterRows.map((row, i) => (
                     <tr key={`${row.SeasonID}-${row.LeagueID}`} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
                       <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{seasonLabel(row.SeasonID)}</td>
+                      <td className="px-3 py-1.5 text-xs">
+                        {(() => {
+                          const m = natManagerHistory.find(mh => mh.SeasonID === row.SeasonID);
+                          return m ? (
+                            <Link to={`/manager/${m.ManagerID}`} className="text-accent hover:underline">{m.FirstName} {m.LastName}</Link>
+                          ) : (
+                            <span className="text-muted-foreground">—</span>
+                          );
+                        })()}
+                      </td>
                       <td className="px-3 py-1.5 text-xs"><Link to={`/league/${row.LeagueID}`} className="text-accent hover:underline">{row.LeagueName}</Link></td>
                       <td className={`px-3 py-1.5 text-xs ${row.stage === "Champions" ? "font-bold text-accent" : "text-muted-foreground"}`}>{row.stage}</td>
                       <td className="px-3 py-1.5 text-right font-mono">{row.gp}</td>
@@ -595,7 +606,7 @@ export default function NationPage() {
                     </tr>
                   ))}
                   {natRegisterRows.length === 0 && (
-                    <tr><td colSpan={9} className="px-3 py-4 text-center text-muted-foreground italic">No competitive history on record.</td></tr>
+                    <tr><td colSpan={10} className="px-3 py-4 text-center text-muted-foreground italic">No competitive history on record.</td></tr>
                   )}
                 </tbody>
               </table>
