@@ -161,7 +161,7 @@ export default function PlayerProfile() {
   const [player, setPlayer] = useState<Player | null>(null);
   const [nation, setNation] = useState<string>("");
   const [stats, setStats] = useState<StatLine[]>([]);
-  const [captainSeasons, setCaptainSeasons] = useState<Set<number>>(new Set());
+  const [captainSeasons, setCaptainSeasons] = useState<Set<string>>(new Set());
   const [managerCareerId, setManagerCareerId] = useState<number | null>(null);
   const [mostRecentTeam, setMostRecentTeam] = useState<string>("");
   const [leagueLeaders, setLeagueLeaders] = useState<LeagueLeaderEntry[]>([]);
@@ -193,12 +193,14 @@ export default function PlayerProfile() {
       }
     });
 
-    // Captaincy history
+    // Captaincy history — key on TeamID+SeasonID so the badge only shows on the
+    // team a player actually captained that season, not every team they played
+    // for that year (e.g. club side + national team in the same season)
     fetchAllRows("team_captains", {
-      select: "SeasonID",
+      select: "TeamID, SeasonID",
       filters: [{ method: "eq", args: ["CaptainPlayerID", pid] }],
     }).then((rows: any) => {
-      setCaptainSeasons(new Set((rows || []).map((r: any) => r.SeasonID).filter(Boolean)));
+      setCaptainSeasons(new Set((rows || []).filter((r: any) => r.TeamID && r.SeasonID).map((r: any) => `${r.TeamID}|${r.SeasonID}`)));
     });
 
     // Did this player go on to manage?
@@ -1040,7 +1042,7 @@ export default function PlayerProfile() {
                           {s.TeamFullName ? (
                             <>
                               <Link to={`/team/${encodeURIComponent(s.TeamFullName)}`} className="text-accent hover:underline">{s.TeamFullName}</Link>
-                              {captainSeasons.has(s.SeasonID) && (
+                              {s.TeamID != null && captainSeasons.has(`${s.TeamID}|${s.SeasonID}`) && (
                                 <span
                                   className="ml-1.5 inline-flex items-center justify-center w-4 h-4 text-[10px] font-bold rounded-full border border-accent text-accent align-middle"
                                   title="Team Captain"
