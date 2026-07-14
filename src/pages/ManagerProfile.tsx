@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
-import { getNationFlag, calculateAge, formatDate, getLeagueTierLabel } from "@/lib/helpers";
+import { getNationFlag, formatDate, getLeagueTierLabel } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { seasonLabel, ordinal, computeStageReached, QUAL_PARENT_MAP, TournamentMatch } from "@/lib/competitionStage";
 
@@ -135,138 +135,165 @@ export default function ManagerProfile() {
           seasonsByTeam.get(s.TeamID)!.add(s.SeasonID);
         });
 
+        // Discover every competition (domestic + cup + CL + international) each
+        // team entered during the manager's tenure, via player_season_stats —
+        // a team's `teams.LeagueID` only reflects its domestic league, so relying
+        // on it alone would silently drop all cup/CL/international appearances.
+        const statsRows = await fetchAllRows<{ TeamID: number; SeasonID: number; LeagueID: number; LeagueName: string }>(
+          "player_season_stats",
+          {
+            select: "TeamID, SeasonID, LeagueID, LeagueName",
+            filters: [{ method: "in", args: ["TeamID", teamIds] }],
+          }
+        );
+
+        // Map: teamId -> leagueId -> Set<seasonId> (only seasons within this manager's tenure at that team)
+        const competitionsByTeam = new Map<number, Map<number, Set<number>>>();
+        statsRows.forEach(r => {
+          if (!r.TeamID || !r.SeasonID || !r.LeagueID) return;
+          const managerSeasons = seasonsByTeam.get(r.TeamID);
+          if (!managerSeasons || !managerSeasons.has(r.SeasonID)) return;
+          if (!competitionsByTeam.has(r.TeamID)) competitionsByTeam.set(r.TeamID, new Map());
+          const leagueMapForTeam = competitionsByTeam.get(r.TeamID)!;
+          if (!leagueMapForTeam.has(r.LeagueID)) leagueMapForTeam.set(r.LeagueID, new Set());
+          leagueMapForTeam.get(r.LeagueID)!.add(r.SeasonID);
+        });
+
         const registerRows: RegisterRow[] = [];
 
         for (const teamId of teamIds) {
-          const seasons = [...(seasonsByTeam.get(teamId) || [])];
-          if (seasons.length === 0) continue;
           const team = tm.get(teamId);
           if (!team) continue;
           const teamName = team.FullName;
-          const leagueId = team.LeagueID;
-          const leagueInfo = lm.get(leagueId);
+          const leaguesForTeam = competitionsByTeam.get(teamId);
+          if (!leaguesForTeam || leaguesForTeam.size === 0) continue;
 
-          if (isDomesticLeague(leagueId)) {
-            // Domestic: pull standings for each season this manager was in charge,
-            // scoped to the league's teams that season, to get points + position.
-            const standingsRows = await Promise.all(
-              seasons.map(seasonId =>
-                fetchAllRows<{ FullName: string; totalpoints: number; totalgamesplayed: number; GoalsFor: number; GoalsAgainst: number }>(
-                  "standings",
-                  {
-                    select: "FullName, SeasonID, LeagueID, totalpoints, totalgamesplayed, GoalsFor, GoalsAgainst",
-                    filters: [
-                      { method: "eq", args: ["SeasonID", seasonId] },
-                      { method: "eq", args: ["LeagueID", leagueId] },
-                    ],
-                    order: { column: "totalpoints", ascending: false },
-                  }
+          for (const [leagueId, seasonSet] of leaguesForTeam) {
+            const seasons = [...seasonSet];
+            const leagueInfo = lm.get(leagueId);
+
+            if (isDomesticLeague(leagueId)) {
+              // Domestic: pull standings for each season this manager was in charge,
+              // scoped to the league's teams that season, to get points + position.
+              const standingsRows = await Promise.all(
+                seasons.map(seasonId =>
+                  fetchAllRows<{ FullName: string; totalpoints: number; totalgamesplayed: number; GoalsFor: number; GoalsAgainst: number }>(
+                    "standings",
+                    {
+                      select: "FullName, SeasonID, LeagueID, totalpoints, totalgamesplayed, GoalsFor, GoalsAgainst",
+                      filters: [
+                        { method: "eq", args: ["SeasonID", seasonId] },
+                        { method: "eq", args: ["LeagueID", leagueId] },
+                      ],
+                      order: { column: "totalpoints", ascending: false },
+                    }
+                  )
                 )
-              )
-            );
-            seasons.forEach((seasonId, i) => {
-              const sorted = [...(standingsRows[i] || [])].sort((a, b) => (b.totalpoints || 0) - (a.totalpoints || 0));
-              const idx = sorted.findIndex(s => s.FullName === teamName);
-              const own = idx >= 0 ? sorted[idx] : null;
-              registerRows.push({
-                SeasonID: seasonId,
-                TeamID: teamId,
-                TeamName: teamName,
-                LeagueID: leagueId,
-                LeagueName: leagueInfo?.LeagueName || "",
-                LeagueTier: leagueInfo?.LeagueTier ?? null,
-                isDomestic: true,
-                position: idx >= 0 ? idx + 1 : null,
-                totalpoints: own?.totalpoints ?? null,
-                isChampion: idx === 0,
-                stageReached: null,
-                gamesPlayed: own?.totalgamesplayed || 0,
-                goalsFor: own?.GoalsFor || 0,
-                goalsAgainst: own?.GoalsAgainst || 0,
+              );
+              seasons.forEach((seasonId, i) => {
+                const sorted = [...(standingsRows[i] || [])].sort((a, b) => (b.totalpoints || 0) - (a.totalpoints || 0));
+                const idx = sorted.findIndex(s => s.FullName === teamName);
+                const own = idx >= 0 ? sorted[idx] : null;
+                registerRows.push({
+                  SeasonID: seasonId,
+                  TeamID: teamId,
+                  TeamName: teamName,
+                  LeagueID: leagueId,
+                  LeagueName: leagueInfo?.LeagueName || "",
+                  LeagueTier: leagueInfo?.LeagueTier ?? null,
+                  isDomestic: true,
+                  position: idx >= 0 ? idx + 1 : null,
+                  totalpoints: own?.totalpoints ?? null,
+                  isChampion: idx === 0,
+                  stageReached: null,
+                  gamesPlayed: own?.totalgamesplayed || 0,
+                  goalsFor: own?.GoalsFor || 0,
+                  goalsAgainst: own?.GoalsAgainst || 0,
+                });
               });
-            });
-          } else {
-            // Cup / CL / international: need ALL matches in the tournament to
-            // compute stage reached, plus this team's own matches for GP/GF/GA.
-            const [ownResultsBySeason, allResultsBySeason] = await Promise.all([
-              Promise.all(seasons.map(seasonId =>
-                fetchAllRows<any>("results", {
-                  select: "HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID",
+            } else {
+              // Cup / CL / international: need ALL matches in the tournament to
+              // compute stage reached, plus this team's own matches for GP/GF/GA.
+              const [ownResultsBySeason, allResultsBySeason] = await Promise.all([
+                Promise.all(seasons.map(seasonId =>
+                  fetchAllRows<any>("results", {
+                    select: "HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID",
+                    filters: [
+                      { method: "eq", args: ["LeagueID", leagueId] },
+                      { method: "eq", args: ["SeasonID", seasonId] },
+                      { method: "or", args: [`HomeTeamID.eq.${teamId},AwayTeamID.eq.${teamId}`] },
+                    ],
+                  })
+                )),
+                Promise.all(seasons.map(seasonId =>
+                  fetchAllRows<any>("results", {
+                    select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID",
+                    filters: [
+                      { method: "eq", args: ["LeagueID", leagueId] },
+                      { method: "eq", args: ["SeasonID", seasonId] },
+                    ],
+                  })
+                )),
+              ]);
+
+              // For qualifying comps, also check whether the team appears in the parent comp that season
+              const parentLid = QUAL_PARENT_MAP[leagueId];
+              let advancedSeasons = new Set<number>();
+              if (parentLid) {
+                const parentRows = await fetchAllRows<any>("results", {
+                  select: "SeasonID,HomeTeamID,AwayTeamID",
                   filters: [
-                    { method: "eq", args: ["LeagueID", leagueId] },
-                    { method: "eq", args: ["SeasonID", seasonId] },
+                    { method: "eq", args: ["LeagueID", parentLid] },
+                    { method: "in", args: ["SeasonID", seasons] },
                     { method: "or", args: [`HomeTeamID.eq.${teamId},AwayTeamID.eq.${teamId}`] },
                   ],
-                })
-              )),
-              Promise.all(seasons.map(seasonId =>
-                fetchAllRows<any>("results", {
-                  select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID",
-                  filters: [
-                    { method: "eq", args: ["LeagueID", leagueId] },
-                    { method: "eq", args: ["SeasonID", seasonId] },
-                  ],
-                })
-              )),
-            ]);
+                });
+                advancedSeasons = new Set(parentRows.map((r: any) => r.SeasonID));
+              }
 
-            // For qualifying comps, also check whether the team appears in the parent comp that season
-            const parentLid = QUAL_PARENT_MAP[leagueId];
-            let advancedSeasons = new Set<number>();
-            if (parentLid) {
-              const parentRows = await fetchAllRows<any>("results", {
-                select: "SeasonID,HomeTeamID,AwayTeamID",
-                filters: [
-                  { method: "eq", args: ["LeagueID", parentLid] },
-                  { method: "in", args: ["SeasonID", seasons] },
-                  { method: "or", args: [`HomeTeamID.eq.${teamId},AwayTeamID.eq.${teamId}`] },
-                ],
+              seasons.forEach((seasonId, i) => {
+                const ownResults = ownResultsBySeason[i] || [];
+                const allMatches: TournamentMatch[] = (allResultsBySeason[i] || []).map((r: any) => ({
+                  matchId: r.MatchID || 0,
+                  homeId: r.HomeTeamID || 0,
+                  awayId: r.AwayTeamID || 0,
+                  homeScore: r.HomeTeamScore || 0,
+                  awayScore: r.AwayTeamScore || 0,
+                  weekId: r.WeekID || 0,
+                }));
+
+                let gp = 0, gf = 0, ga = 0;
+                ownResults.forEach((r: any) => {
+                  gp++;
+                  const isHome = r.HomeTeamID === teamId;
+                  gf += isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
+                  ga += isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
+                });
+
+                const isCL = leagueId === 19;
+                const stage = computeStageReached(teamId, leagueId, allMatches, {
+                  isCL,
+                  advancedToParent: advancedSeasons.has(seasonId),
+                });
+
+                registerRows.push({
+                  SeasonID: seasonId,
+                  TeamID: teamId,
+                  TeamName: teamName,
+                  LeagueID: leagueId,
+                  LeagueName: leagueInfo?.LeagueName || "",
+                  LeagueTier: leagueInfo?.LeagueTier ?? null,
+                  isDomestic: false,
+                  position: null,
+                  totalpoints: null,
+                  isChampion: stage.includes("Champion"),
+                  stageReached: stage,
+                  gamesPlayed: gp,
+                  goalsFor: gf,
+                  goalsAgainst: ga,
+                });
               });
-              advancedSeasons = new Set(parentRows.map((r: any) => r.SeasonID));
             }
-
-            seasons.forEach((seasonId, i) => {
-              const ownResults = ownResultsBySeason[i] || [];
-              const allMatches: TournamentMatch[] = (allResultsBySeason[i] || []).map((r: any) => ({
-                matchId: r.MatchID || 0,
-                homeId: r.HomeTeamID || 0,
-                awayId: r.AwayTeamID || 0,
-                homeScore: r.HomeTeamScore || 0,
-                awayScore: r.AwayTeamScore || 0,
-                weekId: r.WeekID || 0,
-              }));
-
-              let gp = 0, gf = 0, ga = 0;
-              ownResults.forEach((r: any) => {
-                gp++;
-                const isHome = r.HomeTeamID === teamId;
-                gf += isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
-                ga += isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
-              });
-
-              const isCL = leagueId === 19;
-              const stage = computeStageReached(teamId, leagueId, allMatches, {
-                isCL,
-                advancedToParent: advancedSeasons.has(seasonId),
-              });
-
-              registerRows.push({
-                SeasonID: seasonId,
-                TeamID: teamId,
-                TeamName: teamName,
-                LeagueID: leagueId,
-                LeagueName: leagueInfo?.LeagueName || "",
-                LeagueTier: leagueInfo?.LeagueTier ?? null,
-                isDomestic: false,
-                position: null,
-                totalpoints: null,
-                isChampion: stage.includes("Champion"),
-                stageReached: stage,
-                gamesPlayed: gp,
-                goalsFor: gf,
-                goalsAgainst: ga,
-              });
-            });
           }
         }
 
@@ -307,8 +334,6 @@ export default function ManagerProfile() {
       </div>
     );
   }
-
-  const age = calculateAge(manager.DOB);
 
   // A "stint" is a continuous run of consecutive seasons at the same team.
   const stintCount = (() => {
@@ -351,6 +376,8 @@ export default function ManagerProfile() {
 
   const hasCups = register.some(r => !r.isDomestic && r.LeagueID < 20);
   const hasIntl = register.some(r => !r.isDomestic && r.LeagueID >= 20);
+  // Only show the Stage Reached column if the current (filtered) view actually has cup/CL/international rows to show.
+  const showStageColumn = filteredRegister.some(r => !r.isDomestic);
 
   return (
     <div className="min-h-screen bg-background flex flex-col pb-14 md:pb-0">
@@ -384,14 +411,10 @@ export default function ManagerProfile() {
               )}
 
               {/* Demographic grid, matching PlayerProfile */}
-              <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-sans">
+              <div className="mt-3 grid grid-cols-2 md:grid-cols-3 gap-4 text-sm font-sans">
                 <div>
                   <p className="text-xs text-muted-foreground uppercase tracking-wide">Born</p>
                   <p className="font-medium">{formatDate(manager.DOB)}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Age</p>
-                  <p className="font-medium">{age ?? "—"}</p>
                 </div>
                 <div>
                   <p className="text-xs text-muted-foreground uppercase tracking-wide">Nationality</p>
@@ -406,7 +429,7 @@ export default function ManagerProfile() {
                 {manager.Gender && (
                   <div>
                     <p className="text-xs text-muted-foreground uppercase tracking-wide">Gender</p>
-                    <p className={`font-medium ${manager.Gender.toLowerCase() === 'male' || manager.Gender.toLowerCase() === 'm' ? 'text-blue-600 dark:text-blue-400' : manager.Gender.toLowerCase() === 'female' || manager.Gender.toLowerCase() === 'f' ? 'text-pink-600 dark:text-pink-400' : ''}`}>
+                    <p className="font-medium">
                       {manager.Gender.toLowerCase() === 'm' || manager.Gender.toLowerCase() === 'male' ? 'Male' :
                        manager.Gender.toLowerCase() === 'f' || manager.Gender.toLowerCase() === 'female' ? 'Female' :
                        manager.Gender}
@@ -539,7 +562,9 @@ export default function ManagerProfile() {
                     <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GP</th>
                     <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pos</th>
                     <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pts</th>
-                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Stage Reached</th>
+                    {showStageColumn && (
+                      <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Stage Reached</th>
+                    )}
                     <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GF</th>
                     <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GA</th>
                     <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GD</th>
@@ -565,9 +590,11 @@ export default function ManagerProfile() {
                           {r.isDomestic ? (r.isChampion ? "🏆 1st" : r.position != null ? ordinal(r.position) : "—") : "—"}
                         </td>
                         <td className="px-3 py-1.5 text-right font-mono">{r.isDomestic ? (r.totalpoints ?? "—") : "—"}</td>
-                        <td className={`px-3 py-1.5 text-sm ${r.stageReached?.includes("Champion") ? "font-bold text-yellow-600 dark:text-yellow-400" : ""}`}>
-                          {!r.isDomestic ? (r.stageReached ?? "—") : "—"}
-                        </td>
+                        {showStageColumn && (
+                          <td className={`px-3 py-1.5 text-sm ${r.stageReached?.includes("Champion") ? "font-bold text-yellow-600 dark:text-yellow-400" : ""}`}>
+                            {!r.isDomestic ? (r.stageReached ?? "—") : "—"}
+                          </td>
+                        )}
                         <td className="px-3 py-1.5 text-right font-mono">{r.goalsFor || "—"}</td>
                         <td className="px-3 py-1.5 text-right font-mono">{r.goalsAgainst || "—"}</td>
                         <td className={`px-3 py-1.5 text-right font-mono ${gd > 0 ? "text-green-600 dark:text-green-400" : gd < 0 ? "text-destructive" : ""}`}>
@@ -577,7 +604,7 @@ export default function ManagerProfile() {
                     );
                   })}
                   {filteredRegister.length === 0 && (
-                    <tr><td colSpan={10} className="px-3 py-4 text-center text-muted-foreground italic">No managerial record on file.</td></tr>
+                    <tr><td colSpan={showStageColumn ? 10 : 9} className="px-3 py-4 text-center text-muted-foreground italic">No managerial record on file.</td></tr>
                   )}
                 </tbody>
               </table>

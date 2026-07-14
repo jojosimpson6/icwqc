@@ -118,7 +118,7 @@ export function SiteHeader() {
             <div className="border-t border-primary-foreground/20 px-3 py-2 space-y-1">
               {popularLeagues.length > 0 && (
                 <div>
-                  <p className="text-[10px] font-semibold uppercase tracking-wider text-primary-foreground/50 mb-1">Popular</p>
+                  <p className="text-[10px] font-semibold uppercase tracking-wider text-primary-foreground/50 mb-1">Division I</p>
                   <div className="grid grid-cols-2 gap-1">
                     {popularLeagues.map(l => (
                       <Link key={l.LeagueID} to={`/league/${l.LeagueID}`} className="text-xs font-sans text-primary-foreground/80 hover:text-primary-foreground py-1 px-2 rounded hover:bg-primary-foreground/10 truncate">
@@ -148,7 +148,7 @@ export function SiteHeader() {
         <div className="hidden md:block bg-navy-light border-b border-border">
           <div className="container">
             <nav className="flex items-center gap-0 overflow-x-auto scrollbar-hide">
-              <span className="px-3 py-2 text-xs font-sans font-semibold text-primary-foreground/50 uppercase tracking-wider shrink-0">Popular</span>
+              <span className="px-3 py-2 text-xs font-sans font-semibold text-primary-foreground/50 uppercase tracking-wider shrink-0">Division I</span>
               {popularLeagues.map((l) => (
                 <Link key={l.LeagueID} to={`/league/${l.LeagueID}`}
                   className={`px-3 py-2 text-sm font-sans font-medium text-primary-foreground/80 hover:text-primary-foreground hover:bg-primary/30 transition-colors whitespace-nowrap ${pathname === `/league/${l.LeagueID}` ? "text-primary-foreground bg-primary/20" : ""}`}>

@@ -111,8 +111,8 @@ export default function LeaguesIndex() {
           <p className="text-sm text-muted-foreground font-sans mt-1">All leagues, cups, and international competitions</p>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {renderSection("Popular Leagues", grouped.popular)}
-          {renderSection("Other Leagues", grouped.other)}
+          {renderSection("Division I", grouped.popular)}
+          {renderSection("Division II", grouped.other)}
           {renderSection("Cup Competitions", grouped.cups, true)}
           {renderSection("International", grouped.international, true)}
         </div>

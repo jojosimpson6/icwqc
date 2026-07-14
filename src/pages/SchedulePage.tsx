@@ -386,7 +386,7 @@ export default function SchedulePage() {
                       <div className={`font-mono font-semibold mb-0.5 flex items-center justify-between ${isToday ? "text-accent" : ""}`}>
                         <span>{d.getDate()}</span>
                         {hasGames && (
-                          <span className="text-[10px] bg-primary/10 text-primary px-1 rounded-sm">{dayGames.length}</span>
+                          <span className="text-[10px] bg-accent/10 text-accent px-1 rounded-sm">{dayGames.length}</span>
                         )}
                       </div>
 

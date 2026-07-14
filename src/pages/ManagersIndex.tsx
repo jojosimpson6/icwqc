@@ -5,7 +5,7 @@ import { fetchAllRows } from "@/lib/fetchAll";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
-import { calculateAge, getNationFlag } from "@/lib/helpers";
+import { getNationFlag } from "@/lib/helpers";
 import { seasonLabel } from "@/lib/competitionStage";
 import { ChevronUp, ChevronDown } from "lucide-react";
 
@@ -13,7 +13,6 @@ interface Manager {
   ManagerID: number;
   FirstName: string;
   LastName: string;
-  DOB: string | null;
   NationalityID: number | null;
   FormerPlayerFlag: boolean;
 }
@@ -29,7 +28,7 @@ interface TeamInfo {
   FullName: string;
 }
 
-type SortKey = "name" | "nationality" | "team" | "seasons" | "age";
+type SortKey = "name" | "nationality" | "team" | "seasons";
 type SortDir = "asc" | "desc";
 
 export default function ManagersIndex() {
@@ -46,7 +45,7 @@ export default function ManagersIndex() {
 
   useEffect(() => {
     Promise.all([
-      fetchAllRows<Manager>("managers", { select: "ManagerID, FirstName, LastName, DOB, NationalityID, FormerPlayerFlag", order: { column: "LastName" } }),
+      fetchAllRows<Manager>("managers", { select: "ManagerID, FirstName, LastName, NationalityID, FormerPlayerFlag", order: { column: "LastName" } }),
       fetchAllRows<Stint>("team_managers", { select: "ManagerID, TeamID, SeasonID", order: { column: "SeasonID", ascending: false } }),
       fetchAllRows<TeamInfo>("teams", { select: "TeamID, FullName" }),
       supabase.from("nations").select("NationID, Nation, ValidToDt").order("ValidToDt", { ascending: false }),
@@ -136,10 +135,6 @@ export default function ManagersIndex() {
         va = summaryByManager.get(a.ManagerID)?.seasonCount || 0;
         vb = summaryByManager.get(b.ManagerID)?.seasonCount || 0;
       }
-      else if (sortKey === "age") {
-        va = a.DOB ? new Date(a.DOB).getTime() : 0;
-        vb = b.DOB ? new Date(b.DOB).getTime() : 0;
-      }
       const cmp = typeof va === "string" ? va.localeCompare(vb as string) : (va as number) - (vb as number);
       return sortDir === "asc" ? cmp : -cmp;
     });
@@ -218,16 +213,15 @@ export default function ManagersIndex() {
                       <Th col="nationality" label="Nationality" />
                       <Th col="team"        label="Most Recent Team" />
                       <Th col="seasons"     label="Seasons" right />
-                      <Th col="age"         label="Age" right />
                       <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Playing Career</th>
                     </tr>
                   </thead>
                   <tbody>
                     {loading && (
-                      <tr><td colSpan={6} className="px-3 py-8 text-center text-muted-foreground italic">Loading managers…</td></tr>
+                      <tr><td colSpan={5} className="px-3 py-8 text-center text-muted-foreground italic">Loading managers…</td></tr>
                     )}
                     {!loading && filtered.length === 0 && (
-                      <tr><td colSpan={6} className="px-3 py-8 text-center text-muted-foreground italic">No managers match your filters.</td></tr>
+                      <tr><td colSpan={5} className="px-3 py-8 text-center text-muted-foreground italic">No managers match your filters.</td></tr>
                     )}
                     {filtered.map((m, i) => {
                       const nationInfo = m.NationalityID ? nations.get(m.NationalityID) : null;
@@ -255,7 +249,6 @@ export default function ManagersIndex() {
                             )}
                           </td>
                           <td className="px-3 py-2 text-right font-mono text-sm">{summary?.seasonCount ?? "—"}</td>
-                          <td className="px-3 py-2 text-right font-mono text-sm">{calculateAge(m.DOB) ?? "—"}</td>
                           <td className="px-3 py-2 text-xs">
                             {m.FormerPlayerFlag ? (
                               <span className="text-accent">Former Player</span>

@@ -418,7 +418,7 @@ export default function LeaguePage() {
             return (
               <div key={ri} className="flex flex-col min-w-[210px]">
                 <div className="bg-primary/10 border border-primary/20 rounded px-3 py-1.5 mb-4 text-center">
-                  <p className="text-[10px] font-bold uppercase tracking-wider text-primary">{round.name}</p>
+                  <p className="text-[10px] font-bold uppercase tracking-wider text-foreground">{round.name}</p>
                 </div>
                 <div
                   className="flex flex-col justify-around"
@@ -905,7 +905,7 @@ export default function LeaguePage() {
                                   <td className="px-2 py-1 font-mono text-muted-foreground">{i + 1}</td>
                                   <td className="px-2 py-1 font-medium truncate max-w-[140px]">
                                     <Link to={`/team/${encodeURIComponent(tName)}`} className="text-accent hover:underline">{tName}</Link>
-                                    {advanced && <span className="ml-1 text-[10px] text-primary font-bold">✓</span>}
+                                    {advanced && <span className="ml-1 text-[10px] text-green-600 dark:text-green-400 font-bold">✓</span>}
                                   </td>
                                   <td className="px-2 py-1 text-right font-mono">{s.gp}</td>
                                   <td className="px-2 py-1 text-right font-mono">{s.w}</td>

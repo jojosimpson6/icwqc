@@ -891,7 +891,7 @@ export default function PlayerProfile() {
                 {player.Gender && (
                   <div>
                     <p className="text-xs text-muted-foreground uppercase tracking-wide">Gender</p>
-                    <p className={`font-medium ${player.Gender.toLowerCase() === 'male' ? 'text-blue-600 dark:text-blue-400' : player.Gender.toLowerCase() === 'female' ? 'text-pink-600 dark:text-pink-400' : ''}`}>
+                    <p className="font-medium">
                       {player.Gender.toLowerCase() === 'm' || player.Gender.toLowerCase() === 'male' ? 'Male' :
                        player.Gender.toLowerCase() === 'f' || player.Gender.toLowerCase() === 'female' ? 'Female' :
                        player.Gender}
@@ -1073,10 +1073,10 @@ export default function PlayerProfile() {
                     );
                   })}
                   {(() => {
-                    const ct = "px-3 py-1.5 text-right font-mono text-primary";
+                    const ct = "px-3 py-1.5 text-right font-mono text-foreground";
                     return (
                       <tr className="border-t-2 border-primary bg-primary/5 font-bold">
-                        <td className="px-3 py-1.5 text-primary font-mono" colSpan={positionsPlayed.length > 1 ? 5 : 4}>Career Totals</td>
+                        <td className="px-3 py-1.5 text-foreground font-mono" colSpan={positionsPlayed.length > 1 ? 5 : 4}>Career Totals</td>
                         <td className={ct}>{careerTotals.gp}</td>
                         <td className={ct}>{careerTotals.minutes > 0 ? careerTotals.minutes : "—"}</td>
                         {isChaser && <td className={ct}>{careerTotals.goals}</td>}

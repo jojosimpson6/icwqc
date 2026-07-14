@@ -310,8 +310,8 @@ export function getNationFlag(nation: string | null): string {
 export function getLeagueTierLabel(tier: number | null): string {
   switch (tier) {
     case 0: return "Cup Competition";
-    case 1: return "Popular League";
-    case 2: return "Other League";
+    case 1: return "Division I";
+    case 2: return "Division II";
     default: return "League";
   }
 }
