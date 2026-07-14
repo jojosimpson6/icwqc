@@ -5,7 +5,7 @@ import { fetchAllRows } from "@/lib/fetchAll";
 import { Search } from "lucide-react";
 
 interface SearchResult {
-  type: "player" | "team" | "league";
+  type: "player" | "team" | "league" | "manager";
   id: number | string;
   name: string;
   subtitle: string;
@@ -23,6 +23,7 @@ export function GlobalSearch() {
   const [players, setPlayers] = useState<{ PlayerID: number; PlayerName: string; seasons: string; isActive: boolean }[]>([]);
   const [teams, setTeams] = useState<{ TeamID: number; FullName: string }[]>([]);
   const [leagues, setLeagues] = useState<{ LeagueID: number; LeagueName: string }[]>([]);
+  const [managers, setManagers] = useState<{ ManagerID: number; name: string }[]>([]);
 
   useEffect(() => {
     Promise.all([
@@ -30,7 +31,8 @@ export function GlobalSearch() {
       fetchAllRows("player_season_minutes", { select: "PlayerName, SeasonID" }),
       fetchAllRows("teams", { select: "TeamID, FullName" }),
       supabase.from("leagues").select("LeagueID, LeagueName").then(({ data }) => data || []),
-    ]).then(([playerData, statsData, teamData, leagueData]) => {
+      fetchAllRows("managers", { select: "ManagerID, FirstName, LastName" }),
+    ]).then(([playerData, statsData, teamData, leagueData, managerData]) => {
       const seasonMap = new Map<string, { min: number; max: number }>();
       let globalMaxSeason = 0;
       statsData.forEach((s: any) => {
@@ -59,6 +61,7 @@ export function GlobalSearch() {
       );
       setTeams(teamData.map((t: any) => ({ TeamID: t.TeamID, FullName: t.FullName || "" })));
       setLeagues(leagueData.map((l: any) => ({ LeagueID: l.LeagueID, LeagueName: l.LeagueName || "" })));
+      setManagers(managerData.map((m: any) => ({ ManagerID: m.ManagerID, name: `${m.FirstName || ""} ${m.LastName || ""}`.trim() })));
     });
   }, []);
 
@@ -91,9 +94,16 @@ export function GlobalSearch() {
         matched.push({ type: "league", id: l.LeagueID, name: l.LeagueName, subtitle: "League" })
       );
 
+    managers
+      .filter((m) => m.name.toLowerCase().includes(q))
+      .slice(0, 3)
+      .forEach((m) =>
+        matched.push({ type: "manager", id: m.ManagerID, name: m.name, subtitle: "Manager" })
+      );
+
     setResults(matched);
     setSelectedIndex(-1);
-  }, [query, players, teams, leagues]);
+  }, [query, players, teams, leagues, managers]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -110,6 +120,7 @@ export function GlobalSearch() {
     setQuery("");
     if (result.type === "player") navigate(`/player/${result.id}`);
     else if (result.type === "team") navigate(`/team/${result.id}`);
+    else if (result.type === "manager") navigate(`/manager/${result.id}`);
     else navigate(`/league/${result.id}`);
   };
 
@@ -128,7 +139,7 @@ export function GlobalSearch() {
     }
   };
 
-  const typeLabel: Record<string, string> = { player: "Player", team: "Team", league: "League" };
+  const typeLabel: Record<string, string> = { player: "Player", team: "Team", league: "League", manager: "Manager" };
 
   return (
     <div ref={containerRef} className="relative">

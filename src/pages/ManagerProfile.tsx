@@ -4,8 +4,9 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
-import { getNationFlag, calculateAge } from "@/lib/helpers";
+import { getNationFlag, calculateAge, formatDate, getLeagueTierLabel } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
+import { seasonLabel, ordinal, computeStageReached, QUAL_PARENT_MAP, TournamentMatch } from "@/lib/competitionStage";
 
 interface Manager {
   ManagerID: number;
@@ -32,16 +33,35 @@ interface TeamInfo {
   PrimaryColor: string | null;
 }
 
-interface SeasonRecord {
-  TeamID: number;
-  SeasonID: number;
-  wins: number;
-  losses: number;
-  ties: number;
+interface LeagueInfo {
+  LeagueID: number;
+  LeagueName: string;
+  LeagueTier: number | null;
 }
 
-function seasonLabel(id: number): string {
-  return `${id - 1}–${String(id).slice(-2)}`;
+// One row per (season, competition) the manager was in charge for.
+interface RegisterRow {
+  SeasonID: number;
+  TeamID: number;
+  TeamName: string;
+  LeagueID: number;
+  LeagueName: string;
+  LeagueTier: number | null;
+  isDomestic: boolean;
+  // Domestic
+  position: number | null;
+  totalpoints: number | null;
+  isChampion: boolean;
+  // Cup / CL / Intl
+  stageReached: string | null;
+  // Shared
+  gamesPlayed: number;
+  goalsFor: number;
+  goalsAgainst: number;
+}
+
+function isDomesticLeague(id: number): boolean {
+  return id >= 1 && id <= 14;
 }
 
 export default function ManagerProfile() {
@@ -49,9 +69,10 @@ export default function ManagerProfile() {
   const [manager, setManager] = useState<Manager | null>(null);
   const [stints, setStints] = useState<Stint[]>([]);
   const [teamInfo, setTeamInfo] = useState<Map<number, TeamInfo>>(new Map());
-  const [leagueMap, setLeagueMap] = useState<Map<number, string>>(new Map());
+  const [leagueMap, setLeagueMap] = useState<Map<number, LeagueInfo>>(new Map());
   const [nationName, setNationName] = useState<string | null>(null);
-  const [seasonRecords, setSeasonRecords] = useState<SeasonRecord[]>([]);
+  const [register, setRegister] = useState<RegisterRow[]>([]);
+  const [compFilter, setCompFilter] = useState<"all" | "domestic" | "cups" | "international">("all");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
 
@@ -59,86 +80,207 @@ export default function ManagerProfile() {
     if (!id) return;
     const mid = parseInt(id);
     setLoading(true);
+    setLoadError(false);
 
-    Promise.all([
-      supabase.from("managers").select("*").eq("ManagerID", mid).single(),
-      fetchAllRows<Stint>("team_managers", {
-        select: "TeamID, SeasonID",
-        filters: [{ method: "eq", args: ["ManagerID", mid] }],
-        order: { column: "SeasonID", ascending: true },
-      }),
-    ]).then(async ([{ data: mgrData }, stintRows]) => {
-      if (mgrData) setManager(mgrData as Manager);
-      setStints(stintRows || []);
+    (async () => {
+      try {
+        const [{ data: mgrData }, stintRows] = await Promise.all([
+          supabase.from("managers").select("*").eq("ManagerID", mid).single(),
+          fetchAllRows<Stint>("team_managers", {
+            select: "TeamID, SeasonID",
+            filters: [{ method: "eq", args: ["ManagerID", mid] }],
+            order: { column: "SeasonID", ascending: true },
+          }),
+        ]);
 
-      if (mgrData?.NationalityID) {
-        const { data: nData } = await supabase
-          .from("nations")
-          .select("Nation")
-          .eq("NationID", mgrData.NationalityID)
-          .order("ValidToDt", { ascending: false })
-          .limit(1);
-        if (nData?.[0]) setNationName((nData[0] as any).Nation);
-      }
+        if (mgrData) setManager(mgrData as Manager);
+        setStints(stintRows || []);
 
-      const teamIds = [...new Set((stintRows || []).map(s => s.TeamID))];
-      if (teamIds.length > 0) {
-        const teams = await fetchAllRows<TeamInfo>("teams", {
-          select: "TeamID, FullName, LeagueID, logo_url, PrimaryColor",
-          filters: [{ method: "in", args: ["TeamID", teamIds] }],
-        });
+        if (mgrData?.NationalityID) {
+          const { data: nData } = await supabase
+            .from("nations")
+            .select("Nation")
+            .eq("NationID", mgrData.NationalityID)
+            .order("ValidToDt", { ascending: false })
+            .limit(1);
+          if (nData?.[0]) setNationName((nData[0] as any).Nation);
+        }
+
+        const teamIds = [...new Set((stintRows || []).map(s => s.TeamID))];
+        if (teamIds.length === 0) {
+          setLoading(false);
+          return;
+        }
+
+        const [teams, leagues] = await Promise.all([
+          fetchAllRows<TeamInfo>("teams", {
+            select: "TeamID, FullName, LeagueID, logo_url, PrimaryColor",
+            filters: [{ method: "in", args: ["TeamID", teamIds] }],
+          }),
+          fetchAllRows<LeagueInfo>("leagues", { select: "LeagueID, LeagueName, LeagueTier" }),
+        ]);
+
         const tm = new Map<number, TeamInfo>();
         teams.forEach(t => tm.set(t.TeamID, t));
         setTeamInfo(tm);
 
-        const leagueIds = [...new Set(teams.map(t => t.LeagueID))];
-        if (leagueIds.length > 0) {
-          const { data: leagues } = await supabase.from("leagues").select("LeagueID, LeagueName").in("LeagueID", leagueIds);
-          const lm = new Map<number, string>();
-          (leagues || []).forEach((l: any) => lm.set(l.LeagueID, l.LeagueName || ""));
-          setLeagueMap(lm);
-        }
+        const lm = new Map<number, LeagueInfo>();
+        leagues.forEach(l => lm.set(l.LeagueID, l));
+        setLeagueMap(lm);
 
-        // For each team this manager led, fetch that team's results and keep only
-        // the seasons in which they were actually in charge, then tally W/L/T.
+        // Group the manager's season-by-team assignments
         const seasonsByTeam = new Map<number, Set<number>>();
         (stintRows || []).forEach(s => {
           if (!seasonsByTeam.has(s.TeamID)) seasonsByTeam.set(s.TeamID, new Set());
           seasonsByTeam.get(s.TeamID)!.add(s.SeasonID);
         });
 
-        const allRecords: SeasonRecord[] = [];
+        const registerRows: RegisterRow[] = [];
+
         for (const teamId of teamIds) {
           const seasons = [...(seasonsByTeam.get(teamId) || [])];
           if (seasons.length === 0) continue;
-          const results = await fetchAllRows<any>("results", {
-            select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID",
-            filters: [
-              { method: "or", args: [`HomeTeamID.eq.${teamId},AwayTeamID.eq.${teamId}`] },
-              { method: "in", args: ["SeasonID", seasons] },
-            ],
-          });
-          const bySeason = new Map<number, SeasonRecord>();
-          seasons.forEach(s => bySeason.set(s, { TeamID: teamId, SeasonID: s, wins: 0, losses: 0, ties: 0 }));
-          results.forEach(r => {
-            const rec = bySeason.get(r.SeasonID);
-            if (!rec) return;
-            const isHome = r.HomeTeamID === teamId;
-            const ts = isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
-            const os = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
-            if (ts > os) rec.wins++; else if (ts < os) rec.losses++; else rec.ties++;
-          });
-          allRecords.push(...bySeason.values());
+          const team = tm.get(teamId);
+          if (!team) continue;
+          const teamName = team.FullName;
+          const leagueId = team.LeagueID;
+          const leagueInfo = lm.get(leagueId);
+
+          if (isDomesticLeague(leagueId)) {
+            // Domestic: pull standings for each season this manager was in charge,
+            // scoped to the league's teams that season, to get points + position.
+            const standingsRows = await Promise.all(
+              seasons.map(seasonId =>
+                fetchAllRows<{ FullName: string; totalpoints: number; totalgamesplayed: number; GoalsFor: number; GoalsAgainst: number }>(
+                  "standings",
+                  {
+                    select: "FullName, SeasonID, LeagueID, totalpoints, totalgamesplayed, GoalsFor, GoalsAgainst",
+                    filters: [
+                      { method: "eq", args: ["SeasonID", seasonId] },
+                      { method: "eq", args: ["LeagueID", leagueId] },
+                    ],
+                    order: { column: "totalpoints", ascending: false },
+                  }
+                )
+              )
+            );
+            seasons.forEach((seasonId, i) => {
+              const sorted = [...(standingsRows[i] || [])].sort((a, b) => (b.totalpoints || 0) - (a.totalpoints || 0));
+              const idx = sorted.findIndex(s => s.FullName === teamName);
+              const own = idx >= 0 ? sorted[idx] : null;
+              registerRows.push({
+                SeasonID: seasonId,
+                TeamID: teamId,
+                TeamName: teamName,
+                LeagueID: leagueId,
+                LeagueName: leagueInfo?.LeagueName || "",
+                LeagueTier: leagueInfo?.LeagueTier ?? null,
+                isDomestic: true,
+                position: idx >= 0 ? idx + 1 : null,
+                totalpoints: own?.totalpoints ?? null,
+                isChampion: idx === 0,
+                stageReached: null,
+                gamesPlayed: own?.totalgamesplayed || 0,
+                goalsFor: own?.GoalsFor || 0,
+                goalsAgainst: own?.GoalsAgainst || 0,
+              });
+            });
+          } else {
+            // Cup / CL / international: need ALL matches in the tournament to
+            // compute stage reached, plus this team's own matches for GP/GF/GA.
+            const [ownResultsBySeason, allResultsBySeason] = await Promise.all([
+              Promise.all(seasons.map(seasonId =>
+                fetchAllRows<any>("results", {
+                  select: "HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID",
+                  filters: [
+                    { method: "eq", args: ["LeagueID", leagueId] },
+                    { method: "eq", args: ["SeasonID", seasonId] },
+                    { method: "or", args: [`HomeTeamID.eq.${teamId},AwayTeamID.eq.${teamId}`] },
+                  ],
+                })
+              )),
+              Promise.all(seasons.map(seasonId =>
+                fetchAllRows<any>("results", {
+                  select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID",
+                  filters: [
+                    { method: "eq", args: ["LeagueID", leagueId] },
+                    { method: "eq", args: ["SeasonID", seasonId] },
+                  ],
+                })
+              )),
+            ]);
+
+            // For qualifying comps, also check whether the team appears in the parent comp that season
+            const parentLid = QUAL_PARENT_MAP[leagueId];
+            let advancedSeasons = new Set<number>();
+            if (parentLid) {
+              const parentRows = await fetchAllRows<any>("results", {
+                select: "SeasonID,HomeTeamID,AwayTeamID",
+                filters: [
+                  { method: "eq", args: ["LeagueID", parentLid] },
+                  { method: "in", args: ["SeasonID", seasons] },
+                  { method: "or", args: [`HomeTeamID.eq.${teamId},AwayTeamID.eq.${teamId}`] },
+                ],
+              });
+              advancedSeasons = new Set(parentRows.map((r: any) => r.SeasonID));
+            }
+
+            seasons.forEach((seasonId, i) => {
+              const ownResults = ownResultsBySeason[i] || [];
+              const allMatches: TournamentMatch[] = (allResultsBySeason[i] || []).map((r: any) => ({
+                matchId: r.MatchID || 0,
+                homeId: r.HomeTeamID || 0,
+                awayId: r.AwayTeamID || 0,
+                homeScore: r.HomeTeamScore || 0,
+                awayScore: r.AwayTeamScore || 0,
+                weekId: r.WeekID || 0,
+              }));
+
+              let gp = 0, gf = 0, ga = 0;
+              ownResults.forEach((r: any) => {
+                gp++;
+                const isHome = r.HomeTeamID === teamId;
+                gf += isHome ? (r.HomeTeamScore ?? 0) : (r.AwayTeamScore ?? 0);
+                ga += isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
+              });
+
+              const isCL = leagueId === 19;
+              const stage = computeStageReached(teamId, leagueId, allMatches, {
+                isCL,
+                advancedToParent: advancedSeasons.has(seasonId),
+              });
+
+              registerRows.push({
+                SeasonID: seasonId,
+                TeamID: teamId,
+                TeamName: teamName,
+                LeagueID: leagueId,
+                LeagueName: leagueInfo?.LeagueName || "",
+                LeagueTier: leagueInfo?.LeagueTier ?? null,
+                isDomestic: false,
+                position: null,
+                totalpoints: null,
+                isChampion: stage.includes("Champion"),
+                stageReached: stage,
+                gamesPlayed: gp,
+                goalsFor: gf,
+                goalsAgainst: ga,
+              });
+            });
+          }
         }
-        allRecords.sort((a, b) => a.SeasonID - b.SeasonID);
-        setSeasonRecords(allRecords);
+
+        // Sort: season ascending, qualifiers before their parent comp
+        const rank = (lid: number) => (QUAL_PARENT_MAP[lid] != null ? QUAL_PARENT_MAP[lid] - 0.5 : lid);
+        registerRows.sort((a, b) => a.SeasonID - b.SeasonID || rank(a.LeagueID) - rank(b.LeagueID));
+        setRegister(registerRows);
+        setLoading(false);
+      } catch (err) {
+        console.error("Failed to load manager:", err);
+        setLoadError(true);
+        setLoading(false);
       }
-      setLoading(false);
-    }).catch((err) => {
-      console.error("Failed to load manager:", err);
-      setLoadError(true);
-      setLoading(false);
-    });
+    })();
   }, [id]);
 
   if (loading) {
@@ -167,19 +309,8 @@ export default function ManagerProfile() {
   }
 
   const age = calculateAge(manager.DOB);
-  const recordByKey = new Map<string, SeasonRecord>();
-  seasonRecords.forEach(r => recordByKey.set(`${r.TeamID}|${r.SeasonID}`, r));
 
-  const career = seasonRecords.reduce(
-    (acc, r) => ({ wins: acc.wins + r.wins, losses: acc.losses + r.losses, ties: acc.ties + r.ties }),
-    { wins: 0, losses: 0, ties: 0 }
-  );
-  const careerGames = career.wins + career.losses + career.ties;
-  const careerWinPct = careerGames > 0 ? (career.wins / careerGames) : 0;
-
-  // A "stint" is a continuous run of consecutive seasons at the same team --
-  // not one row per season. E.g. Team A 2017-18, 2018-19 then Team B 2021-22,
-  // 2022-23 is 2 stints, not 4.
+  // A "stint" is a continuous run of consecutive seasons at the same team.
   const stintCount = (() => {
     if (stints.length === 0) return 0;
     let count = 1;
@@ -193,106 +324,272 @@ export default function ManagerProfile() {
     return count;
   })();
 
+  // ── Career accolades ──
+  const domesticRows = register.filter(r => r.isDomestic);
+  const cupRows = register.filter(r => !r.isDomestic);
+  const titlesWon = register.filter(r => r.isChampion);
+  const domesticTitles = titlesWon.filter(r => r.isDomestic);
+  const cupTitles = titlesWon.filter(r => !r.isDomestic);
+  const runnerUps = cupRows.filter(r => r.stageReached === "Runner-Up");
+  const top3Finishes = domesticRows.filter(r => r.position != null && r.position <= 3);
+
+  const careerGP = register.reduce((s, r) => s + r.gamesPlayed, 0);
+  const careerGF = register.reduce((s, r) => s + r.goalsFor, 0);
+  const careerGA = register.reduce((s, r) => s + r.goalsAgainst, 0);
+  const avgPosition = domesticRows.filter(r => r.position != null).length > 0
+    ? domesticRows.filter(r => r.position != null).reduce((s, r) => s + (r.position || 0), 0) / domesticRows.filter(r => r.position != null).length
+    : null;
+
+  // ── Filter dropdown scoping ──
+  const filteredRegister = compFilter === "all"
+    ? register
+    : compFilter === "domestic"
+    ? register.filter(r => r.isDomestic)
+    : compFilter === "cups"
+    ? register.filter(r => !r.isDomestic && r.LeagueID < 20)
+    : register.filter(r => !r.isDomestic && r.LeagueID >= 20);
+
+  const hasCups = register.some(r => !r.isDomestic && r.LeagueID < 20);
+  const hasIntl = register.some(r => !r.isDomestic && r.LeagueID >= 20);
+
   return (
     <div className="min-h-screen bg-background flex flex-col pb-14 md:pb-0">
       <SiteHeader />
       <main className="flex-1 container py-8">
-        <div className="mb-6 border-b-2 border-primary pb-2">
-          <p className="text-xs text-muted-foreground font-sans uppercase tracking-wide">Manager</p>
-          <div className="flex items-center gap-4">
-            <div className="w-16 h-16 rounded-full border border-border flex items-center justify-center shrink-0 overflow-hidden bg-secondary">
+        {/* Header — demographic info, matching player profile style */}
+        <div className="mb-6 border-b-2 border-primary pb-4">
+          <div className="flex items-start gap-6">
+            <div className="w-24 h-24 rounded-full border border-border flex items-center justify-center shrink-0 overflow-hidden bg-secondary">
               {manager.headshot_url ? (
                 <img src={manager.headshot_url} alt={`${manager.FirstName} ${manager.LastName}`} className="w-full h-full object-cover" />
               ) : (
-                <span className="text-xl font-display font-bold text-muted-foreground">
+                <span className="text-3xl font-display font-bold text-muted-foreground">
                   {manager.FirstName.charAt(0)}{manager.LastName.charAt(0)}
                 </span>
               )}
             </div>
-            <div>
+            <div className="flex-1">
+              <p className="text-xs text-muted-foreground font-sans uppercase tracking-wide mb-1">Manager</p>
               <h1 className="font-display text-3xl font-bold text-foreground">
                 {manager.FirstName} {manager.LastName}
               </h1>
-              <p className="text-sm text-muted-foreground font-sans mt-1">
-                {nationName && <>{getNationFlag(nationName)} <Link to={`/nation/${manager.NationalityID}`} className="text-accent hover:underline">{nationName}</Link> · </>}
-                {age != null && <>Age {age} · </>}
-                {manager.FormerPlayerFlag && manager.FormerPlayerID ? (
+              {manager.FormerPlayerFlag && manager.FormerPlayerID ? (
+                <p className="text-sm font-sans mt-1">
                   <Link to={`/player/${manager.FormerPlayerID}`} className="text-accent hover:underline font-medium">
-                    View Playing Career
+                    View Playing Career →
                   </Link>
-                ) : (
-                  <span className="italic">No playing career on record</span>
+                </p>
+              ) : (
+                <p className="text-sm text-muted-foreground font-sans mt-1 italic">No playing career on record</p>
+              )}
+
+              {/* Demographic grid, matching PlayerProfile */}
+              <div className="mt-3 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm font-sans">
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Born</p>
+                  <p className="font-medium">{formatDate(manager.DOB)}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Age</p>
+                  <p className="font-medium">{age ?? "—"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide">Nationality</p>
+                  <p className="font-medium">
+                    {manager.NationalityID ? (
+                      <Link to={`/nation/${manager.NationalityID}`} className="hover:text-accent">
+                        {getNationFlag(nationName)} {nationName}
+                      </Link>
+                    ) : "—"}
+                  </p>
+                </div>
+                {manager.Gender && (
+                  <div>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide">Gender</p>
+                    <p className={`font-medium ${manager.Gender.toLowerCase() === 'male' || manager.Gender.toLowerCase() === 'm' ? 'text-blue-600 dark:text-blue-400' : manager.Gender.toLowerCase() === 'female' || manager.Gender.toLowerCase() === 'f' ? 'text-pink-600 dark:text-pink-400' : ''}`}>
+                      {manager.Gender.toLowerCase() === 'm' || manager.Gender.toLowerCase() === 'male' ? 'Male' :
+                       manager.Gender.toLowerCase() === 'f' || manager.Gender.toLowerCase() === 'female' ? 'Female' :
+                       manager.Gender}
+                    </p>
+                  </div>
                 )}
-              </p>
+              </div>
             </div>
           </div>
         </div>
 
-        {/* Career summary */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-6">
-          <div className="border border-border rounded p-3 text-center">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Stints</p>
-            <p className="font-display text-2xl font-bold">{stintCount}</p>
+        <div className="space-y-6">
+          {/* Career summary + accolades */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="border border-border rounded p-3 text-center">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">Stints</p>
+              <p className="font-display text-2xl font-bold">{stintCount}</p>
+            </div>
+            <div className="border border-border rounded p-3 text-center">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">Teams Managed</p>
+              <p className="font-display text-2xl font-bold">{teamInfo.size}</p>
+            </div>
+            <div className="border border-border rounded p-3 text-center">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">Titles Won</p>
+              <p className="font-display text-2xl font-bold text-yellow-600 dark:text-yellow-400">
+                {titlesWon.length > 0 ? `🏆 ${titlesWon.length}` : "0"}
+              </p>
+            </div>
+            <div className="border border-border rounded p-3 text-center">
+              <p className="text-xs text-muted-foreground uppercase tracking-wide">Avg. League Position</p>
+              <p className="font-display text-2xl font-bold">{avgPosition != null ? ordinal(Math.round(avgPosition)) : "—"}</p>
+            </div>
           </div>
-          <div className="border border-border rounded p-3 text-center">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Record</p>
-            <p className="font-display text-2xl font-bold">{career.wins}-{career.losses}{career.ties > 0 ? `-${career.ties}` : ""}</p>
-          </div>
-          <div className="border border-border rounded p-3 text-center">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Win %</p>
-            <p className="font-display text-2xl font-bold">{(careerWinPct * 100).toFixed(1)}%</p>
-          </div>
-          <div className="border border-border rounded p-3 text-center">
-            <p className="text-xs text-muted-foreground uppercase tracking-wide">Teams Managed</p>
-            <p className="font-display text-2xl font-bold">{teamInfo.size}</p>
-          </div>
-        </div>
 
-        {/* Season-by-season history */}
-        <div className="border border-border rounded overflow-hidden">
-          <div className="bg-table-header px-3 py-2">
-            <h3 className="font-display text-sm font-bold text-table-header-foreground">Career Statistics</h3>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm font-sans">
-              <thead>
-                <tr className="bg-secondary">
-                  <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
-                  <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</th>
-                  <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">League</th>
-                  <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GP</th>
-                  <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">W</th>
-                  <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">L</th>
-                  <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Win%</th>
-                </tr>
-              </thead>
-              <tbody>
-                {stints.map((s, i) => {
-                  const team = teamInfo.get(s.TeamID);
-                  const rec = recordByKey.get(`${s.TeamID}|${s.SeasonID}`);
-                  const gp = rec ? rec.wins + rec.losses + rec.ties : 0;
-                  const winPct = gp > 0 ? ((rec!.wins / gp) * 100).toFixed(1) : "—";
-                  return (
-                    <tr key={`${s.TeamID}-${s.SeasonID}`} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
-                      <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{seasonLabel(s.SeasonID)}</td>
-                      <td className="px-3 py-1.5 font-medium text-accent hover:underline">
-                        {team ? <Link to={`/team/${encodeURIComponent(team.FullName)}`}>{team.FullName}</Link> : `Team ${s.TeamID}`}
-                      </td>
-                      <td className="px-3 py-1.5 text-xs">
-                        {team ? <Link to={`/league/${team.LeagueID}`} className="text-accent hover:underline">{leagueMap.get(team.LeagueID) || ""}</Link> : ""}
-                      </td>
-                      <td className="px-3 py-1.5 text-right font-mono">{gp || "—"}</td>
-                      <td className="px-3 py-1.5 text-right font-mono">{rec?.wins ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-right font-mono">{rec?.losses ?? "—"}</td>
-                      <td className="px-3 py-1.5 text-right font-mono">{winPct}{winPct !== "—" ? "%" : ""}</td>
-                    </tr>
-                  );
-                })}
-                {stints.length === 0 && (
-                  <tr><td colSpan={7} className="px-3 py-4 text-center text-muted-foreground italic">No managerial record on file.</td></tr>
+          {/* Accolades breakdown */}
+          {(titlesWon.length > 0 || runnerUps.length > 0 || top3Finishes.length > 0) && (
+            <div className="border border-border rounded overflow-hidden">
+              <div className="bg-table-header px-3 py-2">
+                <h3 className="font-display text-sm font-bold text-table-header-foreground">Accolades</h3>
+              </div>
+              <div className="bg-card p-4 space-y-3">
+                {domesticTitles.length > 0 && (
+                  <div>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">League Titles</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {domesticTitles.map((r, i) => (
+                        <span key={i} title={`${r.TeamName} — ${r.LeagueName}`}
+                          className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400">
+                          <span className="font-bold">🏆</span>
+                          <span>{seasonLabel(r.SeasonID)}</span>
+                          <span className="opacity-70">{r.LeagueName}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
                 )}
-              </tbody>
-            </table>
+                {cupTitles.length > 0 && (
+                  <div>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">Cup / Tournament Titles</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {cupTitles.map((r, i) => (
+                        <span key={i} title={`${r.TeamName} — ${r.LeagueName}`}
+                          className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400">
+                          <span className="font-bold">🏆</span>
+                          <span>{seasonLabel(r.SeasonID)}</span>
+                          <span className="opacity-70">{r.LeagueName}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {runnerUps.length > 0 && (
+                  <div>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">Runners-Up</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {runnerUps.map((r, i) => (
+                        <span key={i} title={`${r.TeamName} — ${r.LeagueName}`}
+                          className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300">
+                          <span className="font-bold">2nd</span>
+                          <span>{seasonLabel(r.SeasonID)}</span>
+                          <span className="opacity-70">{r.LeagueName}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {top3Finishes.filter(r => !r.isChampion).length > 0 && (
+                  <div>
+                    <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">Top-3 League Finishes</p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {top3Finishes.filter(r => !r.isChampion).map((r, i) => (
+                        <span key={i} title={`${r.TeamName} — ${r.LeagueName}`}
+                          className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono bg-muted/40 border-border text-muted-foreground">
+                          <span className="font-bold">{ordinal(r.position!)}</span>
+                          <span>{seasonLabel(r.SeasonID)}</span>
+                          <span className="opacity-70">{r.LeagueName}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* Season-by-season register, broken down by competition */}
+          <div className="border border-border rounded overflow-hidden">
+            <div className="bg-table-header px-3 py-2 flex items-center justify-between flex-wrap gap-2">
+              <h3 className="font-display text-sm font-bold text-table-header-foreground">Managerial Record by Season</h3>
+              {(hasCups || hasIntl) && (
+                <select
+                  value={compFilter}
+                  onChange={e => setCompFilter(e.target.value as any)}
+                  className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
+                >
+                  <option value="all">All Competitions</option>
+                  <option value="domestic">League Only</option>
+                  {hasCups && <option value="cups">Cups Only</option>}
+                  {hasIntl && <option value="international">International Only</option>}
+                </select>
+              )}
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm font-sans">
+                <thead>
+                  <tr className="bg-secondary">
+                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
+                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</th>
+                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Competition</th>
+                    <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GP</th>
+                    <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pos</th>
+                    <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pts</th>
+                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Stage Reached</th>
+                    <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GF</th>
+                    <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GA</th>
+                    <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GD</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredRegister.map((r, i) => {
+                    const gd = r.goalsFor - r.goalsAgainst;
+                    return (
+                      <tr key={`${r.TeamID}-${r.SeasonID}-${r.LeagueID}`} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
+                        <td className="px-3 py-1.5 font-mono text-xs text-muted-foreground">{seasonLabel(r.SeasonID)}</td>
+                        <td className="px-3 py-1.5 font-medium">
+                          <Link to={`/team/${encodeURIComponent(r.TeamName)}`} className="text-accent hover:underline">{r.TeamName}</Link>
+                        </td>
+                        <td className="px-3 py-1.5 text-xs">
+                          <Link to={`/league/${r.LeagueID}`} className="text-accent hover:underline">{r.LeagueName}</Link>
+                          {r.LeagueTier != null && (
+                            <span className="text-muted-foreground"> · {getLeagueTierLabel(r.LeagueTier)}</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-mono">{r.gamesPlayed || "—"}</td>
+                        <td className={`px-3 py-1.5 text-right font-mono ${r.isChampion ? "font-bold text-yellow-600 dark:text-yellow-400" : ""}`}>
+                          {r.isDomestic ? (r.isChampion ? "🏆 1st" : r.position != null ? ordinal(r.position) : "—") : "—"}
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-mono">{r.isDomestic ? (r.totalpoints ?? "—") : "—"}</td>
+                        <td className={`px-3 py-1.5 text-sm ${r.stageReached?.includes("Champion") ? "font-bold text-yellow-600 dark:text-yellow-400" : ""}`}>
+                          {!r.isDomestic ? (r.stageReached ?? "—") : "—"}
+                        </td>
+                        <td className="px-3 py-1.5 text-right font-mono">{r.goalsFor || "—"}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{r.goalsAgainst || "—"}</td>
+                        <td className={`px-3 py-1.5 text-right font-mono ${gd > 0 ? "text-green-600 dark:text-green-400" : gd < 0 ? "text-destructive" : ""}`}>
+                          {gd > 0 ? "+" : ""}{gd || "—"}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {filteredRegister.length === 0 && (
+                    <tr><td colSpan={10} className="px-3 py-4 text-center text-muted-foreground italic">No managerial record on file.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {register.length > 0 && (
+              <div className="px-3 py-2 bg-secondary/30 border-t border-border flex flex-wrap gap-x-6 gap-y-1 text-xs font-sans text-muted-foreground">
+                <span>Career GP: <strong className="text-foreground">{careerGP}</strong></span>
+                <span>Career GF: <strong className="text-foreground">{careerGF}</strong></span>
+                <span>Career GA: <strong className="text-foreground">{careerGA}</strong></span>
+                <span>Career GD: <strong className={careerGF - careerGA > 0 ? "text-green-600 dark:text-green-400" : careerGF - careerGA < 0 ? "text-destructive" : "text-foreground"}>{careerGF - careerGA > 0 ? "+" : ""}{careerGF - careerGA}</strong></span>
+              </div>
+            )}
           </div>
         </div>
       </main>

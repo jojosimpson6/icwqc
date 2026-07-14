@@ -647,7 +647,7 @@ export default function NationPage() {
                             <td className="px-3 py-1.5 text-center font-mono">
                               <Link to={`/match/${r.MatchID}`} className="text-accent hover:underline">{r.HomeTeamScore ?? "—"}–{r.AwayTeamScore ?? "—"}</Link>
                             </td>
-                            <td className={`px-3 py-1.5 text-center font-bold ${outcome === "W" ? "text-green-600" : outcome === "L" ? "text-red-600" : "text-muted-foreground"}`}>{outcome}</td>
+                            <td className={`px-3 py-1.5 text-center font-bold ${outcome === "W" ? "text-green-600 dark:text-green-400" : outcome === "L" ? "text-red-600 dark:text-red-400" : "text-muted-foreground"}`}>{outcome}</td>
                           </tr>
                         );
                       })}

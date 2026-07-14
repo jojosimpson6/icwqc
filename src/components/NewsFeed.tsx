@@ -7,6 +7,7 @@ interface NewsItem {
   title: string;
   body: string;
   published_date: string;
+  author?: string | null;
 }
 
 function formatNewsDate(dateStr: string): string {
@@ -46,7 +47,9 @@ export function NewsFeed({ compact = false }: { compact?: boolean }) {
           ) : (
             displayItems.slice(0, 4).map((item) => (
               <Link key={item.id} to={`/news/${item.id}`} className="block px-3 py-3 hover:bg-highlight/20 transition-colors">
-                <p className="text-xs text-muted-foreground font-sans mb-1">{formatNewsDate(item.published_date)}</p>
+                <p className="text-xs text-muted-foreground font-sans mb-1">
+                  {formatNewsDate(item.published_date)}{item.author ? ` · By ${item.author}` : ""}
+                </p>
                 <p className="font-sans font-semibold text-sm text-accent hover:underline mb-1">{item.title}</p>
               </Link>
             ))
@@ -68,7 +71,9 @@ export function NewsFeed({ compact = false }: { compact?: boolean }) {
         ) : (
           displayItems.map((item, i) => (
             <Link key={item.id} to={`/news/${item.id}`} className="block px-4 py-4 hover:bg-highlight/20 transition-colors">
-              <p className="text-xs text-muted-foreground font-sans mb-1">{formatNewsDate(item.published_date)}</p>
+              <p className="text-xs text-muted-foreground font-sans mb-1">
+                {formatNewsDate(item.published_date)}{item.author ? ` · By ${item.author}` : ""}
+              </p>
               <p className="font-display font-bold text-lg text-foreground mb-2 hover:text-accent transition-colors">{item.title}</p>
               <p className="text-sm text-muted-foreground font-sans leading-relaxed line-clamp-2">{item.body}</p>
             </Link>

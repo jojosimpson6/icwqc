@@ -9,6 +9,7 @@ interface NewsItem {
   title: string;
   body: string;
   published_date: string;
+  author: string | null;
 }
 
 interface SiteContent {
@@ -27,7 +28,7 @@ export default function AdminPanel() {
   // News state
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [editingNews, setEditingNews] = useState<NewsItem | null>(null);
-  const [newNews, setNewNews] = useState({ title: "", body: "", published_date: new Date().toISOString().split("T")[0] });
+  const [newNews, setNewNews] = useState({ title: "", body: "", published_date: new Date().toISOString().split("T")[0], author: "" });
   const [newsMsg, setNewsMsg] = useState("");
 
   // Site content state
@@ -81,9 +82,10 @@ export default function AdminPanel() {
       title: newNews.title,
       body: newNews.body,
       published_date: newNews.published_date,
+      author: newNews.author || null,
     });
     if (error) { setNewsMsg("Error: " + error.message); return; }
-    setNewNews({ title: "", body: "", published_date: new Date().toISOString().split("T")[0] });
+    setNewNews({ title: "", body: "", published_date: new Date().toISOString().split("T")[0], author: "" });
     setNewsMsg("News item added!");
     fetchNews();
     setTimeout(() => setNewsMsg(""), 3000);
@@ -95,6 +97,7 @@ export default function AdminPanel() {
       title: editingNews.title,
       body: editingNews.body,
       published_date: editingNews.published_date,
+      author: editingNews.author || null,
     }).eq("id", editingNews.id);
     if (error) { setNewsMsg("Error: " + error.message); return; }
     setEditingNews(null);
@@ -198,6 +201,10 @@ export default function AdminPanel() {
                   <input type="text" value={newNews.title} onChange={e => setNewNews(n => ({ ...n, title: e.target.value }))} className={inputClass} placeholder="Headline..." />
                 </div>
                 <div>
+                  <label className={labelClass}>Author</label>
+                  <input type="text" value={newNews.author} onChange={e => setNewNews(n => ({ ...n, author: e.target.value }))} className={inputClass} placeholder="Byline (optional)..." />
+                </div>
+                <div>
                   <label className={labelClass}>Body</label>
                   <textarea value={newNews.body} onChange={e => setNewNews(n => ({ ...n, body: e.target.value }))} className={`${inputClass} h-24 resize-none`} placeholder="Full announcement text..." />
                 </div>
@@ -219,7 +226,8 @@ export default function AdminPanel() {
                     {editingNews?.id === item.id ? (
                       <div className="space-y-2">
                         <input type="date" value={editingNews.published_date} onChange={e => setEditingNews(n => n ? { ...n, published_date: e.target.value } : n)} className={inputClass} />
-                        <input type="text" value={editingNews.title} onChange={e => setEditingNews(n => n ? { ...n, title: e.target.value } : n)} className={inputClass} />
+                        <input type="text" value={editingNews.title} onChange={e => setEditingNews(n => n ? { ...n, title: e.target.value } : n)} className={inputClass} placeholder="Headline..." />
+                        <input type="text" value={editingNews.author || ""} onChange={e => setEditingNews(n => n ? { ...n, author: e.target.value } : n)} className={inputClass} placeholder="Byline (optional)..." />
                         <textarea value={editingNews.body} onChange={e => setEditingNews(n => n ? { ...n, body: e.target.value } : n)} className={`${inputClass} h-20 resize-none`} />
                         <div className="flex gap-2">
                           <button onClick={updateNews} className={btnPrimary}>Save</button>
@@ -230,7 +238,9 @@ export default function AdminPanel() {
                     ) : (
                       <div className="flex items-start gap-3">
                         <div className="flex-1">
-                          <p className="text-xs text-muted-foreground font-sans mb-0.5">{item.published_date}</p>
+                          <p className="text-xs text-muted-foreground font-sans mb-0.5">
+                            {item.published_date}{item.author ? ` · By ${item.author}` : ""}
+                          </p>
                           <p className="font-sans font-semibold text-sm text-foreground">{item.title}</p>
                           <p className="text-xs text-muted-foreground font-sans mt-1 line-clamp-2">{item.body}</p>
                         </div>
@@ -252,7 +262,7 @@ export default function AdminPanel() {
 
         {activeTab === "content" && (
           <div className="space-y-4">
-            {contentMsg && <div className="text-sm text-green-600 font-sans">{contentMsg}</div>}
+            {contentMsg && <div className="text-sm text-green-600 dark:text-green-400 font-sans">{contentMsg}</div>}
             {siteContents.map(sc => (
               <div key={sc.id} className="border border-border rounded overflow-hidden">
                 <div className="bg-table-header px-3 py-2 flex items-center justify-between">

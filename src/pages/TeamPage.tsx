@@ -662,7 +662,7 @@ export default function TeamPage() {
           <tbody>
             {rows.map((row, i) => {
               const gd = (row.GoalsFor || 0) - (row.GoalsAgainst || 0);
-              const posClass = row.isChampion ? "font-bold text-yellow-500" : "";
+              const posClass = row.isChampion ? "font-bold text-yellow-600 dark:text-yellow-400" : "";
               // Compute stage reached for cup/CL competitions
               const QUAL_PARENT_MAP: Record<number, number> = { 21: 20, 23: 22, 25: 24, 27: 26, 29: 28 };
               const isQualifier = row.LeagueID in QUAL_PARENT_MAP;
@@ -830,13 +830,13 @@ export default function TeamPage() {
                   <td className="px-3 py-1.5 text-right font-mono">{row.totalgamesplayed ?? "—"}</td>
                   {isDomestic && <td className="px-3 py-1.5 text-right font-mono">{row.totalpoints ?? "—"}</td>}
                   {!isDomestic && (
-                    <td className={`px-3 py-1.5 font-sans text-sm ${stageReached?.includes("Champion") ? "font-bold text-yellow-500" : ""}`}>
+                    <td className={`px-3 py-1.5 font-sans text-sm ${stageReached?.includes("Champion") ? "font-bold text-yellow-600 dark:text-yellow-400" : ""}`}>
                       {stageReached ?? "—"}
                     </td>
                   )}
                   <td className="px-3 py-1.5 text-right font-mono">{row.GoalsFor ?? "—"}</td>
                   <td className="px-3 py-1.5 text-right font-mono">{row.GoalsAgainst ?? "—"}</td>
-                  <td className={`px-3 py-1.5 text-right font-mono ${gd > 0 ? "text-green-600" : gd < 0 ? "text-destructive" : ""}`}>{gd > 0 ? "+" : ""}{gd}</td>
+                  <td className={`px-3 py-1.5 text-right font-mono ${gd > 0 ? "text-green-600 dark:text-green-400" : gd < 0 ? "text-destructive" : ""}`}>{gd > 0 ? "+" : ""}{gd}</td>
                 </tr>
               );
             })}
@@ -1038,7 +1038,7 @@ export default function TeamPage() {
                                 {teamScore}–{oppScore}
                               </Link>
                             </td>
-                            <td className={`px-3 py-1.5 text-center font-bold text-xs ${won ? "text-green-600" : "text-destructive"}`}>
+                            <td className={`px-3 py-1.5 text-center font-bold text-xs ${won ? "text-green-600 dark:text-green-400" : "text-destructive"}`}>
                               {won ? "W" : "L"}
                             </td>
                             <td className="px-3 py-1.5 text-right font-mono text-muted-foreground text-xs">{r.SnitchCaughtTime ?? "—"}</td>
@@ -1103,7 +1103,7 @@ export default function TeamPage() {
                               <td className="px-3 py-1.5 text-right font-mono font-bold">
                                 <Link to={`/match/${r.MatchID}`} className="hover:underline text-accent">{teamScore}–{oppScore}</Link>
                               </td>
-                              <td className={`px-3 py-1.5 text-center font-bold text-xs ${won ? "text-green-600" : "text-destructive"}`}>{won ? "W" : "L"}</td>
+                              <td className={`px-3 py-1.5 text-center font-bold text-xs ${won ? "text-green-600 dark:text-green-400" : "text-destructive"}`}>{won ? "W" : "L"}</td>
                             </tr>
                           );
                         })}
@@ -1263,7 +1263,7 @@ export default function TeamPage() {
                         <div className="flex justify-between"><span className="text-muted-foreground">Total Points</span><span className="font-mono font-bold">{s.totalpoints}</span></div>
                         <div className="flex justify-between"><span className="text-muted-foreground">Goals For</span><span className="font-mono">{s.GoalsFor}</span></div>
                         <div className="flex justify-between"><span className="text-muted-foreground">Goals Against</span><span className="font-mono">{s.GoalsAgainst}</span></div>
-                        <div className="flex justify-between"><span className="text-muted-foreground">Goal Difference</span><span className={`font-mono ${gd > 0 ? "text-green-600" : gd < 0 ? "text-destructive" : ""}`}>{gd > 0 ? "+" : ""}{gd}</span></div>
+                        <div className="flex justify-between"><span className="text-muted-foreground">Goal Difference</span><span className={`font-mono ${gd > 0 ? "text-green-600 dark:text-green-400" : gd < 0 ? "text-destructive" : ""}`}>{gd > 0 ? "+" : ""}{gd}</span></div>
                         <div className="flex justify-between"><span className="text-muted-foreground">Home Pts</span><span className="font-mono">{s.homepoints}</span></div>
                         <div className="flex justify-between"><span className="text-muted-foreground">Away Pts</span><span className="font-mono">{s.awaypoints}</span></div>
                       </>;

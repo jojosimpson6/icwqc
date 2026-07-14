@@ -9,6 +9,7 @@ interface NewsItem {
   title: string;
   body: string;
   published_date: string;
+  author: string | null;
 }
 
 function formatDate(dateStr: string): string {
@@ -37,7 +38,9 @@ export default function NewsArticle() {
           <p className="text-muted-foreground font-sans">Loading article...</p>
         ) : article ? (
           <article>
-            <p className="text-sm text-muted-foreground font-sans mb-2">{formatDate(article.published_date)}</p>
+            <p className="text-sm text-muted-foreground font-sans mb-2">
+              {formatDate(article.published_date)}{article.author ? ` · By ${article.author}` : ""}
+            </p>
             <h1 className="font-display text-3xl font-bold text-foreground mb-6">{article.title}</h1>
             <div className="prose prose-sm max-w-none font-sans text-foreground leading-relaxed whitespace-pre-line">
               {article.body}

@@ -1527,7 +1527,7 @@ export default function PlayerProfile() {
                                   {m.teamScore}–{m.oppScore}
                                 </Link>
                               </td>
-                              <td className={`${tdClass} text-center font-bold text-xs ${won ? "text-green-600" : "text-destructive"}`}>
+                              <td className={`${tdClass} text-center font-bold text-xs ${won ? "text-green-600 dark:text-green-400" : "text-destructive"}`}>
                                 {won ? "W" : "L"}
                               </td>
                               <td className={`${tdClass} text-right font-mono`}>{m.stat}</td>
