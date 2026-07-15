@@ -7,6 +7,7 @@ import { SiteFooter } from "@/components/SiteFooter";
 import { getNationFlag, formatHeight, calculateAge } from "@/lib/helpers";
 import { useSortableTable } from "@/hooks/useSortableTable";
 import { fetchAllRows } from "@/lib/fetchAll";
+import { computeStageReached, QUAL_PARENT_MAP, TournamentMatch } from "@/lib/competitionStage";
 
 interface Nation {
   NationID: number;
@@ -111,7 +112,7 @@ export default function NationPage() {
   const [nation, setNation] = useState<Nation | null>(null);
   const [players, setPlayers] = useState<PlayerRow[]>([]);
   const [careerRecords, setCareerRecords] = useState<CareerRecord[]>([]);
-  const [activeTab, setActiveTab] = useState<"roster" | "abroad" | "records" | "results" | "register" | "h2h">("roster");
+  const [activeTab, setActiveTab] = useState<"roster" | "abroad" | "records" | "intlRecords" | "results" | "register" | "h2h">("roster");
   const [intlResults, setIntlResults] = useState<IntlResult[]>([]);
   const [teamMap, setTeamMap] = useState<Map<number, string>>(new Map());
   const [leagueMap, setLeagueMap] = useState<Map<number, string>>(new Map());
@@ -124,6 +125,7 @@ export default function NationPage() {
   const [intlCompFilter, setIntlCompFilter] = useState<number | "all">("all");
   const [natCaptainMap, setNatCaptainMap] = useState<Map<number, number>>(new Map()); // SeasonID -> CaptainPlayerID
   const [natManagerHistory, setNatManagerHistory] = useState<{ SeasonID: number; ManagerID: number; FirstName: string; LastName: string; FormerPlayerFlag: boolean }[]>([]);
+  const [intlStageMap, setIntlStageMap] = useState<Map<string, string>>(new Map());
 
   // For each (season, league) the nation appears in W4, load W3 winners to distinguish Final vs 3rd-place.
   useEffect(() => {
@@ -156,6 +158,60 @@ export default function NationPage() {
       setSemiWinnersMap(m);
     }).catch(() => {});
   }, [intlResults]);
+
+  // For each (season, competition) the nation played in, fetch ALL matches in that
+  // competition (not just the nation's own) so we can compute proper stage/qualification
+  // status — group standing + advancement for qualifiers, bracket outcome for the main
+  // tournaments — the same way team pages do for cup/CL competitions.
+  useEffect(() => {
+    if (!nationalTeam) { setIntlStageMap(new Map()); return; }
+    const keys = new Set<string>();
+    intlResults.forEach(r => {
+      if (r.SeasonID && r.LeagueID) keys.add(`${r.SeasonID}|${r.LeagueID}`);
+    });
+    if (keys.size === 0) { setIntlStageMap(new Map()); return; }
+    const pairs = [...keys].map(k => k.split("|").map(Number));
+    const seasons = [...new Set(pairs.map(p => p[0]))];
+    const leagues = [...new Set(pairs.map(p => p[1]))];
+
+    fetchAllRows<any>("results", {
+      select: '"MatchID","HomeTeamID","AwayTeamID","HomeTeamScore","AwayTeamScore","SeasonID","LeagueID","WeekID"',
+      filters: [
+        { method: "in", args: ["LeagueID", leagues] },
+        { method: "in", args: ["SeasonID", seasons] },
+      ],
+    }).then(rows => {
+      const byKey = new Map<string, TournamentMatch[]>();
+      (rows || []).forEach((r: any) => {
+        if (!r.SeasonID || !r.LeagueID) return;
+        const key = `${r.SeasonID}|${r.LeagueID}`;
+        if (!byKey.has(key)) byKey.set(key, []);
+        byKey.get(key)!.push({
+          matchId: r.MatchID || 0,
+          homeId: r.HomeTeamID || 0,
+          awayId: r.AwayTeamID || 0,
+          homeScore: r.HomeTeamScore ?? 0,
+          awayScore: r.AwayTeamScore ?? 0,
+          weekId: r.WeekID || 0,
+        });
+      });
+
+      const stageMap = new Map<string, string>();
+      keys.forEach(key => {
+        const [seasonStr, leagueStr] = key.split("|");
+        const seasonId = Number(seasonStr);
+        const leagueId = Number(leagueStr);
+        if (leagueId === 30) { stageMap.set(key, "Friendly"); return; }
+        const matches = byKey.get(key) || [];
+        const parentLid = QUAL_PARENT_MAP[leagueId];
+        const advancedToParent = parentLid != null
+          ? intlResults.some(r => r.SeasonID === seasonId && r.LeagueID === parentLid)
+          : false;
+        stageMap.set(key, computeStageReached(nationalTeam.TeamID, leagueId, matches, { isCL: false, advancedToParent }));
+      });
+      setIntlStageMap(stageMap);
+    }).catch(() => {});
+  }, [intlResults, nationalTeam]);
 
 
   useEffect(() => {
@@ -380,6 +436,39 @@ export default function NationPage() {
     </div>
   );
 
+  type IntlRecord = { PlayerID: number | null; PlayerName: string; Position: string; totalGP: number; totalGoals: number; totalGSC: number; totalSaves: number };
+  const IntlRecordTable = ({ title, data, statKey, statLabel }: { title: string; data: IntlRecord[]; statKey: keyof IntlRecord; statLabel: string }) => (
+    <div className="border border-border rounded overflow-hidden">
+      <div className="bg-table-header px-3 py-2">
+        <h4 className="font-display text-sm font-bold text-table-header-foreground">{title}</h4>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm font-sans">
+          <thead>
+            <tr className="bg-secondary">
+              <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">#</th>
+              <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Player</th>
+              <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pos</th>
+              <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">{statLabel}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.map((r, i) => (
+              <tr key={r.PlayerID ?? r.PlayerName} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
+                <td className="px-3 py-1.5 font-mono text-muted-foreground">{i + 1}</td>
+                <td className="px-3 py-1.5 font-medium text-accent hover:underline">
+                  {r.PlayerID ? <Link to={`/player/${r.PlayerID}`}>{r.PlayerName}</Link> : r.PlayerName}
+                </td>
+                <td className="px-3 py-1.5 text-muted-foreground text-xs">{r.Position}</td>
+                <td className="px-3 py-1.5 text-right font-mono font-bold">{r[statKey] as number}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+
   // Compute W-L record for national team
   const natTeamRecord = nationalTeam ? (() => {
     let w = 0, l = 0, d = 0;
@@ -395,14 +484,14 @@ export default function NationPage() {
   // Season-by-season register: one row per (season, competition) the national team played in.
   const natRegisterRows: NatRegisterRow[] = (() => {
     if (!nationalTeam) return [];
-    const map = new Map<string, NatRegisterRow & { lastWeek: number; lastWon: boolean; lastIsFinal: boolean }>();
+    const map = new Map<string, NatRegisterRow>();
     intlResults.forEach(r => {
       if (!r.SeasonID || !r.LeagueID) return;
       const key = `${r.SeasonID}|${r.LeagueID}`;
       if (!map.has(key)) {
         map.set(key, {
           SeasonID: r.SeasonID, LeagueID: r.LeagueID, LeagueName: leagueMap.get(r.LeagueID) || `League ${r.LeagueID}`,
-          gp: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gsc: 0, stage: "", lastWeek: -1, lastWon: false, lastIsFinal: false,
+          gp: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0, gsc: 0, stage: "",
         });
       }
       const row = map.get(key)!;
@@ -411,24 +500,10 @@ export default function NationPage() {
       const os = isHome ? (r.AwayTeamScore ?? 0) : (r.HomeTeamScore ?? 0);
       row.gp++; row.gf += ts; row.ga += os;
       if (ts > os) row.w++; else if (ts < os) row.l++; else row.d++;
-
-      const week = r.WeekID || 0;
-      let isFinalMatch = false;
-      if (week === 4 && r.LeagueID && r.SeasonID) {
-        const winners = semiWinnersMap.get(`${r.SeasonID}|${r.LeagueID}`);
-        if (winners && r.HomeTeamID && r.AwayTeamID) isFinalMatch = winners.has(r.HomeTeamID) && winners.has(r.AwayTeamID);
-      }
-      if (week >= row.lastWeek) {
-        row.lastWeek = week; row.lastWon = ts > os; row.lastIsFinal = isFinalMatch;
-      }
     });
     const rows = [...map.values()];
     rows.forEach(row => {
-      if ([20, 22, 24, 26, 28].includes(row.LeagueID) && row.lastWeek === 4 && row.lastIsFinal) {
-        row.stage = row.lastWon ? "Champions" : "Runners-up";
-      } else {
-        row.stage = roundLabel(row.LeagueID, row.lastWeek, row.lastIsFinal) || "—";
-      }
+      row.stage = intlStageMap.get(`${row.SeasonID}|${row.LeagueID}`) || "—";
     });
     rows.sort((a, b) => a.SeasonID - b.SeasonID || a.LeagueID - b.LeagueID);
     return rows;
@@ -450,8 +525,77 @@ export default function NationPage() {
     if (ts > os) rivalRecord.w++; else if (ts < os) rivalRecord.l++; else rivalRecord.d++;
   });
 
+  // All-time head-to-head record vs every opponent the national team has faced —
+  // mirrors the "All-Time Record vs. Every Opponent" table on club team pages.
+  const allOpponentsH2H = (() => {
+    if (!nationalTeam) return [];
+    type H2H = { oppId: number; gp: number; w: number; d: number; l: number; gf: number; ga: number };
+    const map = new Map<number, H2H>();
+    intlResults.forEach(r => {
+      if (r.HomeTeamScore === null || r.AwayTeamScore === null) return;
+      const isHome = r.HomeTeamID === nationalTeam.TeamID;
+      const isAway = r.AwayTeamID === nationalTeam.TeamID;
+      if (!isHome && !isAway) return;
+      const oppId = isHome ? r.AwayTeamID : r.HomeTeamID;
+      if (!oppId) return;
+      const ts = isHome ? r.HomeTeamScore : r.AwayTeamScore;
+      const os = isHome ? r.AwayTeamScore : r.HomeTeamScore;
+      const cur = map.get(oppId) || { oppId, gp: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0 };
+      cur.gp++; cur.gf += ts; cur.ga += os;
+      if (ts > os) cur.w++; else if (ts < os) cur.l++; else cur.d++;
+      map.set(oppId, cur);
+    });
+    return [...map.values()]
+      .map(r => ({ ...r, name: teamMap.get(r.oppId) || `Team ${r.oppId}`, winPct: r.gp ? (r.w + r.d * 0.5) / r.gp : 0 }))
+      .sort((a, b) => b.gp - a.gp || b.winPct - a.winPct);
+  })();
+  const allOpponentsTotals = allOpponentsH2H.reduce((acc, r) => ({
+    gp: acc.gp + r.gp, w: acc.w + r.w, d: acc.d + r.d, l: acc.l + r.l, gf: acc.gf + r.gf, ga: acc.ga + r.ga,
+  }), { gp: 0, w: 0, d: 0, l: 0, gf: 0, ga: 0 });
+
   const natRosterSeasons = [...new Set(natSeasonStats.map(s => s.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number)) as number[];
-  const natRosterRows = natSeasonStats.filter(s => s.SeasonID === natRosterSeasonId);
+
+  // player_season_stats has one row per (player, season, competition) — a player who
+  // featured in e.g. both a qualifier and the main tournament in the same season would
+  // otherwise show up twice. Aggregate to one row per player per season.
+  const natRosterRows = (() => {
+    const bySeason = natSeasonStats.filter(s => s.SeasonID === natRosterSeasonId);
+    const byPlayer = new Map<number | string, NatStatLine & { key: number | string }>();
+    bySeason.forEach(s => {
+      const key = s.PlayerID ?? s.PlayerName ?? Math.random();
+      if (!byPlayer.has(key)) {
+        byPlayer.set(key, { ...s, GamesPlayed: 0, Goals: 0, GoldenSnitchCatches: 0, KeeperSaves: 0, key });
+      }
+      const row = byPlayer.get(key)!;
+      row.GamesPlayed = (row.GamesPlayed || 0) + (s.GamesPlayed || 0);
+      row.Goals = (row.Goals || 0) + (s.Goals || 0);
+      row.GoldenSnitchCatches = (row.GoldenSnitchCatches || 0) + (s.GoldenSnitchCatches || 0);
+      row.KeeperSaves = (row.KeeperSaves || 0) + (s.KeeperSaves || 0);
+    });
+    return [...byPlayer.values()];
+  })();
+
+  // International career totals — appearances/goals/GSC/saves earned while playing
+  // FOR THE NATIONAL TEAM specifically, aggregated across every season on record.
+  const intlCareerRecords = (() => {
+    const byPlayer = new Map<number | string, { PlayerID: number | null; PlayerName: string; Position: string; totalGP: number; totalGoals: number; totalGSC: number; totalSaves: number }>();
+    natSeasonStats.forEach(s => {
+      const key = s.PlayerID ?? s.PlayerName ?? Math.random();
+      if (!byPlayer.has(key)) {
+        byPlayer.set(key, { PlayerID: s.PlayerID, PlayerName: s.PlayerName || "", Position: s.Position || "", totalGP: 0, totalGoals: 0, totalGSC: 0, totalSaves: 0 });
+      }
+      const rec = byPlayer.get(key)!;
+      rec.totalGP += s.GamesPlayed || 0;
+      rec.totalGoals += s.Goals || 0;
+      rec.totalGSC += s.GoldenSnitchCatches || 0;
+      rec.totalSaves += s.KeeperSaves || 0;
+    });
+    return [...byPlayer.values()];
+  })();
+  const topByIntlGP = [...intlCareerRecords].sort((a, b) => b.totalGP - a.totalGP).slice(0, 15);
+  const topByIntlGoals = [...intlCareerRecords].filter(r => r.totalGoals > 0).sort((a, b) => b.totalGoals - a.totalGoals).slice(0, 15);
+  const topByIntlGSC = [...intlCareerRecords].filter(r => r.totalGSC > 0).sort((a, b) => b.totalGSC - a.totalGSC).slice(0, 15);
+  const topByIntlSaves = [...intlCareerRecords].filter(r => r.totalSaves > 0).sort((a, b) => b.totalSaves - a.totalSaves).slice(0, 15);
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -489,7 +633,7 @@ export default function NationPage() {
 
         {/* Tabs */}
         <div className="flex gap-2 mb-4 border-b border-border overflow-x-auto">
-          {(["roster", "register", "results", "h2h", "abroad", "records"] as const).map(tab => (
+          {(["roster", "register", "results", "h2h", "intlRecords", "abroad", "records"] as const).map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
@@ -497,7 +641,7 @@ export default function NationPage() {
                 activeTab === tab ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"
               }`}
             >
-              {tab === "roster" ? "National Team Roster" : tab === "register" ? "Season Register" : tab === "abroad" ? "Players Abroad" : tab === "records" ? "Club Career Leaders" : tab === "h2h" ? "Head-to-Head" : "Match History"}
+              {tab === "roster" ? "National Team Roster" : tab === "register" ? "Season Register" : tab === "abroad" ? "Players Abroad" : tab === "records" ? "Club Career Leaders" : tab === "intlRecords" ? "International Leaders" : tab === "h2h" ? "Head-to-Head" : "Match History"}
             </button>
           ))}
         </div>
@@ -596,7 +740,7 @@ export default function NationPage() {
                         })()}
                       </td>
                       <td className="px-3 py-1.5 text-xs"><Link to={`/league/${row.LeagueID}`} className="text-accent hover:underline">{row.LeagueName}</Link></td>
-                      <td className={`px-3 py-1.5 text-xs ${row.stage === "Champions" ? "font-bold text-accent" : "text-muted-foreground"}`}>{row.stage}</td>
+                      <td className={`px-3 py-1.5 text-xs ${row.stage.includes("Champion") ? "font-bold text-yellow-600 dark:text-yellow-400" : row.stage === "Runner-Up" ? "text-slate-600 dark:text-slate-300" : "text-muted-foreground"}`}>{row.stage}</td>
                       <td className="px-3 py-1.5 text-right font-mono">{row.gp}</td>
                       <td className="px-3 py-1.5 text-right font-mono">{row.w}</td>
                       <td className="px-3 py-1.5 text-right font-mono">{row.d}</td>
@@ -616,7 +760,66 @@ export default function NationPage() {
 
         {activeTab === "h2h" && (
           <div className="space-y-4">
-            {nationalTeam?.Rival ? (
+            {allOpponentsH2H.length > 0 ? (
+              <div className="border border-border rounded overflow-hidden">
+                <div className="bg-table-header px-3 py-2">
+                  <h3 className="font-display text-sm font-bold text-table-header-foreground">All-Time Record vs. Every Opponent</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm font-sans">
+                    <thead>
+                      <tr className="bg-secondary">
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Opponent</th>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GP</th>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">W</th>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">D</th>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">L</th>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Win%</th>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GF</th>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GA</th>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">GD</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {allOpponentsH2H.map((r, i) => (
+                        <tr key={r.oppId} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
+                          <td className="px-3 py-1.5">
+                            <Link to={`/team/${encodeURIComponent(r.name)}`} className="text-accent hover:underline font-medium">{r.name}</Link>
+                          </td>
+                          <td className="px-3 py-1.5 text-right font-mono">{r.gp}</td>
+                          <td className="px-3 py-1.5 text-right font-mono text-green-600 dark:text-green-400">{r.w}</td>
+                          <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{r.d}</td>
+                          <td className="px-3 py-1.5 text-right font-mono text-destructive">{r.l}</td>
+                          <td className="px-3 py-1.5 text-right font-mono">{(r.winPct * 100).toFixed(1)}%</td>
+                          <td className="px-3 py-1.5 text-right font-mono">{r.gf}</td>
+                          <td className="px-3 py-1.5 text-right font-mono">{r.ga}</td>
+                          <td className={`px-3 py-1.5 text-right font-mono ${r.gf - r.ga > 0 ? "text-green-600 dark:text-green-400" : r.gf - r.ga < 0 ? "text-destructive" : ""}`}>
+                            {r.gf - r.ga > 0 ? "+" : ""}{r.gf - r.ga}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="border-t-2 border-border bg-secondary/60 font-semibold">
+                        <td className="px-3 py-1.5">Total ({allOpponentsH2H.length} opponents)</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{allOpponentsTotals.gp}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{allOpponentsTotals.w}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{allOpponentsTotals.d}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{allOpponentsTotals.l}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{allOpponentsTotals.gp ? (((allOpponentsTotals.w + allOpponentsTotals.d * 0.5) / allOpponentsTotals.gp) * 100).toFixed(1) : "0.0"}%</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{allOpponentsTotals.gf}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{allOpponentsTotals.ga}</td>
+                        <td className="px-3 py-1.5 text-right font-mono">{allOpponentsTotals.gf - allOpponentsTotals.ga > 0 ? "+" : ""}{allOpponentsTotals.gf - allOpponentsTotals.ga}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            ) : (
+              <p className="text-muted-foreground font-sans text-sm italic">No completed international matches yet.</p>
+            )}
+
+            {nationalTeam?.Rival && rivalMatches.length > 0 && (
               <div className="border border-border rounded overflow-hidden">
                 <div className="bg-table-header px-3 py-2 flex items-center justify-between">
                   <h3 className="font-display text-sm font-bold text-table-header-foreground">
@@ -655,8 +858,6 @@ export default function NationPage() {
                   </table>
                 </div>
               </div>
-            ) : (
-              <p className="text-muted-foreground font-sans text-sm italic">No rivalry on record for this national team.</p>
             )}
           </div>
         )}
@@ -714,6 +915,24 @@ export default function NationPage() {
             {topByGoals.length > 0 && <RecordTable title="Most Goals" data={topByGoals} statKey="totalGoals" statLabel="Goals" />}
             {topByGSC.length > 0 && <RecordTable title="Most Golden Snitch Catches" data={topByGSC} statKey="totalGSC" statLabel="GSC" />}
             {topBySaves.length > 0 && <RecordTable title="Most Keeper Saves" data={topBySaves} statKey="totalSaves" statLabel="Saves" />}
+          </div>
+        )}
+
+        {activeTab === "intlRecords" && (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground font-sans">
+              Career totals earned while playing for the national team{nationalTeam ? ` (${nationalTeam.FullName})` : ""} only.
+            </p>
+            {intlCareerRecords.length > 0 ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <IntlRecordTable title="Most Caps" data={topByIntlGP} statKey="totalGP" statLabel="Caps" />
+                {topByIntlGoals.length > 0 && <IntlRecordTable title="Most Goals" data={topByIntlGoals} statKey="totalGoals" statLabel="Goals" />}
+                {topByIntlGSC.length > 0 && <IntlRecordTable title="Most Golden Snitch Catches" data={topByIntlGSC} statKey="totalGSC" statLabel="GSC" />}
+                {topByIntlSaves.length > 0 && <IntlRecordTable title="Most Keeper Saves" data={topByIntlSaves} statKey="totalSaves" statLabel="Saves" />}
+              </div>
+            ) : (
+              <p className="text-muted-foreground font-sans text-sm italic">No international appearance data available.</p>
+            )}
           </div>
         )}
 
