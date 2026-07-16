@@ -41,7 +41,7 @@ export default function SearchPage() {
       fetchAllRows<LeagueRow>("leagues", { select: "LeagueID, LeagueName, LeagueTier" }),
     ]).then(([playerData, teamData, managerData, nationData, leagueData]) => {
       setPlayers(playerData);
-      setTeams(teamData.filter(t => !t.nationid)); // club teams only — nations get their own results section
+      setTeams(teamData.filter(t => !t.nationid && t.TeamID <= 999)); // club teams only — nations get their own results section
       setManagers(managerData);
       // Dedupe nations (historical name changes can produce repeat NationIDs)
       const seenNations = new Map<number, NationRow>();

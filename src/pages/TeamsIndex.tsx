@@ -42,8 +42,10 @@ export default function TeamsIndex() {
       fetchAllRows<Team>("teams", { select: "TeamID, FullName, Nickname, City, Country, LeagueID, logo_url, nationid" }),
       fetchAllRows<League>("leagues", { select: "LeagueID, LeagueName, LeagueTier" }),
     ]).then(([teamData, leagueData]) => {
-      // Club teams only — national teams (which have a nationid) get their own Nations pages.
-      setTeams(teamData.filter(t => !t.nationid));
+      // Club teams only — national teams get their own Nations pages. The `nationid`
+      // column isn't always populated, so also exclude by the TeamID>999 convention
+      // (TeamID = NationID + 1000) that TeamPage itself uses to redirect to /nation/:id.
+      setTeams(teamData.filter(t => !t.nationid && t.TeamID <= 999));
       setLeagues(leagueData);
       setLoading(false);
     }).catch(err => {

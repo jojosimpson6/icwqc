@@ -10,6 +10,7 @@ interface NewsItem {
   body: string;
   published_date: string;
   author: string | null;
+  pinned: boolean;
 }
 
 interface SiteContent {
@@ -17,6 +18,59 @@ interface SiteContent {
   key: string;
   title: string | null;
   content: string;
+}
+
+interface GlossaryTerm {
+  term: string;
+  definition: string;
+}
+
+function parseGlossaryTerms(content: string): GlossaryTerm[] {
+  try {
+    const parsed = JSON.parse(content);
+    if (Array.isArray(parsed)) return parsed.filter((t) => t && typeof t.term === "string");
+  } catch { /* not valid JSON yet — treat as empty */ }
+  return [];
+}
+
+function GlossaryEditor({ value, onChange }: { value: string; onChange: (next: string) => void }) {
+  const terms = parseGlossaryTerms(value);
+  const inputClass = "w-full border border-border rounded px-3 py-2 text-sm bg-background text-foreground font-sans focus:outline-none focus:ring-2 focus:ring-primary";
+  const btnSecondary = "border border-border text-foreground font-sans font-semibold text-xs px-3 py-1.5 rounded hover:bg-secondary transition-colors";
+  const btnDanger = "border border-destructive text-destructive font-sans font-semibold text-xs px-2 py-1 rounded hover:bg-destructive/10 transition-colors";
+
+  function update(next: GlossaryTerm[]) {
+    onChange(JSON.stringify(next));
+  }
+
+  return (
+    <div className="space-y-3">
+      <label className="block text-xs font-semibold uppercase tracking-wide text-muted-foreground font-sans">Terms ({terms.length})</label>
+      <div className="space-y-2 max-h-96 overflow-y-auto pr-1">
+        {terms.map((t, i) => (
+          <div key={i} className="border border-border rounded p-2 space-y-1.5">
+            <div className="flex gap-2 items-center">
+              <input
+                type="text"
+                value={t.term}
+                onChange={e => update(terms.map((x, j) => j === i ? { ...x, term: e.target.value } : x))}
+                placeholder="Term (e.g. GSC)"
+                className={`${inputClass} font-semibold`}
+              />
+              <button onClick={() => update(terms.filter((_, j) => j !== i))} className={btnDanger}>Remove</button>
+            </div>
+            <textarea
+              value={t.definition}
+              onChange={e => update(terms.map((x, j) => j === i ? { ...x, definition: e.target.value } : x))}
+              placeholder="Definition..."
+              className={`${inputClass} h-16 resize-none`}
+            />
+          </div>
+        ))}
+      </div>
+      <button onClick={() => update([...terms, { term: "", definition: "" }])} className={btnSecondary}>+ Add Term</button>
+    </div>
+  );
 }
 
 export default function AdminPanel() {
@@ -28,7 +82,7 @@ export default function AdminPanel() {
   // News state
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
   const [editingNews, setEditingNews] = useState<NewsItem | null>(null);
-  const [newNews, setNewNews] = useState({ title: "", body: "", published_date: new Date().toISOString().split("T")[0], author: "" });
+  const [newNews, setNewNews] = useState({ title: "", body: "", published_date: new Date().toISOString().split("T")[0], author: "", pinned: false });
   const [newsMsg, setNewsMsg] = useState("");
 
   // Site content state
@@ -62,7 +116,7 @@ export default function AdminPanel() {
   }, [navigate]);
 
   async function fetchNews() {
-    const { data } = await supabase.from("news_items").select("*").order("published_date", { ascending: false });
+    const { data } = await supabase.from("news_items").select("*").order("pinned", { ascending: false }).order("published_date", { ascending: false });
     if (data) setNewsItems(data as NewsItem[]);
   }
 
@@ -83,9 +137,10 @@ export default function AdminPanel() {
       body: newNews.body,
       published_date: newNews.published_date,
       author: newNews.author || null,
+      pinned: newNews.pinned,
     });
     if (error) { setNewsMsg("Error: " + error.message); return; }
-    setNewNews({ title: "", body: "", published_date: new Date().toISOString().split("T")[0], author: "" });
+    setNewNews({ title: "", body: "", published_date: new Date().toISOString().split("T")[0], author: "", pinned: false });
     setNewsMsg("News item added!");
     fetchNews();
     setTimeout(() => setNewsMsg(""), 3000);
@@ -98,6 +153,7 @@ export default function AdminPanel() {
       body: editingNews.body,
       published_date: editingNews.published_date,
       author: editingNews.author || null,
+      pinned: editingNews.pinned,
     }).eq("id", editingNews.id);
     if (error) { setNewsMsg("Error: " + error.message); return; }
     setEditingNews(null);
@@ -109,6 +165,11 @@ export default function AdminPanel() {
   async function deleteNews(id: string) {
     if (!confirm("Delete this news item?")) return;
     await supabase.from("news_items").delete().eq("id", id);
+    fetchNews();
+  }
+
+  async function togglePin(item: NewsItem) {
+    await supabase.from("news_items").update({ pinned: !item.pinned }).eq("id", item.id);
     fetchNews();
   }
 
@@ -208,6 +269,10 @@ export default function AdminPanel() {
                   <label className={labelClass}>Body</label>
                   <textarea value={newNews.body} onChange={e => setNewNews(n => ({ ...n, body: e.target.value }))} className={`${inputClass} h-24 resize-none`} placeholder="Full announcement text..." />
                 </div>
+                <label className="flex items-center gap-2 text-sm font-sans text-foreground cursor-pointer">
+                  <input type="checkbox" checked={newNews.pinned} onChange={e => setNewNews(n => ({ ...n, pinned: e.target.checked }))} className="accent-accent" />
+                  📌 Pin to top of front page
+                </label>
                 <div className="flex items-center gap-3">
                   <button onClick={saveNews} className={btnPrimary}>Publish</button>
                   {newsMsg && <span className="text-xs text-muted-foreground font-sans">{newsMsg}</span>}
@@ -229,6 +294,10 @@ export default function AdminPanel() {
                         <input type="text" value={editingNews.title} onChange={e => setEditingNews(n => n ? { ...n, title: e.target.value } : n)} className={inputClass} placeholder="Headline..." />
                         <input type="text" value={editingNews.author || ""} onChange={e => setEditingNews(n => n ? { ...n, author: e.target.value } : n)} className={inputClass} placeholder="Byline (optional)..." />
                         <textarea value={editingNews.body} onChange={e => setEditingNews(n => n ? { ...n, body: e.target.value } : n)} className={`${inputClass} h-20 resize-none`} />
+                        <label className="flex items-center gap-2 text-sm font-sans text-foreground cursor-pointer">
+                          <input type="checkbox" checked={editingNews.pinned} onChange={e => setEditingNews(n => n ? { ...n, pinned: e.target.checked } : n)} className="accent-accent" />
+                          📌 Pin to top of front page
+                        </label>
                         <div className="flex gap-2">
                           <button onClick={updateNews} className={btnPrimary}>Save</button>
                           <button onClick={() => setEditingNews(null)} className={btnSecondary}>Cancel</button>
@@ -239,12 +308,14 @@ export default function AdminPanel() {
                       <div className="flex items-start gap-3">
                         <div className="flex-1">
                           <p className="text-xs text-muted-foreground font-sans mb-0.5">
+                            {item.pinned && <span className="text-accent font-semibold mr-1">📌 Pinned</span>}
                             {item.published_date}{item.author ? ` · By ${item.author}` : ""}
                           </p>
                           <p className="font-sans font-semibold text-sm text-foreground">{item.title}</p>
                           <p className="text-xs text-muted-foreground font-sans mt-1 line-clamp-2">{item.body}</p>
                         </div>
                         <div className="flex gap-2 shrink-0">
+                          <button onClick={() => togglePin(item)} className={btnSecondary}>{item.pinned ? "Unpin" : "Pin"}</button>
                           <button onClick={() => setEditingNews(item)} className={btnSecondary}>Edit</button>
                           <button onClick={() => deleteNews(item.id)} className={btnDanger}>Delete</button>
                         </div>
@@ -278,15 +349,24 @@ export default function AdminPanel() {
                         <label className={labelClass}>Title</label>
                         <input type="text" value={editingContent.title || ""} onChange={e => setEditingContent(n => n ? { ...n, title: e.target.value } : n)} className={inputClass} />
                       </div>
-                      <div>
-                        <label className={labelClass}>Content</label>
-                        <textarea value={editingContent.content} onChange={e => setEditingContent(n => n ? { ...n, content: e.target.value } : n)} className={`${inputClass} h-32 resize-none`} />
-                      </div>
+                      {sc.key === "glossary" ? (
+                        <GlossaryEditor
+                          value={editingContent.content}
+                          onChange={next => setEditingContent(n => n ? { ...n, content: next } : n)}
+                        />
+                      ) : (
+                        <div>
+                          <label className={labelClass}>Content</label>
+                          <textarea value={editingContent.content} onChange={e => setEditingContent(n => n ? { ...n, content: e.target.value } : n)} className={`${inputClass} h-32 resize-none`} />
+                        </div>
+                      )}
                       <div className="flex gap-2">
                         <button onClick={updateContent} className={btnPrimary}>Save</button>
                         <button onClick={() => setEditingContent(null)} className={btnSecondary}>Cancel</button>
                       </div>
                     </div>
+                  ) : sc.key === "glossary" ? (
+                    <p className="text-sm text-muted-foreground font-sans">{parseGlossaryTerms(sc.content).length} terms defined.</p>
                   ) : (
                     <p className="text-sm text-muted-foreground font-sans whitespace-pre-wrap">{sc.content}</p>
                   )}

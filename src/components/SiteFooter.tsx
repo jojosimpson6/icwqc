@@ -15,7 +15,9 @@ export function SiteFooter() {
             <h4 className="font-display font-bold text-base mb-3">Quick Links</h4>
             <ul className="space-y-1.5 opacity-70">
               <li><Link to="/players" className="hover:opacity-100">Players</Link></li>
+              <li><Link to="/teams" className="hover:opacity-100">Teams</Link></li>
               <li><Link to="/leagues" className="hover:opacity-100">Leagues</Link></li>
+              <li><Link to="/glossary" className="hover:opacity-100">Glossary</Link></li>
             </ul>
           </div>
           <div>
@@ -23,6 +25,7 @@ export function SiteFooter() {
             <p className="opacity-70 leading-relaxed">
               QuidReference tracks statistics across all professional Quidditch leagues worldwide.
             </p>
+            <Link to="/about" className="inline-block mt-2 opacity-70 hover:opacity-100 underline">Read more →</Link>
           </div>
         </div>
         <div className="border-t border-primary-foreground/20 mt-6 pt-4 text-xs opacity-50 text-center font-sans flex items-center justify-center gap-4">

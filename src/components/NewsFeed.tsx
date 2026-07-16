@@ -8,6 +8,7 @@ interface NewsItem {
   body: string;
   published_date: string;
   author?: string | null;
+  pinned?: boolean;
 }
 
 function formatNewsDate(dateStr: string): string {
@@ -19,12 +20,15 @@ export function NewsFeed({ compact = false }: { compact?: boolean }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.from("news_items").select("*").order("published_date", { ascending: false }).limit(compact ? 4 : 10).then(({ data }) => {
-      if (data && data.length > 0) {
-        setNewsItems(data as NewsItem[]);
-      }
-      setLoading(false);
-    });
+    supabase.from("news_items").select("*")
+      .order("pinned", { ascending: false })
+      .order("published_date", { ascending: false })
+      .limit(compact ? 4 : 10).then(({ data }) => {
+        if (data && data.length > 0) {
+          setNewsItems(data as NewsItem[]);
+        }
+        setLoading(false);
+      });
   }, [compact]);
 
   const displayItems = newsItems.length > 0 ? newsItems : [
@@ -48,6 +52,7 @@ export function NewsFeed({ compact = false }: { compact?: boolean }) {
             displayItems.slice(0, 4).map((item) => (
               <Link key={item.id} to={`/news/${item.id}`} className="block px-3 py-3 hover:bg-highlight/20 transition-colors">
                 <p className="text-xs text-muted-foreground font-sans mb-1">
+                  {item.pinned && <span className="text-accent font-semibold mr-1">📌 Pinned</span>}
                   {formatNewsDate(item.published_date)}{item.author ? ` · By ${item.author}` : ""}
                 </p>
                 <p className="font-sans font-semibold text-sm text-accent hover:underline mb-1">{item.title}</p>
@@ -70,8 +75,9 @@ export function NewsFeed({ compact = false }: { compact?: boolean }) {
           <div className="px-3 py-3 text-xs text-muted-foreground font-sans italic">Loading...</div>
         ) : (
           displayItems.map((item, i) => (
-            <Link key={item.id} to={`/news/${item.id}`} className="block px-4 py-4 hover:bg-highlight/20 transition-colors">
+            <Link key={item.id} to={`/news/${item.id}`} className={`block px-4 py-4 hover:bg-highlight/20 transition-colors ${item.pinned ? "bg-highlight/10" : ""}`}>
               <p className="text-xs text-muted-foreground font-sans mb-1">
+                {item.pinned && <span className="text-accent font-semibold mr-1">📌 Pinned</span>}
                 {formatNewsDate(item.published_date)}{item.author ? ` · By ${item.author}` : ""}
               </p>
               <p className="font-display font-bold text-lg text-foreground mb-2 hover:text-accent transition-colors">{item.title}</p>

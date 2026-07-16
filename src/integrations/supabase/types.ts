@@ -181,28 +181,34 @@ export type Database = {
       }
       news_items: {
         Row: {
+          author: string | null
           body: string
           created_at: string
           created_by: string | null
           id: string
+          pinned: boolean
           published_date: string
           title: string
           updated_at: string
         }
         Insert: {
+          author?: string | null
           body: string
           created_at?: string
           created_by?: string | null
           id?: string
+          pinned?: boolean
           published_date?: string
           title: string
           updated_at?: string
         }
         Update: {
+          author?: string | null
           body?: string
           created_at?: string
           created_by?: string | null
           id?: string
+          pinned?: boolean
           published_date?: string
           title?: string
           updated_at?: string

@@ -10,6 +10,8 @@ import LeaguePage from "./pages/LeaguePage";
 import TeamPage from "./pages/TeamPage";
 import TeamsIndex from "./pages/TeamsIndex";
 import SearchPage from "./pages/SearchPage";
+import AboutPage from "./pages/AboutPage";
+import GlossaryPage from "./pages/GlossaryPage";
 import PlayersIndex from "./pages/PlayersIndex";
 import LeaguesIndex from "./pages/LeaguesIndex";
 import AdminLogin from "./pages/AdminLogin";
@@ -47,6 +49,8 @@ const App = () => (
           <Route path="/compare" element={<ComparePage />} />
           <Route path="/leagues" element={<LeaguesIndex />} />
           <Route path="/search" element={<SearchPage />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="/glossary" element={<GlossaryPage />} />
           <Route path="/teams" element={<TeamsIndex />} />
           <Route path="/team/:name" element={<TeamPage />} />
           <Route path="/match/:id" element={<MatchPage />} />

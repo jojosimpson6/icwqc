@@ -359,22 +359,24 @@ export default function LeaguePage() {
       });
       const hWin = played && hAgg > aAgg, aWin = played && aAgg > hAgg;
       const primary = legs[0];
+      const legsTitle = legs.length > 1 ? `Legs: ${legLine.join(" · ")}` : undefined;
       return (
-        <Link to={primary.MatchID ? `/match/${primary.MatchID}` : "#"} className="block group">
-          <div className="border border-border rounded bg-background overflow-hidden shadow-sm group-hover:border-accent transition-colors">
-            <div className={`flex items-center justify-between px-2.5 py-1.5 ${hWin ? "bg-secondary/50" : ""}`}>
+        <Link to={primary.MatchID ? `/match/${primary.MatchID}` : "#"} className="block group" title={legsTitle}>
+          {/* Fixed height regardless of leg count — connector lines below assume every
+              tie box occupies exactly the same vertical space, so this must not vary. */}
+          <div className="border border-border rounded bg-background overflow-hidden shadow-sm group-hover:border-accent transition-colors h-[60px]">
+            <div className={`flex items-center justify-between px-2.5 h-[30px] ${hWin ? "bg-secondary/50" : ""}`}>
               <span className={`truncate text-xs ${hWin ? "font-bold text-foreground" : "text-foreground/80"}`}>{hName}</span>
-              <span className={`font-mono text-xs ml-2 ${hWin ? "font-bold" : "text-muted-foreground"}`}>{played ? hAgg : "—"}</span>
+              <span className={`font-mono text-xs ml-2 shrink-0 ${hWin ? "font-bold" : "text-muted-foreground"}`}>
+                {played ? hAgg : "—"}{legs.length > 1 && <sup className="ml-0.5 opacity-60">agg</sup>}
+              </span>
             </div>
-            <div className={`flex items-center justify-between px-2.5 py-1.5 border-t border-border/60 ${aWin ? "bg-secondary/50" : ""}`}>
+            <div className={`flex items-center justify-between px-2.5 h-[30px] border-t border-border/60 ${aWin ? "bg-secondary/50" : ""}`}>
               <span className={`truncate text-xs ${aWin ? "font-bold text-foreground" : "text-foreground/80"}`}>{aName}</span>
-              <span className={`font-mono text-xs ml-2 ${aWin ? "font-bold" : "text-muted-foreground"}`}>{played ? aAgg : "—"}</span>
+              <span className={`font-mono text-xs ml-2 shrink-0 ${aWin ? "font-bold" : "text-muted-foreground"}`}>
+                {played ? aAgg : "—"}{legs.length > 1 && <sup className="ml-0.5 opacity-60">agg</sup>}
+              </span>
             </div>
-            {legs.length > 1 && (
-              <div className="px-2.5 py-1 text-[10px] font-mono text-muted-foreground border-t border-border/60 bg-secondary/20 text-center">
-                Legs: {legLine.join(" · ")}
-              </div>
-            )}
           </div>
         </Link>
       );

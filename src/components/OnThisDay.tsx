@@ -88,6 +88,19 @@ export function OnThisDay() {
           });
 
           const relevant = results.filter(r => keys.has(`${r.SeasonID}|${r.LeagueID}|${r.WeekID}`) && r.HomeTeamScore != null && r.AwayTeamScore != null);
+
+          // "Significant" ranking so this scales even if a hundred matches happen to
+          // share today's calendar date across many seasons/leagues: flagship
+          // competitions (international > cup/CL > domestic) come first, then the
+          // closest, most dramatic finishes within that tier. A handful of blowout
+          // domestic fixtures should never crowd out an actual cup final.
+          const leagueWeight = (leagueId: number | null) => {
+            if (leagueId == null) return 0;
+            if (leagueId >= 20) return 3; // international / national-team competitions
+            if (leagueId >= 15) return 2; // cup competitions & Champions League
+            return 1; // domestic league
+          };
+
           matchList = relevant
             .map(match => ({
               match,
@@ -96,8 +109,13 @@ export function OnThisDay() {
               leagueName: match.LeagueID ? (leagueMap.get(match.LeagueID) || "") : "",
               yearsAgo: thisYear - (yearByKey.get(`${match.SeasonID}|${match.LeagueID}|${match.WeekID}`) || thisYear),
             }))
-            // Prefer more recent, higher-scoring (more "notable") matches; cap the list.
-            .sort((a, b) => (b.match.HomeTeamScore! + b.match.AwayTeamScore!) - (a.match.HomeTeamScore! + a.match.AwayTeamScore!))
+            .sort((a, b) => {
+              const wa = leagueWeight(a.match.LeagueID), wb = leagueWeight(b.match.LeagueID);
+              if (wa !== wb) return wb - wa;
+              const marginA = Math.abs(a.match.HomeTeamScore! - a.match.AwayTeamScore!);
+              const marginB = Math.abs(b.match.HomeTeamScore! - b.match.AwayTeamScore!);
+              return marginA - marginB; // closer finish = more exciting
+            })
             .slice(0, 4);
         }
 
@@ -117,8 +135,8 @@ export function OnThisDay() {
           const nation = m.NationalityID ? nationMap.get(m.NationalityID) : undefined;
           bdays.push({ id: m.ManagerID, name: `${m.FirstName} ${m.LastName}`, birthYear: d.getFullYear(), kind: "manager", nationFlag: nation ? getNationFlag(nation) : undefined });
         });
-        // Shuffle lightly so the same few names don't always lead, then cap.
-        bdays.sort(() => Math.random() - 0.5);
+        // Oldest to youngest — a stable, meaningful order rather than a random shuffle.
+        bdays.sort((a, b) => a.birthYear - b.birthYear);
 
         setMatches(matchList);
         setBirthdays(bdays.slice(0, 5));
