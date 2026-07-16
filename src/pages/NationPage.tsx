@@ -8,6 +8,7 @@ import { getNationFlag, formatHeight, calculateAge } from "@/lib/helpers";
 import { useSortableTable } from "@/hooks/useSortableTable";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { computeStageReached, QUAL_PARENT_MAP, TournamentMatch } from "@/lib/competitionStage";
+import { ProfileSkeleton, ErrorState } from "@/components/StateMessage";
 
 interface Nation {
   NationID: number;
@@ -110,6 +111,7 @@ function roundLabel(leagueId: number | null, weekId: number | null, isFinal: boo
 export default function NationPage() {
   const { id } = useParams();
   const [nation, setNation] = useState<Nation | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [players, setPlayers] = useState<PlayerRow[]>([]);
   const [careerRecords, setCareerRecords] = useState<CareerRecord[]>([]);
   const [activeTab, setActiveTab] = useState<"roster" | "abroad" | "records" | "intlRecords" | "results" | "register" | "h2h">("roster");
@@ -368,6 +370,9 @@ export default function NationPage() {
           setCareerRecords([...recordMap.values()]);
         });
       }
+    }).catch(err => {
+      console.error("Failed to load nation:", err);
+      setLoadError(true);
     });
   }, [id]);
 
@@ -394,7 +399,19 @@ export default function NationPage() {
     return (
       <div className="min-h-screen bg-background flex flex-col pb-14 md:pb-0">
         <SiteHeader />
-        <main className="flex-1 container py-8"><p className="text-muted-foreground font-sans">Loading nation...</p></main>
+        <main className="flex-1 container py-8">
+          {loadError ? (
+            <ErrorState
+              title="We couldn't load this nation"
+              message="Something went wrong while fetching this nation's profile."
+              onRetry={() => window.location.reload()}
+              backTo="/nations"
+              backLabel="Back to nations"
+            />
+          ) : (
+            <ProfileSkeleton />
+          )}
+        </main>
         <SiteFooter />
       </div>
     );
@@ -597,6 +614,10 @@ export default function NationPage() {
   const topByIntlGSC = [...intlCareerRecords].filter(r => r.totalGSC > 0).sort((a, b) => b.totalGSC - a.totalGSC).slice(0, 15);
   const topByIntlSaves = [...intlCareerRecords].filter(r => r.totalSaves > 0).sort((a, b) => b.totalSaves - a.totalSaves).slice(0, 15);
 
+  // Trophy cabinet: international titles and runners-up, derived from the season register.
+  const intlTitles = natRegisterRows.filter(r => r.stage.includes("Champion"));
+  const intlRunnerUps = natRegisterRows.filter(r => r.stage === "Runner-Up");
+
   return (
     <div className="min-h-screen bg-background flex flex-col">
       <SiteHeader />
@@ -630,6 +651,47 @@ export default function NationPage() {
             )}
           </p>
         </div>
+
+        {/* Trophy Cabinet */}
+        {(intlTitles.length > 0 || intlRunnerUps.length > 0) && (
+          <div className="border border-border rounded overflow-hidden mb-4">
+            <div className="bg-table-header px-3 py-2">
+              <h3 className="font-display text-sm font-bold text-table-header-foreground">Trophy Cabinet</h3>
+            </div>
+            <div className="bg-card p-4 space-y-3">
+              {intlTitles.length > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">International Titles ({intlTitles.length})</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {intlTitles.map((r, i) => (
+                      <span key={i} title={r.LeagueName}
+                        className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400">
+                        <span className="font-bold">🏆</span>
+                        <span>{seasonLabel(r.SeasonID)}</span>
+                        <span className="opacity-70">{r.LeagueName}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {intlRunnerUps.length > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">Runners-Up ({intlRunnerUps.length})</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {intlRunnerUps.map((r, i) => (
+                      <span key={i} title={r.LeagueName}
+                        className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300">
+                        <span className="font-bold">2nd</span>
+                        <span>{seasonLabel(r.SeasonID)}</span>
+                        <span className="opacity-70">{r.LeagueName}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex gap-2 mb-4 border-b border-border overflow-x-auto">

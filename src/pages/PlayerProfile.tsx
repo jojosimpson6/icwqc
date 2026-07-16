@@ -8,6 +8,7 @@ import { formatHeight, calculateAge, formatDate, getNationFlag } from "@/lib/hel
 import { fetchAllRows } from "@/lib/fetchAll";
 import { cachedQuery } from "@/lib/queryCache";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { ProfileSkeleton, ErrorState } from "@/components/StateMessage";
 
 interface Player {
   PlayerID: number;
@@ -159,6 +160,7 @@ type ExtBest = { shotPct: number | null; passPct: number | null; snitchPct: numb
 export default function PlayerProfile() {
   const { id } = useParams();
   const [player, setPlayer] = useState<Player | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [nation, setNation] = useState<string>("");
   const [stats, setStats] = useState<StatLine[]>([]);
   const [captainSeasons, setCaptainSeasons] = useState<Set<string>>(new Set());
@@ -191,6 +193,9 @@ export default function PlayerProfile() {
             .then(({ data: nd }) => { if (nd?.[0]) setNation(nd[0].Nation || ""); });
         }
       }
+    }).catch(err => {
+      console.error("Failed to load player:", err);
+      setLoadError(true);
     });
 
     // Captaincy history — key on TeamID+SeasonID so the badge only shows on the
@@ -611,7 +616,17 @@ export default function PlayerProfile() {
       <div className="min-h-screen bg-background flex flex-col pb-14 md:pb-0">
         <SiteHeader />
         <main className="flex-1 container py-8">
-          <p className="text-muted-foreground font-sans">Loading player...</p>
+          {loadError ? (
+            <ErrorState
+              title="We couldn't load this player"
+              message="Something went wrong while fetching this player's profile."
+              onRetry={() => window.location.reload()}
+              backTo="/players"
+              backLabel="Back to players"
+            />
+          ) : (
+            <ProfileSkeleton />
+          )}
         </main>
         <SiteFooter />
       </div>

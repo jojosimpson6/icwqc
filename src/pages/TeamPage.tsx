@@ -8,6 +8,8 @@ import { useSortableTable } from "@/hooks/useSortableTable";
 import { getContrastText, formatHeight, getNationFlag, isLightColor } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { seasonLabel, ordinal, computeStageReached, QUAL_PARENT_MAP } from "@/lib/competitionStage";
+import { ProfileSkeleton, ErrorState } from "@/components/StateMessage";
 
 interface Team {
   TeamID: number;
@@ -85,89 +87,15 @@ interface PlayerInfo {
   Handedness: string | null;
 }
 
-function seasonLabel(id: number): string {
-  return `${id - 1}–${String(id).slice(-2)}`;
-}
 
-function ordinal(n: number): string {
-  const s = ["th", "st", "nd", "rd"];
-  const v = n % 100;
-  return n + (s[(v - 20) % 10] || s[v] || s[0]);
-}
 
-// Map match count per week → round label (ordinal for cups, descriptive for CL)
-// Uses match count (not team count) so variable-draw tournaments work correctly.
-function cupRoundName(matchCount: number, isCL: boolean): string {
-  if (matchCount === 1) return isCL ? "CL Final" : "Final";
-  if (matchCount === 2) return "Semifinals";
-  if (matchCount === 4) return "Quarterfinals";
-  // For cups: use ordinal labels counting from the start of the tournament
-  // We'll assign these after building the full week list (see buildCupStageMap).
-  // This function only handles the end-of-tournament rounds.
-  return `__ordinal__${matchCount}`;
-}
 
-// Build a map of weekId → round label for a cup/CL tournament.
-// For the final/semis/quarters we use descriptive names; earlier rounds get
-// ordinal labels (1st Round, 2nd Round, …) counted from the start.
-function buildCupStageMap(
-  knockoutMatches: { homeId: number; awayId: number; homeScore: number; awayScore: number; weekId: number }[],
-  isCL: boolean
-): Map<number, string> {
-  const weekMap = new Map<number, typeof knockoutMatches>();
-  knockoutMatches.forEach(m => {
-    if (!weekMap.has(m.weekId)) weekMap.set(m.weekId, []);
-    weekMap.get(m.weekId)!.push(m);
-  });
-  const sortedWeeks = [...weekMap.keys()].sort((a, b) => a - b);
 
-  // First pass: assign descriptive names, collapsing two-leg rounds
-  const weekToRound = new Map<number, string>();
-  let wi = 0;
-  while (wi < sortedWeeks.length) {
-    const w = sortedWeeks[wi];
-    const cnt = weekMap.get(w)!.length;
-    const lbl = cupRoundName(cnt, isCL);
-    weekToRound.set(w, lbl);
-    if (wi + 1 < sortedWeeks.length && weekMap.get(sortedWeeks[wi + 1])!.length === cnt && cnt > 1) {
-      weekToRound.set(sortedWeeks[wi + 1], lbl);
-      wi += 2;
-    } else {
-      wi++;
-    }
-  }
-
-  // Second pass: replace __ordinal__ placeholders with 1st Round, 2nd Round, etc.
-  // Count distinct round labels in chronological order, numbering the ordinal ones.
-  const ordinalRounds: number[] = []; // unique weeks for ordinal rounds, in order
-  const seenRounds = new Set<string>();
-  sortedWeeks.forEach(w => {
-    const lbl = weekToRound.get(w)!;
-    if (lbl.startsWith("__ordinal__") && !seenRounds.has(lbl)) {
-      seenRounds.add(lbl);
-      ordinalRounds.push(w);
-    }
-  });
-
-  // Assign ordinal names: first occurrence = "1st Round", next = "2nd Round", etc.
-  const ordinals = ["1st Round", "2nd Round", "3rd Round", "4th Round", "5th Round", "6th Round"];
-  const ordinalMap = new Map<string, string>();
-  ordinalRounds.forEach((w, i) => {
-    ordinalMap.set(weekToRound.get(w)!, ordinals[i] || `${i + 1}th Round`);
-  });
-
-  // Final map
-  const result = new Map<number, string>();
-  sortedWeeks.forEach(w => {
-    const lbl = weekToRound.get(w)!;
-    result.set(w, lbl.startsWith("__ordinal__") ? (ordinalMap.get(lbl) || lbl) : lbl);
-  });
-  return result;
-}
 
 export default function TeamPage() {
   const { name } = useParams();
   const [team, setTeam] = useState<Team | null>(null);
+  const [loadError, setLoadError] = useState(false);
   const [leagueName, setLeagueName] = useState("");
   const [currentRoster, setCurrentRoster] = useState<StatLine[]>([]);
   const [allStats, setAllStats] = useState<StatLine[]>([]);
@@ -323,6 +251,9 @@ export default function TeamPage() {
       if (statsData && statsData.length > 0) {
         buildSeasonRegister(teamName, (standData || []) as StandingRow[], statsData as StatLine[], teamData?.TeamID ?? null);
       }
+    }).catch(err => {
+      console.error("Failed to load team:", err);
+      setLoadError(true);
     });
   }, [name]);
 
@@ -589,6 +520,28 @@ export default function TeamPage() {
     ? internationalRegisterAll
     : internationalRegisterAll.filter(r => r.LeagueID === intlCompetitionFilter);
 
+  // Precompute stage/qualification status once for every non-domestic (cup/CL/intl)
+  // register row — shared by the register tables below and the trophy cabinet.
+  const nonDomesticStageMap = (() => {
+    const map = new Map<string, string>();
+    if (!team) return map;
+    const nonDomestic = seasonRegister.filter(r => r.LeagueID >= 15);
+    nonDomestic.forEach(row => {
+      const key = `${row.LeagueID}|${row.SeasonID}`;
+      const allMatches = allTournamentMatches.get(key);
+      if (!allMatches || allMatches.length === 0) { map.set(key, "—"); return; }
+      const parentLid = QUAL_PARENT_MAP[row.LeagueID];
+      const advanced = parentLid != null && nonDomestic.some(r => r.SeasonID === row.SeasonID && r.LeagueID === parentLid);
+      map.set(key, computeStageReached(team.TeamID, row.LeagueID, allMatches, { isCL: row.LeagueID === 19, advancedToParent: advanced }));
+    });
+    return map;
+  })();
+
+  // Trophy cabinet: league titles, cup/CL/international titles, and runners-up.
+  const leagueTitles = domesticRegister.filter(r => r.isChampion);
+  const nonDomesticTitles = seasonRegister.filter(r => r.LeagueID >= 15 && (nonDomesticStageMap.get(`${r.LeagueID}|${r.SeasonID}`) || "").includes("Champion"));
+  const runnerUps = seasonRegister.filter(r => r.LeagueID >= 15 && nonDomesticStageMap.get(`${r.LeagueID}|${r.SeasonID}`) === "Runner-Up");
+
   // Team color styling with contrast-aware text
   const primaryColor = team?.PrimaryColor || null;
   const secondaryColor = team?.SecondaryColor || null;
@@ -623,7 +576,19 @@ export default function TeamPage() {
     return (
       <div className="min-h-screen bg-background flex flex-col pb-14 md:pb-0">
         <SiteHeader />
-        <main className="flex-1 container py-8"><p className="text-muted-foreground font-sans">Loading team...</p></main>
+        <main className="flex-1 container py-8">
+          {loadError ? (
+            <ErrorState
+              title="We couldn't load this team"
+              message="Something went wrong while fetching this team's profile."
+              onRetry={() => window.location.reload()}
+              backTo="/teams"
+              backLabel="Back to teams"
+            />
+          ) : (
+            <ProfileSkeleton />
+          )}
+        </main>
         <SiteFooter />
       </div>
     );
@@ -663,142 +628,8 @@ export default function TeamPage() {
             {rows.map((row, i) => {
               const gd = (row.GoalsFor || 0) - (row.GoalsAgainst || 0);
               const posClass = row.isChampion ? "font-bold text-yellow-600 dark:text-yellow-400" : "";
-              // Compute stage reached for cup/CL competitions
-              const QUAL_PARENT_MAP: Record<number, number> = { 21: 20, 23: 22, 25: 24, 27: 26, 29: 28 };
-              const isQualifier = row.LeagueID in QUAL_PARENT_MAP;
-              const stageReached = !isDomestic ? (() => {
-                const tid = team?.TeamID;
-                if (!tid) return "—";
-
-                const allMatches = allTournamentMatches.get(`${row.LeagueID}|${row.SeasonID}`);
-                if (!allMatches || allMatches.length === 0) return "—";
-
-                // Qualifying competitions: show group placing + advancement to parent comp
-                if (isQualifier) {
-                  const parentLid = QUAL_PARENT_MAP[row.LeagueID];
-                  const advanced = rows.some(r => r.SeasonID === row.SeasonID && r.LeagueID === parentLid);
-                  // BFS group build from group-stage matches (exclude any playoff week)
-                  // For qualifiers all weeks are group matches.
-                  const adj = new Map<number, Set<number>>();
-                  allMatches.forEach(m => {
-                    if (!m.homeId || !m.awayId) return;
-                    if (!adj.has(m.homeId)) adj.set(m.homeId, new Set());
-                    if (!adj.has(m.awayId)) adj.set(m.awayId, new Set());
-                    adj.get(m.homeId)!.add(m.awayId);
-                    adj.get(m.awayId)!.add(m.homeId);
-                  });
-                  const visited = new Set<number>();
-                  const groups: number[][] = [];
-                  for (const t of adj.keys()) {
-                    if (visited.has(t)) continue;
-                    const g: number[] = []; const q = [t];
-                    while (q.length) {
-                      const x = q.shift()!;
-                      if (visited.has(x)) continue;
-                      visited.add(x); g.push(x);
-                      adj.get(x)?.forEach(n => { if (!visited.has(n)) q.push(n); });
-                    }
-                    groups.push(g.sort((a, b) => a - b));
-                  }
-                  groups.sort((a, b) => a[0] - b[0]);
-                  const myGroupIdx = groups.findIndex(g => g.includes(tid));
-                  if (myGroupIdx < 0) return advanced ? "Advanced" : "Group Stage";
-                  const groupTeams = groups[myGroupIdx];
-                  const teamSet = new Set(groupTeams);
-                  const stats = new Map<number, { pts: number; gf: number; ga: number }>();
-                  groupTeams.forEach(t => stats.set(t, { pts: 0, gf: 0, ga: 0 }));
-                  allMatches.forEach(m => {
-                    if (!teamSet.has(m.homeId) || !teamSet.has(m.awayId)) return;
-                    const h = stats.get(m.homeId)!; const a = stats.get(m.awayId)!;
-                    h.gf += m.homeScore; h.ga += m.awayScore;
-                    a.gf += m.awayScore; a.ga += m.homeScore;
-                    if (m.homeScore > m.awayScore) {
-                      const diff = m.homeScore - m.awayScore;
-                      const bonus = diff > 150 ? 5 : diff > 100 ? 3 : diff > 50 ? 1 : 0;
-                      h.pts += 2 + bonus;
-                    } else if (m.awayScore > m.homeScore) {
-                      const diff = m.awayScore - m.homeScore;
-                      const bonus = diff > 150 ? 5 : diff > 100 ? 3 : diff > 50 ? 1 : 0;
-                      a.pts += 2 + bonus;
-                    } else {
-                      h.pts += 1; a.pts += 1;
-                    }
-                  });
-                  const sorted = [...groupTeams].sort((a, b) => {
-                    const sa = stats.get(a)!, sb = stats.get(b)!;
-                    if (sb.pts !== sa.pts) return sb.pts - sa.pts;
-                    return (sb.gf - sb.ga) - (sa.gf - sa.ga);
-                  });
-                  const pos = sorted.indexOf(tid) + 1;
-                  const groupLabel = String.fromCharCode(65 + myGroupIdx);
-                  const posLabel = pos === 1 ? "1st" : pos === 2 ? "2nd" : pos === 3 ? "3rd" : `${pos}th`;
-                  return `${posLabel} in Group ${groupLabel}${advanced ? " · ✓ Advanced" : ""}`;
-                }
-
-                // International comps (LeagueID ≥ 20): last week has Final + 3rd-place playoff.
-                // Final = match between the two semifinal winners; other = 3rd-place playoff.
-                if (row.LeagueID >= 20) {
-                  const teamMatches = allMatches.filter(m => m.homeId === tid || m.awayId === tid);
-                  if (teamMatches.length === 0) return "—";
-                  const maxWeek = Math.max(...allMatches.map(m => m.weekId));
-                  const lastWeekMatches = allMatches.filter(m => m.weekId === maxWeek);
-                  const semiMatches = allMatches.filter(m => m.weekId === maxWeek - 1);
-                  if (lastWeekMatches.length === 2 && semiMatches.length === 2) {
-                    const semiWinners = new Set<number>();
-                    semiMatches.forEach(m => {
-                      if (m.homeScore >= m.awayScore && m.homeId) semiWinners.add(m.homeId);
-                      else if (m.awayScore > m.homeScore && m.awayId) semiWinners.add(m.awayId);
-                    });
-                    const finalMatch = lastWeekMatches.find(m =>
-                      m.homeId && m.awayId && semiWinners.has(m.homeId) && semiWinners.has(m.awayId)
-                    );
-                    const thirdMatch = lastWeekMatches.find(m => m !== finalMatch);
-                    if (finalMatch && (finalMatch.homeId === tid || finalMatch.awayId === tid)) {
-                      const isHome = finalMatch.homeId === tid;
-                      const won = (isHome ? finalMatch.homeScore : finalMatch.awayScore) > (isHome ? finalMatch.awayScore : finalMatch.homeScore);
-                      return won ? "🏆 Champion" : "Runner-Up";
-                    }
-                    if (thirdMatch && (thirdMatch.homeId === tid || thirdMatch.awayId === tid)) {
-                      const isHome = thirdMatch.homeId === tid;
-                      const won = (isHome ? thirdMatch.homeScore : thirdMatch.awayScore) > (isHome ? thirdMatch.awayScore : thirdMatch.homeScore);
-                      return won ? "3rd Place" : "4th Place";
-                    }
-                  }
-                  // Fell short of the semifinals — use generic round labeling
-                  const lastMyWeek = Math.max(...teamMatches.map(m => m.weekId));
-                  if (lastMyWeek === maxWeek - 1) return "Semifinals";
-                  if (lastMyWeek === maxWeek - 2) return "Quarterfinals";
-                  return `Round ${lastMyWeek}`;
-                }
-
-                // For CL: knockout starts at week 7; for cups: all weeks are knockout
-                const knockoutMatches = isCL ? allMatches.filter(m => m.weekId > 6) : allMatches;
-                if (knockoutMatches.length === 0) {
-                  return isCL ? "Group Stage" : "—";
-                }
-
-                const weekToRound = buildCupStageMap(knockoutMatches, isCL ?? false);
-
-                // Find this team's last knockout match
-                const teamKOMMatches = knockoutMatches.filter(m => m.homeId === tid || m.awayId === tid);
-                if (teamKOMMatches.length === 0) return isCL ? "Group Stage" : "—";
-                const lastWeek = Math.max(...teamKOMMatches.map(m => m.weekId));
-                const stageName = weekToRound.get(lastWeek) || "—";
-
-                // Did the team win their last match(es) in that round?
-                const lastRoundMatches = teamKOMMatches.filter(m => weekToRound.get(m.weekId) === stageName);
-                let teamAgg = 0, oppAgg = 0;
-                lastRoundMatches.forEach(m => {
-                  const isHome = m.homeId === tid;
-                  teamAgg += isHome ? m.homeScore : m.awayScore;
-                  oppAgg  += isHome ? m.awayScore : m.homeScore;
-                });
-                const won = teamAgg > oppAgg;
-
-                if ((stageName === "Final" || stageName === "CL Final") && won) return "🏆 Champion";
-                if ((stageName === "Final" || stageName === "CL Final") && !won) return "Runner-Up";
-                return stageName;
-              })() : null;
+              // Look up the precomputed stage/qualification status for this competition.
+              const stageReached = !isDomestic ? (nonDomesticStageMap.get(`${row.LeagueID}|${row.SeasonID}`) ?? "—") : null;
               return (
                 <tr key={`${row.SeasonID}-${row.LeagueID}`} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"} hover:bg-highlight/20`}>
                   <td className="px-3 py-1.5">
@@ -925,6 +756,62 @@ export default function TeamPage() {
             </div>
           )}
         </div>
+
+        {/* Trophy Cabinet */}
+        {(leagueTitles.length > 0 || nonDomesticTitles.length > 0 || runnerUps.length > 0) && (
+          <div className="border border-border rounded overflow-hidden mb-4">
+            <div className="bg-table-header px-3 py-2">
+              <h3 className="font-display text-sm font-bold text-table-header-foreground">Trophy Cabinet</h3>
+            </div>
+            <div className="bg-card p-4 space-y-3">
+              {leagueTitles.length > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">League Titles ({leagueTitles.length})</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {leagueTitles.map((r, i) => (
+                      <span key={i} title={r.LeagueName}
+                        className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400">
+                        <span className="font-bold">🏆</span>
+                        <span>{seasonLabel(r.SeasonID)}</span>
+                        <span className="opacity-70">{r.LeagueName}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {nonDomesticTitles.length > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">Cup / Tournament Titles ({nonDomesticTitles.length})</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {nonDomesticTitles.map((r, i) => (
+                      <span key={i} title={r.LeagueName}
+                        className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400">
+                        <span className="font-bold">🏆</span>
+                        <span>{seasonLabel(r.SeasonID)}</span>
+                        <span className="opacity-70">{r.LeagueName}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {runnerUps.length > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold mb-1.5">Runners-Up ({runnerUps.length})</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {runnerUps.map((r, i) => (
+                      <span key={i} title={r.LeagueName}
+                        className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300">
+                        <span className="font-bold">2nd</span>
+                        <span>{seasonLabel(r.SeasonID)}</span>
+                        <span className="opacity-70">{r.LeagueName}</span>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex gap-2 mb-4 border-b border-border">

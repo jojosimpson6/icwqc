@@ -159,6 +159,8 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
 
   const [h2h, setH2h] = useState<ResultRow[] | null>(null);
   const [h2hLoading, setH2hLoading] = useState(false);
+  // Which two of the (possibly more than 2) selected teams to show head-to-head for.
+  const [h2hPair, setH2hPair] = useState<[number, number]>([0, 1]);
 
   useEffect(() => {
     cachedQuery("leagues:all", async () => await supabase.from("leagues").select("LeagueID, LeagueName")).then((res: any) => {
@@ -237,8 +239,8 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
 
   // All-time head-to-head, independent of each slot's selected scope.
   useEffect(() => {
-    const a = slots[0]?.team;
-    const b = slots[1]?.team;
+    const a = slots[h2hPair[0]]?.team;
+    const b = slots[h2hPair[1]]?.team;
     if (!a || !b) { setH2h(null); return; }
     setH2hLoading(true);
     let cancelled = false;
@@ -253,7 +255,7 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
     });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [slots[0]?.team?.TeamID, slots[1]?.team?.TeamID]);
+  }, [slots[h2hPair[0]]?.team?.TeamID, slots[h2hPair[1]]?.team?.TeamID]);
 
   function selectTeam(idx: number, slotId: string, team: TeamOption) {
     setSlots(prev => prev.map(s => (s.id === slotId ? { ...s, team, results: [], standings: [], loading: true } : s)));
@@ -318,8 +320,22 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
 
   const activeIndexes = slots.map((s, i) => i).filter(i => !!slots[i].team);
 
+  // Keep the head-to-head pair pointing at two populated slots as teams are added/removed.
+  useEffect(() => {
+    const [i, j] = h2hPair;
+    const iValid = slots[i]?.team && activeIndexes.includes(i);
+    const jValid = slots[j]?.team && activeIndexes.includes(j) && j !== i;
+    if (iValid && jValid) return;
+    if (activeIndexes.length >= 2) {
+      setH2hPair([activeIndexes[0], activeIndexes[1]]);
+    } else if (activeIndexes.length === 1) {
+      setH2hPair([activeIndexes[0], activeIndexes[0]]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeIndexes.join(",")]);
+
   const h2hSummary = useMemo(() => {
-    const a = slots[0]?.team, b = slots[1]?.team;
+    const a = slots[h2hPair[0]]?.team, b = slots[h2hPair[1]]?.team;
     if (!h2h || !a || !b) return null;
     let aWins = 0, bWins = 0, draws = 0, aGF = 0, bGF = 0;
     h2h.forEach(r => {
@@ -331,10 +347,10 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
       if (aScore > bScore) aWins++; else if (bScore > aScore) bWins++; else draws++;
     });
     return { aWins, bWins, draws, aGF, bGF, total: h2h.length };
-  }, [h2h, slots[0]?.team, slots[1]?.team]);
+  }, [h2h, slots[h2hPair[0]]?.team, slots[h2hPair[1]]?.team]);
 
   const h2hLog: MatchLogEntry[] = useMemo(() => {
-    const a = slots[0]?.team, b = slots[1]?.team;
+    const a = slots[h2hPair[0]]?.team, b = slots[h2hPair[1]]?.team;
     if (!h2h || !a || !b) return [];
     return h2h.map(r => {
       const aIsHome = r.HomeTeamID === a.TeamID;
@@ -351,7 +367,7 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
         neutral: !!r.IsNeutralSite,
       };
     });
-  }, [h2h, slots[0]?.team, slots[1]?.team, matchDayCompositeMap, leagueNameById]);
+  }, [h2h, slots[h2hPair[0]]?.team, slots[h2hPair[1]]?.team, matchDayCompositeMap, leagueNameById]);
 
   const { sorted: sortedH2hLog, sortKey: h2hSortKey, sortDir: h2hSortDir, requestSort: requestH2hSort } = useSortableTable(h2hLog, "dateStr", "desc");
   const h2hSortInd = (key: string) => (h2hSortKey === key ? (h2hSortDir === "asc" ? " ↑" : " ↓") : "");
@@ -375,7 +391,7 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
   return (
     <div>
       <p className="text-sm text-muted-foreground font-sans mb-4">
-        Compare any two teams' records, head-to-head history, and competition results across any span of seasons.
+        Compare up to six teams' records and competition results across any span of seasons, plus head-to-head history between any two of them.
       </p>
 
       <div className="flex flex-wrap gap-4 mb-4">
@@ -570,11 +586,34 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
             </p>
           </div>
 
-          {/* Head-to-head (only meaningful for exactly two teams) */}
-          {slots[0]?.team && slots[1]?.team && (
+          {/* Head-to-head — pick any two of the selected teams */}
+          {slots[h2hPair[0]]?.team && slots[h2hPair[1]]?.team && h2hPair[0] !== h2hPair[1] && (
             <div className="border border-border rounded overflow-hidden">
-              <div className="bg-table-header px-3 py-2">
+              <div className="bg-table-header px-3 py-2 flex items-center justify-between flex-wrap gap-2">
                 <h3 className="font-display text-sm font-bold text-table-header-foreground">All-Time Head-to-Head</h3>
+                {activeIndexes.length > 2 && (
+                  <div className="flex items-center gap-2 text-xs font-sans">
+                    <select
+                      value={h2hPair[0]}
+                      onChange={e => setH2hPair(([, j]) => [Number(e.target.value), j])}
+                      className="bg-popover text-popover-foreground border border-border rounded px-1.5 py-0.5"
+                    >
+                      {activeIndexes.map(i => (
+                        <option key={i} value={i} disabled={i === h2hPair[1]}>{slots[i].team!.FullName}</option>
+                      ))}
+                    </select>
+                    <span className="text-table-header-foreground/70">vs</span>
+                    <select
+                      value={h2hPair[1]}
+                      onChange={e => setH2hPair(([i]) => [i, Number(e.target.value)])}
+                      className="bg-popover text-popover-foreground border border-border rounded px-1.5 py-0.5"
+                    >
+                      {activeIndexes.map(i => (
+                        <option key={i} value={i} disabled={i === h2hPair[0]}>{slots[i].team!.FullName}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
               </div>
               <div className="bg-card p-3">
                 {h2hLoading ? (
@@ -585,8 +624,8 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
                   <>
                     <div className="flex items-center justify-center gap-6 font-sans mb-3 flex-wrap">
                       <div className="text-center">
-                        <p className={`text-2xl font-display font-bold ${SLOT_COLORS[0].text}`}>{h2hSummary.aWins}</p>
-                        <p className="text-xs text-muted-foreground truncate max-w-[140px]">{slots[0].team!.FullName} wins</p>
+                        <p className={`text-2xl font-display font-bold ${SLOT_COLORS[h2hPair[0] % SLOT_COLORS.length].text}`}>{h2hSummary.aWins}</p>
+                        <p className="text-xs text-muted-foreground truncate max-w-[140px]">{slots[h2hPair[0]].team!.FullName} wins</p>
                       </div>
                       {h2hSummary.draws > 0 && (
                         <div className="text-center">
@@ -595,8 +634,8 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
                         </div>
                       )}
                       <div className="text-center">
-                        <p className={`text-2xl font-display font-bold ${SLOT_COLORS[1].text}`}>{h2hSummary.bWins}</p>
-                        <p className="text-xs text-muted-foreground truncate max-w-[140px]">{slots[1].team!.FullName} wins</p>
+                        <p className={`text-2xl font-display font-bold ${SLOT_COLORS[h2hPair[1] % SLOT_COLORS.length].text}`}>{h2hSummary.bWins}</p>
+                        <p className="text-xs text-muted-foreground truncate max-w-[140px]">{slots[h2hPair[1]].team!.FullName} wins</p>
                       </div>
                       <div className="text-center">
                         <p className="text-2xl font-display font-bold text-foreground">{h2hSummary.aGF}–{h2hSummary.bGF}</p>

@@ -131,12 +131,22 @@ export function GlobalSearch() {
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setSelectedIndex((i) => Math.max(i - 1, 0));
-    } else if (e.key === "Enter" && selectedIndex >= 0) {
+    } else if (e.key === "Enter" && selectedIndex >= 0 && results[selectedIndex]) {
       e.preventDefault();
       navigateTo(results[selectedIndex]);
+    } else if (e.key === "Enter" && query.trim()) {
+      e.preventDefault();
+      goToAdvancedSearch();
     } else if (e.key === "Escape") {
       setOpen(false);
     }
+  };
+
+  const goToAdvancedSearch = () => {
+    setOpen(false);
+    const q = query;
+    setQuery("");
+    navigate(`/search${q.trim() ? `?q=${encodeURIComponent(q.trim())}` : ""}`);
   };
 
   const typeLabel: Record<string, string> = { player: "Player", team: "Team", league: "League", manager: "Manager" };
@@ -177,6 +187,12 @@ export function GlobalSearch() {
               </div>
             </button>
           ))}
+          <button
+            onClick={goToAdvancedSearch}
+            className="w-full text-left px-3 py-2 text-xs font-sans font-semibold text-accent hover:bg-accent/10 transition-colors border-t border-border"
+          >
+            Advanced search &amp; filters →
+          </button>
         </div>
       )}
     </div>

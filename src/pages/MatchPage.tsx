@@ -5,6 +5,7 @@ import { fetchAllRows } from "@/lib/fetchAll";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
+import { CardSkeleton, ErrorState } from "@/components/StateMessage";
 
 type PlayerMap = Map<number, { name: string; id: number }>;
 
@@ -32,6 +33,7 @@ export default function MatchPage() {
   const [teamMap, setTeamMap] = useState<Map<number, string>>(new Map());
   const [leagueName, setLeagueName] = useState("");
   const [matchDate, setMatchDate] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -74,6 +76,9 @@ export default function MatchPage() {
             }
           });
       }
+    }).catch(err => {
+      console.error("Failed to load match:", err);
+      setLoadError(true);
     });
   }, [id]);
 
@@ -82,7 +87,17 @@ export default function MatchPage() {
       <div className="min-h-screen bg-background flex flex-col pb-14 md:pb-0">
         <SiteHeader />
         <main className="flex-1 container py-8">
-          <p className="text-muted-foreground font-sans">Loading match...</p>
+          {loadError ? (
+            <ErrorState
+              title="We couldn't load this match"
+              message="Something went wrong while fetching this match's details."
+              onRetry={() => window.location.reload()}
+              backTo="/schedule"
+              backLabel="Back to schedule"
+            />
+          ) : (
+            <CardSkeleton rows={6} />
+          )}
         </main>
         <SiteFooter />
       </div>

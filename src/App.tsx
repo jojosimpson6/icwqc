@@ -8,6 +8,8 @@ import NotFound from "./pages/NotFound";
 import PlayerProfile from "./pages/PlayerProfile";
 import LeaguePage from "./pages/LeaguePage";
 import TeamPage from "./pages/TeamPage";
+import TeamsIndex from "./pages/TeamsIndex";
+import SearchPage from "./pages/SearchPage";
 import PlayersIndex from "./pages/PlayersIndex";
 import LeaguesIndex from "./pages/LeaguesIndex";
 import AdminLogin from "./pages/AdminLogin";
@@ -44,6 +46,8 @@ const App = () => (
           <Route path="/elo" element={<EloPage />} />
           <Route path="/compare" element={<ComparePage />} />
           <Route path="/leagues" element={<LeaguesIndex />} />
+          <Route path="/search" element={<SearchPage />} />
+          <Route path="/teams" element={<TeamsIndex />} />
           <Route path="/team/:name" element={<TeamPage />} />
           <Route path="/match/:id" element={<MatchPage />} />
           <Route path="/nation/:id" element={<NationPage />} />

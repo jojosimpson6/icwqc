@@ -7,6 +7,7 @@ import { SiteFooter } from "@/components/SiteFooter";
 import { getLeagueTierLabel } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { cachedQuery } from "@/lib/queryCache";
+import { CardSkeleton, ErrorState } from "@/components/StateMessage";
 
 interface League {
   LeagueID: number;
@@ -44,6 +45,7 @@ export default function AwardHistory() {
   const [league, setLeague] = useState<League | null>(null);
   const [awards, setAwards] = useState<AwardEntry[]>([]);
   const [playerMap, setPlayerMap] = useState<Map<number, string>>(new Map());
+  const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
     if (!id || !awardName) return;
@@ -70,6 +72,9 @@ export default function AwardHistory() {
         });
         setPlayerMap(pm);
       }
+    }).catch(err => {
+      console.error("Failed to load award history:", err);
+      setLoadError(true);
     });
   }, [id, awardName]);
 
@@ -124,7 +129,19 @@ export default function AwardHistory() {
     return (
       <div className="min-h-screen bg-background flex flex-col pb-14 md:pb-0">
         <SiteHeader />
-        <main className="flex-1 container py-8"><p className="text-muted-foreground font-sans">Loading...</p></main>
+        <main className="flex-1 container py-8">
+          {loadError ? (
+            <ErrorState
+              title="We couldn't load this award history"
+              message="Something went wrong while fetching this award's history."
+              onRetry={() => window.location.reload()}
+              backTo="/leagues"
+              backLabel="Back to leagues"
+            />
+          ) : (
+            <CardSkeleton rows={6} />
+          )}
+        </main>
         <SiteFooter />
       </div>
     );

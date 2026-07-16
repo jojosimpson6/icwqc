@@ -7,6 +7,7 @@ import { SiteFooter } from "@/components/SiteFooter";
 import { getNationFlag, formatDate, getLeagueTierLabel } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { seasonLabel, ordinal, computeStageReached, QUAL_PARENT_MAP, TournamentMatch } from "@/lib/competitionStage";
+import { ProfileSkeleton } from "@/components/StateMessage";
 
 interface Manager {
   ManagerID: number;
@@ -314,7 +315,7 @@ export default function ManagerProfile() {
     return (
       <div className="min-h-screen bg-background flex flex-col pb-14 md:pb-0">
         <SiteHeader />
-        <main className="flex-1 container py-8"><p className="text-muted-foreground font-sans">Loading manager...</p></main>
+        <main className="flex-1 container py-8"><ProfileSkeleton /></main>
         <SiteFooter />
       </div>
     );

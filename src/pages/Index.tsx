@@ -1,6 +1,7 @@
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { PlayerSpotlight } from "@/components/PlayerSpotlight";
+import { OnThisDay } from "@/components/OnThisDay";
 import { NewsFeed } from "@/components/NewsFeed";
 import { LeagueLeaders } from "@/components/LeagueLeaders";
 import { HomeStandings } from "@/components/HomeStandings";
@@ -56,6 +57,7 @@ const Index = () => {
             </div>
 
             <div className="space-y-6">
+              <OnThisDay />
               <PlayerSpotlight />
               <HomeStandings />
             </div>
