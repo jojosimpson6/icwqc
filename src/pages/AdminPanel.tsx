@@ -116,8 +116,11 @@ export default function AdminPanel() {
   }, [navigate]);
 
   async function fetchNews() {
-    const { data } = await supabase.from("news_items").select("*").order("pinned", { ascending: false }).order("published_date", { ascending: false });
-    if (data) setNewsItems(data as NewsItem[]);
+    // Sort pinned items client-side rather than via .order("pinned", ...) — see
+    // the matching comment in NewsFeed.tsx for why.
+    const { data, error } = await supabase.from("news_items").select("*").order("published_date", { ascending: false });
+    if (error) { console.error("Failed to load news:", error.message); return; }
+    if (data) setNewsItems([...data].sort((a: any, b: any) => (b.pinned ? 1 : 0) - (a.pinned ? 1 : 0)) as NewsItem[]);
   }
 
   async function fetchContent() {
@@ -169,7 +172,8 @@ export default function AdminPanel() {
   }
 
   async function togglePin(item: NewsItem) {
-    await supabase.from("news_items").update({ pinned: !item.pinned }).eq("id", item.id);
+    const { error } = await supabase.from("news_items").update({ pinned: !item.pinned }).eq("id", item.id);
+    if (error) { setNewsMsg("Error: " + error.message); return; }
     fetchNews();
   }
 
