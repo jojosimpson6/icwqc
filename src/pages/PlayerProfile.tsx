@@ -154,8 +154,13 @@ function fmtMin(minutes: number | null): string {
   return minutes.toString();
 }
 
-type CompBest = { goals: number; gsc: number; saves: number; sf: number; gp: number; mins: number };
-type ExtBest = { shotPct: number | null; passPct: number | null; snitchPct: number | null; svPct: number | null; keeperPassPct: number | null; bludgersHit: number; turnovers: number; teammates: number; sfPerGP: number | null; minPerGoal: number | null };
+type CompBest = { goals: number; gsc: number; saves: number; sf: number; gp: number; mins: number; shotsAllowed: number };
+type ExtBest = {
+  shotPct: number | null; passPct: number | null; snitchPct: number | null; svPct: number | null; keeperPassPct: number | null;
+  bludgersHit: number; turnovers: number; teammates: number; minPerGoal: number | null;
+  minPerSave: number | null; minPerShotFaced: number | null; minPerBH: number | null; minPerTF: number | null; minPerTP: number | null;
+  minPerShotsAllowed: number | null; avgCatchTime: number | null;
+};
 
 export default function PlayerProfile() {
   const { id } = useParams();
@@ -179,6 +184,14 @@ export default function PlayerProfile() {
   const [playerAwards, setPlayerAwards] = useState<{ awardname: string; placement: number; seasonid: number; leagueid: number; leagueName?: string }[]>([]);
   const [leagueNameMap, setLeagueNameMap] = useState<Map<number, string>>(new Map());
   const [teamCompWins, setTeamCompWins] = useState<{ leagueId: number; leagueName: string; seasonId: number; teamName: string }[]>([]);
+  // Derived from match-level data (not available in the player_season_stats view) —
+  // keyed by `${SeasonID}|${LeagueID}|${TeamID}`.
+  const [seekerCatchMap, setSeekerCatchMap] = useState<Map<string, { totalTime: number; catches: number }>>(new Map());
+  const [beaterShotsAllowedMap, setBeaterShotsAllowedMap] = useState<Map<string, { totalShotsAllowed: number; games: number }>>(new Map());
+  // League-wide bests for the two match-level-only stats above, so they can be gold-
+  // highlighted the same way as every other stat — keyed by `${SeasonID}|${LeagueName}`.
+  const [leagueCatchBest, setLeagueCatchBest] = useState<Map<string, number>>(new Map());
+  const [leagueShotsAllowedBest, setLeagueShotsAllowedBest] = useState<Map<string, number>>(new Map());
   useEffect(() => {
     if (!id) return;
     const pid = parseInt(id);
@@ -253,7 +266,7 @@ export default function PlayerProfile() {
 
       const [matchData, { data: leaguesData }, teamsData, mdData] = await Promise.all([
         fetchAllRows("results", {
-          select: "MatchID,SeasonID,LeagueID,WeekID,SnitchCaughtTime,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,HomeKeeperID,AwayKeeperID,HomeSeekerID,AwaySeekerID,HomeChaser1ID,HomeChaser1Goals,HomeChaser2ID,HomeChaser2Goals,HomeChaser3ID,HomeChaser3Goals,AwayChaser1ID,AwayChaser1Goals,AwayChaser2ID,AwayChaser2Goals,AwayChaser3ID,AwayChaser3Goals,IsNeutralSite,HomeBeater1ID,HomeBeater2ID,AwayBeater1ID,AwayBeater2ID,HomeKeeperSaves,AwayKeeperSaves,HomeChaser1ShotAtt,HomeChaser1ShotScored,HomeChaser2ShotAtt,HomeChaser2ShotScored,HomeChaser3ShotAtt,HomeChaser3ShotScored,AwayChaser1ShotAtt,AwayChaser1ShotScored,AwayChaser2ShotAtt,AwayChaser2ShotScored,AwayChaser3ShotAtt,AwayChaser3ShotScored,HomeBeater1BludgersHit,HomeBeater2BludgersHit,AwayBeater1BludgersHit,AwayBeater2BludgersHit",
+          select: "MatchID,SeasonID,LeagueID,WeekID,SnitchCaughtTime,SnitchCaughtBy,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,HomeKeeperID,AwayKeeperID,HomeSeekerID,AwaySeekerID,HomeChaser1ID,HomeChaser1Goals,HomeChaser2ID,HomeChaser2Goals,HomeChaser3ID,HomeChaser3Goals,AwayChaser1ID,AwayChaser1Goals,AwayChaser2ID,AwayChaser2Goals,AwayChaser3ID,AwayChaser3Goals,IsNeutralSite,HomeBeater1ID,HomeBeater2ID,AwayBeater1ID,AwayBeater2ID,HomeKeeperSaves,AwayKeeperSaves,HomeChaser1ShotAtt,HomeChaser1ShotScored,HomeChaser2ShotAtt,HomeChaser2ShotScored,HomeChaser3ShotAtt,HomeChaser3ShotScored,AwayChaser1ShotAtt,AwayChaser1ShotScored,AwayChaser2ShotAtt,AwayChaser2ShotScored,AwayChaser3ShotAtt,AwayChaser3ShotScored,HomeBeater1BludgersHit,HomeBeater2BludgersHit,AwayBeater1BludgersHit,AwayBeater2BludgersHit",
           filters: [{ method: "or", args: [allOrFilters.join(",")] }],
           order: { column: "MatchID", ascending: false },
         }),
@@ -272,6 +285,11 @@ export default function PlayerProfile() {
 
       const logEntries: MatchLogEntry[] = [];
       const seenMatchIds = new Set<number>();
+      // Keyed by `${SeasonID}|${LeagueID}|${TeamID}` to align with the season-by-season
+      // stats table's grain (a player can have multiple rows in the same league+season
+      // if they changed teams mid-year).
+      const seekerCatchAgg = new Map<string, { totalTime: number; catches: number }>();
+      const beaterShotsAllowedAgg = new Map<string, { totalShotsAllowed: number; games: number }>();
 
       matchData.forEach((r: Record<string, unknown>) => {
         const matchId = r.MatchID as number;
@@ -294,19 +312,52 @@ export default function PlayerProfile() {
         else if ([r.HomeBeater1ID, r.HomeBeater2ID, r.AwayBeater1ID, r.AwayBeater2ID].includes(pid2)) matchPos = "Beater";
 
         let stat = "";
+        // SnitchCaughtBy stores the TEAM ID that caught the snitch, not a player ID
+        // (confirmed against MatchPage's box score logic) — comparing it directly to
+        // a player ID would only ever match by coincidence, so we compare team IDs.
+        const mySnitchCaught = r.SnitchCaughtBy != null && r.SnitchCaughtBy === teamId;
         if (matchPos === "Chaser") {
           const chasers = [[r.HomeChaser1ID, r.HomeChaser1Goals], [r.HomeChaser2ID, r.HomeChaser2Goals], [r.HomeChaser3ID, r.HomeChaser3Goals], [r.AwayChaser1ID, r.AwayChaser1Goals], [r.AwayChaser2ID, r.AwayChaser2Goals], [r.AwayChaser3ID, r.AwayChaser3Goals]];
           const g = chasers.find(([cid]) => cid === pid2)?.[1] as number || 0;
           stat = String(g);
         } else if (matchPos === "Seeker") {
-          const caught = r.SnitchCaughtBy === pid2 || (isHome ? r.HomeSeekerID === pid2 && (r.HomeTeamScore as number) > ((r.AwayTeamScore as number) || 0) + 140 : r.AwaySeekerID === pid2 && (r.AwayTeamScore as number) > ((r.HomeTeamScore as number) || 0) + 140);
-          stat = caught ? "1" : "0";
+          stat = mySnitchCaught ? "1" : "0";
         } else if (matchPos === "Keeper") {
           const saves = (isHome ? r.HomeKeeperSaves : r.AwayKeeperSaves) as number || 0;
           stat = String(saves);
         } else if (matchPos === "Beater") {
           const bhField = isHome ? (r.HomeBeater1ID === pid2 ? r.HomeBeater1BludgersHit : r.HomeBeater2BludgersHit) : (r.AwayBeater1ID === pid2 ? r.AwayBeater1BludgersHit : r.AwayBeater2BludgersHit);
           stat = String(bhField as number || 0);
+        }
+
+        // ── New per-match aggregates, keyed by season|league|team to align with the
+        // season-by-season stats table's grain (a player can appear for more than one
+        // team in the same league+season if transferred mid-year). ──
+        const aggKey = `${sid}|${lid}|${teamId}`;
+
+        if (matchPos === "Seeker" && r.SnitchCaughtTime != null) {
+          // Average Time to Catch is computed ONLY over games this seeker personally
+          // caught the snitch — an opposing seeker's catch time must never factor into
+          // this player's average (that's a different seeker's play entirely).
+          if (mySnitchCaught) {
+            const entry = seekerCatchAgg.get(aggKey) || { totalTime: 0, catches: 0 };
+            entry.totalTime += r.SnitchCaughtTime as number;
+            entry.catches += 1;
+            seekerCatchAgg.set(aggKey, entry);
+          }
+        }
+
+        if (matchPos === "Beater") {
+          // "Shots Allowed" = how many shot attempts the OPPOSING team's chasers took
+          // in this match — a defensive measure of whether these beaters kept the
+          // other team's chasers from even getting looks at goal.
+          const oppChaserShotAtt = isHome
+            ? (r.AwayChaser1ShotAtt as number || 0) + (r.AwayChaser2ShotAtt as number || 0) + (r.AwayChaser3ShotAtt as number || 0)
+            : (r.HomeChaser1ShotAtt as number || 0) + (r.HomeChaser2ShotAtt as number || 0) + (r.HomeChaser3ShotAtt as number || 0);
+          const entry = beaterShotsAllowedAgg.get(aggKey) || { totalShotsAllowed: 0, games: 0 };
+          entry.totalShotsAllowed += oppChaserShotAtt;
+          entry.games += 1;
+          beaterShotsAllowedAgg.set(aggKey, entry);
         }
 
         const weekId = r.WeekID as number;
@@ -322,6 +373,8 @@ export default function PlayerProfile() {
 
       logEntries.sort((a, b) => (a.SeasonID || 0) - (b.SeasonID || 0) || (a.date || "").localeCompare(b.date || ""));
       setMatchLog(logEntries);
+      setSeekerCatchMap(seekerCatchAgg);
+      setBeaterShotsAllowedMap(beaterShotsAllowedAgg);
 
       // Build league maxes for leader highlighting — fetch all seasons in PARALLEL (not sequential)
       const playerName = (sData[0] as any).PlayerName;
@@ -333,7 +386,7 @@ export default function PlayerProfile() {
       const allSeasonStats = await Promise.all(
         seasonIds.map(sid =>
           fetchAllRows("player_season_stats", {
-            select: "PlayerName,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,GamesPlayed,Position,SeasonID,LeagueName",
+            select: "PlayerName,Goals,GoldenSnitchCatches,KeeperSaves,KeeperShotsFaced,GamesPlayed,MinPlayed,ShotAtt,ShotScored,PassAtt,PassComp,KeeperPassAtt,KeeperPassComp,BludgersHit,TurnoversForced,TeammatesProtected,Position,SeasonID,LeagueName",
             filters: [{ method: "eq", args: ["SeasonID", sid] }],
           }).then(data => ({ sid, data }))
         )
@@ -350,27 +403,97 @@ export default function PlayerProfile() {
         grouped.forEach((rows, pairKey) => {
           const [, ln] = pairKey.split("|");
           const statMaxes = new Map<string, number>();
+
+          // GP and Minutes apply to every position, so compare across the whole
+          // league+season roster, not just one position group.
+          const maxGP = Math.max(0, ...rows.map((r: Record<string, unknown>) => (r.GamesPlayed as number) || 0));
+          statMaxes.set("GP", maxGP);
+          const maxMin = Math.max(0, ...rows.map((r: Record<string, unknown>) => (r.MinPlayed as number) || 0));
+          statMaxes.set("Min", maxMin);
+
           const chasers = rows.filter((r: Record<string, unknown>) => r.Position === "Chaser");
           if (chasers.length) {
             const sorted = [...chasers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.Goals as number) || 0) - ((a.Goals as number) || 0));
             statMaxes.set("Goals", (sorted[0]?.Goals as number) || 0);
             const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
             if (rank > 0 && rank <= 5) awardEntries.push({ SeasonID: sid, LeagueName: ln, stat: "Goals", value: (sorted[rank - 1]?.Goals as number) || 0, rank, scope: "league" });
+
+            let bestShotPct = 0, bestPassPct = 0, bestMinPerGoal: number | null = null;
+            chasers.forEach((r: Record<string, unknown>) => {
+              const sa = (r.ShotAtt as number) || 0, ss = (r.ShotScored as number) || 0;
+              const pa = (r.PassAtt as number) || 0, pc = (r.PassComp as number) || 0;
+              const mp = (r.MinPlayed as number) || 0, g = (r.Goals as number) || 0;
+              if (sa > 0) bestShotPct = Math.max(bestShotPct, (ss / sa) * 100);
+              if (pa > 0) bestPassPct = Math.max(bestPassPct, (pc / pa) * 100);
+              if (g > 0 && mp > 0) { const v = mp / g; if (bestMinPerGoal === null || v < bestMinPerGoal) bestMinPerGoal = v; }
+            });
+            statMaxes.set("ShotPct", bestShotPct);
+            statMaxes.set("PassPct", bestPassPct);
+            if (bestMinPerGoal !== null) statMaxes.set("MinPerGoal", bestMinPerGoal);
           }
+
           const seekers = rows.filter((r: Record<string, unknown>) => r.Position === "Seeker");
           if (seekers.length) {
             const sorted = [...seekers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.GoldenSnitchCatches as number) || 0) - ((a.GoldenSnitchCatches as number) || 0));
             statMaxes.set("GoldenSnitchCatches", (sorted[0]?.GoldenSnitchCatches as number) || 0);
             const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
             if (rank > 0 && rank <= 5) awardEntries.push({ SeasonID: sid, LeagueName: ln, stat: "Golden Snitch Catches", value: (sorted[rank - 1]?.GoldenSnitchCatches as number) || 0, rank, scope: "league" });
+
+            let bestSnitchPct = 0;
+            seekers.forEach((r: Record<string, unknown>) => {
+              const gp = (r.GamesPlayed as number) || 0, gsc = (r.GoldenSnitchCatches as number) || 0;
+              if (gp > 0) bestSnitchPct = Math.max(bestSnitchPct, (gsc / gp) * 100);
+            });
+            statMaxes.set("SnitchPct", bestSnitchPct);
           }
+
           const keepers = rows.filter((r: Record<string, unknown>) => r.Position === "Keeper");
           if (keepers.length) {
             const sorted = [...keepers].sort((a: Record<string, unknown>, b: Record<string, unknown>) => ((b.KeeperSaves as number) || 0) - ((a.KeeperSaves as number) || 0));
             statMaxes.set("KeeperSaves", (sorted[0]?.KeeperSaves as number) || 0);
             const rank = sorted.findIndex((r: Record<string, unknown>) => r.PlayerName === playerName) + 1;
             if (rank > 0 && rank <= 5) awardEntries.push({ SeasonID: sid, LeagueName: ln, stat: "Keeper Saves", value: (sorted[rank - 1]?.KeeperSaves as number) || 0, rank, scope: "league" });
+
+            let bestSF = 0, bestSavePct = 0, bestKPassPct = 0, bestMinPerSave: number | null = null, bestMinPerSF: number | null = null;
+            keepers.forEach((r: Record<string, unknown>) => {
+              const sf = (r.KeeperShotsFaced as number) || 0, sv = (r.KeeperSaves as number) || 0;
+              const kpa = (r.KeeperPassAtt as number) || 0, kpc = (r.KeeperPassComp as number) || 0;
+              const mp = (r.MinPlayed as number) || 0;
+              bestSF = Math.max(bestSF, sf);
+              if (sf > 0) bestSavePct = Math.max(bestSavePct, (sv / sf) * 100);
+              if (kpa > 0) bestKPassPct = Math.max(bestKPassPct, (kpc / kpa) * 100);
+              if (sv > 0 && mp > 0) { const v = mp / sv; if (bestMinPerSave === null || v < bestMinPerSave) bestMinPerSave = v; }
+              if (sf > 0 && mp > 0) { const v = mp / sf; if (bestMinPerSF === null || v < bestMinPerSF) bestMinPerSF = v; }
+            });
+            statMaxes.set("KeeperShotsFaced", bestSF);
+            statMaxes.set("SavePct", bestSavePct);
+            statMaxes.set("KeeperPassPct", bestKPassPct);
+            if (bestMinPerSave !== null) statMaxes.set("MinPerSave", bestMinPerSave);
+            if (bestMinPerSF !== null) statMaxes.set("MinPerShotFaced", bestMinPerSF);
           }
+
+          const beaters = rows.filter((r: Record<string, unknown>) => r.Position === "Beater");
+          if (beaters.length) {
+            let bestBH = 0, bestTF = 0, bestTP = 0;
+            let bestMinPerBH: number | null = null, bestMinPerTF: number | null = null, bestMinPerTP: number | null = null;
+            beaters.forEach((r: Record<string, unknown>) => {
+              const bh = (r.BludgersHit as number) || 0, tf = (r.TurnoversForced as number) || 0, tp = (r.TeammatesProtected as number) || 0;
+              const mp = (r.MinPlayed as number) || 0;
+              bestBH = Math.max(bestBH, bh);
+              bestTF = Math.max(bestTF, tf);
+              bestTP = Math.max(bestTP, tp);
+              if (bh > 0 && mp > 0) { const v = mp / bh; if (bestMinPerBH === null || v < bestMinPerBH) bestMinPerBH = v; }
+              if (tf > 0 && mp > 0) { const v = mp / tf; if (bestMinPerTF === null || v < bestMinPerTF) bestMinPerTF = v; }
+              if (tp > 0 && mp > 0) { const v = mp / tp; if (bestMinPerTP === null || v < bestMinPerTP) bestMinPerTP = v; }
+            });
+            statMaxes.set("BludgersHit", bestBH);
+            statMaxes.set("TurnoversForced", bestTF);
+            statMaxes.set("TeammatesProtected", bestTP);
+            if (bestMinPerBH !== null) statMaxes.set("MinPerBH", bestMinPerBH);
+            if (bestMinPerTF !== null) statMaxes.set("MinPerTF", bestMinPerTF);
+            if (bestMinPerTP !== null) statMaxes.set("MinPerTP", bestMinPerTP);
+          }
+
           maxMap.set(pairKey, statMaxes);
         });
         const allChasers = seasonStats.filter((r: Record<string, unknown>) => r.Position === "Chaser");
@@ -392,6 +515,97 @@ export default function PlayerProfile() {
           if (rank > 0 && rank <= 10 && !awardEntries.some(e => e.SeasonID === sid && e.stat === "Keeper Saves" && e.scope === "league")) awardEntries.push({ SeasonID: sid, LeagueName: "All Leagues", stat: "Keeper Saves", value: (sorted[rank - 1]?.KeeperSaves as number) || 0, rank, scope: "combined" });
         }
       }
+      // ── League-wide bests for the two stats that need match-level data (not
+      // available in the player_season_stats view): Seeker average time to catch,
+      // and Beater minutes-per-shots-allowed. Scoped only to the (season, league)
+      // pairs this player actually appeared in at that position, to keep the extra
+      // fetch bounded rather than pulling every league's full match history. ──
+      const seekerPairs = [...new Set((sData as any[]).filter(s => s.Position === "Seeker" && s.SeasonID && s.LeagueID).map(s => `${s.SeasonID}|${s.LeagueID}`))];
+      const beaterPairs = [...new Set((sData as any[]).filter(s => s.Position === "Beater" && s.SeasonID && s.LeagueID).map(s => `${s.SeasonID}|${s.LeagueID}`))];
+      const relevantPairs = [...new Set([...seekerPairs, ...beaterPairs])];
+
+      const catchBestMap = new Map<string, number>(); // key: `${SeasonID}|${LeagueName}` -> lowest avg catch time (best)
+      const shotsAllowedBestMap = new Map<string, number>(); // key: `${SeasonID}|${LeagueName}` -> highest Min/ShotsAllowed (best)
+
+      if (relevantPairs.length > 0) {
+        const pairResults = await Promise.all(
+          relevantPairs.map(pairKey => {
+            const [sidStr, lidStr] = pairKey.split("|");
+            const seasonId = Number(sidStr), leagueId = Number(lidStr);
+            return fetchAllRows("results", {
+              select: "HomeTeamID,AwayTeamID,HomeSeekerID,AwaySeekerID,SnitchCaughtBy,SnitchCaughtTime,HomeBeater1ID,HomeBeater1MinPlayed,HomeBeater2ID,HomeBeater2MinPlayed,AwayBeater1ID,AwayBeater1MinPlayed,AwayBeater2ID,AwayBeater2MinPlayed,HomeChaser1ShotAtt,HomeChaser2ShotAtt,HomeChaser3ShotAtt,AwayChaser1ShotAtt,AwayChaser2ShotAtt,AwayChaser3ShotAtt",
+              filters: [
+                { method: "eq", args: ["SeasonID", seasonId] },
+                { method: "eq", args: ["LeagueID", leagueId] },
+              ],
+            }).then(rows => ({ seasonId, leagueId, rows }));
+          })
+        );
+
+        for (const { seasonId, leagueId, rows } of pairResults) {
+          if (!rows || rows.length === 0) continue;
+          const ln = leagueNameMap2.get(leagueId) || String(leagueId);
+          const key = `${seasonId}|${ln}`;
+          const isSeekerPair = seekerPairs.includes(`${seasonId}|${leagueId}`);
+          const isBeaterPair = beaterPairs.includes(`${seasonId}|${leagueId}`);
+
+          const seekerAgg = new Map<number, { totalTime: number; catches: number }>();
+          const beaterAgg = new Map<number, { shotsAllowed: number; minutes: number }>();
+
+          rows.forEach((r: Record<string, unknown>) => {
+            const homeTeamId = r.HomeTeamID as number, awayTeamId = r.AwayTeamID as number;
+            const caughtByTeam = r.SnitchCaughtBy as number | null;
+
+            if (isSeekerPair) {
+              const hs = r.HomeSeekerID as number | null, as_ = r.AwaySeekerID as number | null;
+              if (hs != null && caughtByTeam === homeTeamId && r.SnitchCaughtTime != null) {
+                const e = seekerAgg.get(hs) || { totalTime: 0, catches: 0 };
+                e.totalTime += r.SnitchCaughtTime as number; e.catches++;
+                seekerAgg.set(hs, e);
+              }
+              if (as_ != null && caughtByTeam === awayTeamId && r.SnitchCaughtTime != null) {
+                const e = seekerAgg.get(as_) || { totalTime: 0, catches: 0 };
+                e.totalTime += r.SnitchCaughtTime as number; e.catches++;
+                seekerAgg.set(as_, e);
+              }
+            }
+
+            if (isBeaterPair) {
+              const homeOppShotAtt = (r.AwayChaser1ShotAtt as number || 0) + (r.AwayChaser2ShotAtt as number || 0) + (r.AwayChaser3ShotAtt as number || 0);
+              const awayOppShotAtt = (r.HomeChaser1ShotAtt as number || 0) + (r.HomeChaser2ShotAtt as number || 0) + (r.HomeChaser3ShotAtt as number || 0);
+              const hb1 = r.HomeBeater1ID as number | null, hb2 = r.HomeBeater2ID as number | null;
+              const ab1 = r.AwayBeater1ID as number | null, ab2 = r.AwayBeater2ID as number | null;
+              if (hb1 != null) { const e = beaterAgg.get(hb1) || { shotsAllowed: 0, minutes: 0 }; e.shotsAllowed += homeOppShotAtt; e.minutes += (r.HomeBeater1MinPlayed as number) || 0; beaterAgg.set(hb1, e); }
+              if (hb2 != null) { const e = beaterAgg.get(hb2) || { shotsAllowed: 0, minutes: 0 }; e.shotsAllowed += homeOppShotAtt; e.minutes += (r.HomeBeater2MinPlayed as number) || 0; beaterAgg.set(hb2, e); }
+              if (ab1 != null) { const e = beaterAgg.get(ab1) || { shotsAllowed: 0, minutes: 0 }; e.shotsAllowed += awayOppShotAtt; e.minutes += (r.AwayBeater1MinPlayed as number) || 0; beaterAgg.set(ab1, e); }
+              if (ab2 != null) { const e = beaterAgg.get(ab2) || { shotsAllowed: 0, minutes: 0 }; e.shotsAllowed += awayOppShotAtt; e.minutes += (r.AwayBeater2MinPlayed as number) || 0; beaterAgg.set(ab2, e); }
+            }
+          });
+
+          if (seekerAgg.size > 0) {
+            let best: number | null = null;
+            seekerAgg.forEach(({ totalTime, catches }) => {
+              if (catches === 0) return;
+              const avg = totalTime / catches;
+              if (best === null || avg < best) best = avg; // lower time-to-catch = better
+            });
+            if (best !== null) catchBestMap.set(key, best);
+          }
+
+          if (beaterAgg.size > 0) {
+            let best: number | null = null;
+            beaterAgg.forEach(({ shotsAllowed, minutes }) => {
+              if (shotsAllowed === 0 || minutes === 0) return;
+              const rate = minutes / shotsAllowed;
+              if (best === null || rate > best) best = rate; // higher = fewer shots allowed per minute = better defense
+            });
+            if (best !== null) shotsAllowedBestMap.set(key, best);
+          }
+        }
+      }
+      setLeagueCatchBest(catchBestMap);
+      setLeagueShotsAllowedBest(shotsAllowedBestMap);
+
       setLeagueMaxes(maxMap);
       awardEntries.sort((a, b) => { if (a.scope !== b.scope) return a.scope === "league" ? -1 : 1; return a.SeasonID - b.SeasonID; });
       setLeagueLeaders(awardEntries);
@@ -727,6 +941,19 @@ export default function PlayerProfile() {
     teammatesProtected: filteredStats.reduce((s, r) => s + (r.TeammatesProtected || 0), 0),
     bludgerShotsFaced: filteredStats.reduce((s, r) => s + (r.BludgerShotsFaced || 0), 0),
     snitchSpotted: filteredStats.reduce((s, r) => s + (r.SnitchSpotted || 0), 0),
+    // Match-level-derived — looked up per row via the season|league|team aggregate maps
+    seekerCatches: filteredStats.reduce((sum, r) => {
+      if (r.SeasonID == null || r.LeagueID == null || r.TeamID == null) return sum;
+      return sum + (seekerCatchMap.get(`${r.SeasonID}|${r.LeagueID}|${r.TeamID}`)?.catches || 0);
+    }, 0),
+    seekerCatchTotalTime: filteredStats.reduce((sum, r) => {
+      if (r.SeasonID == null || r.LeagueID == null || r.TeamID == null) return sum;
+      return sum + (seekerCatchMap.get(`${r.SeasonID}|${r.LeagueID}|${r.TeamID}`)?.totalTime || 0);
+    }, 0),
+    shotsAllowed: filteredStats.reduce((sum, r) => {
+      if (r.SeasonID == null || r.LeagueID == null || r.TeamID == null) return sum;
+      return sum + (beaterShotsAllowedMap.get(`${r.SeasonID}|${r.LeagueID}|${r.TeamID}`)?.totalShotsAllowed || 0);
+    }, 0),
   };
 
 
@@ -737,8 +964,13 @@ export default function PlayerProfile() {
 
   const updateBests = (key: string, s: typeof stats[0]) => {
     const mins = s.MinPlayed || 0;
-    const existing = bestByComp.get(key) || { goals: 0, gsc: 0, saves: 0, sf: 0, gp: 0, mins: 0 };
-    const existingExt = bestExtByComp.get(key) || { shotPct: null, passPct: null, snitchPct: null, svPct: null, keeperPassPct: null, bludgersHit: 0, turnovers: 0, teammates: 0, sfPerGP: null, minPerGoal: null };
+    const existing = bestByComp.get(key) || { goals: 0, gsc: 0, saves: 0, sf: 0, gp: 0, mins: 0, shotsAllowed: 0 };
+    const existingExt = bestExtByComp.get(key) || {
+      shotPct: null, passPct: null, snitchPct: null, svPct: null, keeperPassPct: null,
+      bludgersHit: 0, turnovers: 0, teammates: 0, minPerGoal: null,
+      minPerSave: null, minPerShotFaced: null, minPerBH: null, minPerTF: null, minPerTP: null,
+      minPerShotsAllowed: null, avgCatchTime: null,
+    };
     if ((s.Goals || 0) > existing.goals) existing.goals = s.Goals || 0;
     if ((s.GoldenSnitchCatches || 0) > existing.gsc) existing.gsc = s.GoldenSnitchCatches || 0;
     if ((s.KeeperSaves || 0) > existing.saves) existing.saves = s.KeeperSaves || 0;
@@ -749,17 +981,42 @@ export default function PlayerProfile() {
     const passAtt = s.PassAtt || 0; const passComp = s.PassComp || 0;
     const kPassAtt = s.KeeperPassAtt || 0; const kPassComp = s.KeeperPassComp || 0;
     const bh = s.BludgersHit || 0; const tf = s.TurnoversForced || 0; const tp = s.TeammatesProtected || 0;
-    const bsf = s.BludgerShotsFaced || 0;
+    const saves = s.KeeperSaves || 0; const sf = s.KeeperShotsFaced || 0;
     if (shotAtt > 0) { const v = (shotScored / shotAtt) * 100; if (existingExt.shotPct === null || v > existingExt.shotPct) existingExt.shotPct = v; }
     if (passAtt > 0 && s.Position === "Chaser") { const v = (passComp / passAtt) * 100; if (existingExt.passPct === null || v > existingExt.passPct) existingExt.passPct = v; }
     if (kPassAtt > 0 && s.Position === "Keeper") { const v = (kPassComp / kPassAtt) * 100; if (existingExt.keeperPassPct === null || v > existingExt.keeperPassPct) existingExt.keeperPassPct = v; }
     if ((s.GamesPlayed || 0) > 0 && (s.GoldenSnitchCatches || 0) > 0) { const v = ((s.GoldenSnitchCatches || 0) / (s.GamesPlayed || 1)) * 100; if (existingExt.snitchPct === null || v > existingExt.snitchPct) existingExt.snitchPct = v; }
-    if ((s.KeeperShotsFaced || 0) > 0) { const v = (s.KeeperSaves || 0) / (s.KeeperShotsFaced || 1) * 100; if (existingExt.svPct === null || v > existingExt.svPct) existingExt.svPct = v; }
+    if (sf > 0) { const v = (saves / sf) * 100; if (existingExt.svPct === null || v > existingExt.svPct) existingExt.svPct = v; }
     if (bh > existingExt.bludgersHit) existingExt.bludgersHit = bh;
     if (tf > existingExt.turnovers) existingExt.turnovers = tf;
     if (tp > existingExt.teammates) existingExt.teammates = tp;
-    if ((s.GamesPlayed || 0) > 0 && bsf > 0) { const v = bsf / (s.GamesPlayed || 1); if (existingExt.sfPerGP === null || v > existingExt.sfPerGP) existingExt.sfPerGP = v; }
     if ((s.Goals || 0) > 0 && mins > 0) { const v = mins / (s.Goals || 1); if (existingExt.minPerGoal === null || v < existingExt.minPerGoal) existingExt.minPerGoal = v; }
+    if (saves > 0 && mins > 0) { const v = mins / saves; if (existingExt.minPerSave === null || v < existingExt.minPerSave) existingExt.minPerSave = v; }
+    if (sf > 0 && mins > 0) { const v = mins / sf; if (existingExt.minPerShotFaced === null || v < existingExt.minPerShotFaced) existingExt.minPerShotFaced = v; }
+    if (bh > 0 && mins > 0) { const v = mins / bh; if (existingExt.minPerBH === null || v < existingExt.minPerBH) existingExt.minPerBH = v; }
+    if (tf > 0 && mins > 0) { const v = mins / tf; if (existingExt.minPerTF === null || v < existingExt.minPerTF) existingExt.minPerTF = v; }
+    if (tp > 0 && mins > 0) { const v = mins / tp; if (existingExt.minPerTP === null || v < existingExt.minPerTP) existingExt.minPerTP = v; }
+
+    // Match-level-derived stats (not in the player_season_stats view) — looked up
+    // via the season|league|team aggregate maps built from raw match data.
+    if (s.Position === "Seeker" && s.SeasonID != null && s.LeagueID != null && s.TeamID != null) {
+      const agg = seekerCatchMap.get(`${s.SeasonID}|${s.LeagueID}|${s.TeamID}`);
+      if (agg && agg.catches > 0) {
+        const avg = agg.totalTime / agg.catches;
+        if (existingExt.avgCatchTime === null || avg < existingExt.avgCatchTime) existingExt.avgCatchTime = avg;
+      }
+    }
+    if (s.Position === "Beater" && s.SeasonID != null && s.LeagueID != null && s.TeamID != null) {
+      const agg = beaterShotsAllowedMap.get(`${s.SeasonID}|${s.LeagueID}|${s.TeamID}`);
+      if (agg) {
+        if (agg.totalShotsAllowed > existing.shotsAllowed) existing.shotsAllowed = agg.totalShotsAllowed;
+        if (agg.totalShotsAllowed > 0 && mins > 0) {
+          const rate = mins / agg.totalShotsAllowed;
+          if (existingExt.minPerShotsAllowed === null || rate > existingExt.minPerShotsAllowed) existingExt.minPerShotsAllowed = rate;
+        }
+      }
+    }
+
     bestByComp.set(key, existing);
     bestExtByComp.set(key, existingExt);
   };
@@ -771,10 +1028,10 @@ export default function PlayerProfile() {
   });
 
   // By Competition aggregates — now directly from view fields
-  const byCompetition = new Map<string, { gp: number; goals: number; gsc: number; saves: number; shotsFaced: number; minutes: number; shotAtt: number; shotScored: number; passAtt: number; passComp: number; kPassAtt: number; kPassComp: number; bh: number; tf: number; tp: number; bsf: number; snitchSpotted: number }>();
+  const byCompetition = new Map<string, { gp: number; goals: number; gsc: number; saves: number; shotsFaced: number; minutes: number; shotAtt: number; shotScored: number; passAtt: number; passComp: number; kPassAtt: number; kPassComp: number; bh: number; tf: number; tp: number; bsf: number; snitchSpotted: number; shotsAllowed: number; seekerCatches: number; seekerCatchTotalTime: number }>();
   stats.forEach((s) => {
     const key = s.LeagueName || "Unknown";
-    const ex = byCompetition.get(key) || { gp: 0, goals: 0, gsc: 0, saves: 0, shotsFaced: 0, minutes: 0, shotAtt: 0, shotScored: 0, passAtt: 0, passComp: 0, kPassAtt: 0, kPassComp: 0, bh: 0, tf: 0, tp: 0, bsf: 0, snitchSpotted: 0 };
+    const ex = byCompetition.get(key) || { gp: 0, goals: 0, gsc: 0, saves: 0, shotsFaced: 0, minutes: 0, shotAtt: 0, shotScored: 0, passAtt: 0, passComp: 0, kPassAtt: 0, kPassComp: 0, bh: 0, tf: 0, tp: 0, bsf: 0, snitchSpotted: 0, shotsAllowed: 0, seekerCatches: 0, seekerCatchTotalTime: 0 };
     ex.gp += s.GamesPlayed || 0; ex.goals += s.Goals || 0; ex.gsc += s.GoldenSnitchCatches || 0;
     ex.saves += s.KeeperSaves || 0; ex.shotsFaced += s.KeeperShotsFaced || 0; ex.minutes += s.MinPlayed || 0;
     ex.shotAtt += s.ShotAtt || 0; ex.shotScored += s.ShotScored || 0;
@@ -782,17 +1039,36 @@ export default function PlayerProfile() {
     ex.kPassAtt += s.KeeperPassAtt || 0; ex.kPassComp += s.KeeperPassComp || 0;
     ex.bh += s.BludgersHit || 0; ex.tf += s.TurnoversForced || 0; ex.tp += s.TeammatesProtected || 0;
     ex.bsf += s.BludgerShotsFaced || 0; ex.snitchSpotted += s.SnitchSpotted || 0;
+    if (s.SeasonID != null && s.LeagueID != null && s.TeamID != null) {
+      const aggKey = `${s.SeasonID}|${s.LeagueID}|${s.TeamID}`;
+      ex.shotsAllowed += beaterShotsAllowedMap.get(aggKey)?.totalShotsAllowed || 0;
+      const catchAgg = seekerCatchMap.get(aggKey);
+      ex.seekerCatches += catchAgg?.catches || 0;
+      ex.seekerCatchTotalTime += catchAgg?.totalTime || 0;
+    }
     byCompetition.set(key, ex);
   });
 
-  function isLeagueLeader(s: StatLine, statKey: string): boolean {
+  const LEADER_EPS = 0.001; // float tolerance for rate-stat comparisons
+
+  // Generic per-stat league-leader check. `val` is the value THIS row/column
+  // actually displays; each column calls this with its own value and stat key,
+  // so a player leading in Goals but not Sh% only gets Goals highlighted.
+  function isLeagueLeader(s: StatLine, statKey: string, val: number | null): boolean {
+    if (val == null || val <= 0) return false;
     const pairKey = `${s.SeasonID}|${s.LeagueName}`;
-    const maxes = leagueMaxes.get(pairKey);
-    if (!maxes) return false;
-    const max = maxes.get(statKey);
-    if (max == null) return false;
-    const val = statKey === "Goals" ? (s.Goals || 0) : statKey === "GoldenSnitchCatches" ? (s.GoldenSnitchCatches || 0) : statKey === "KeeperSaves" ? (s.KeeperSaves || 0) : 0;
-    return val > 0 && val === max;
+    const max = leagueMaxes.get(pairKey)?.get(statKey);
+    if (max == null || max <= 0) return false;
+    return Math.abs(val - max) < LEADER_EPS;
+  }
+
+  // Same idea, for the two match-level-only stats (Average Time to Catch, Min/Shots
+  // Allowed) whose league bests live in their own maps rather than `leagueMaxes`.
+  function isLeagueLeaderFromMap(map: Map<string, number>, seasonId: number | null, leagueName: string | null, val: number | null): boolean {
+    if (val == null || seasonId == null || !leagueName) return false;
+    const best = map.get(`${seasonId}|${leagueName}`);
+    if (best == null) return false;
+    return Math.abs(val - best) < LEADER_EPS;
   }
 
   function allTimeClass(val: number, best: number): string {
@@ -966,15 +1242,21 @@ export default function PlayerProfile() {
                     {isChaser && <th className={`${thClass} text-right`}>Min/G</th>}
                     {isSeeker && <th className={`${thClass} text-right`}>GSC</th>}
                     {isSeeker && <th className={`${thClass} text-right`}>Snitch%</th>}
-                    {isSeeker && <th className={`${thClass} text-right`}>Spotted</th>}
+                    {isSeeker && <th className={`${thClass} text-right`}>Avg Catch</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>Saves</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>SF</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>Sv%</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>Pass%</th>}
+                    {isKeeper && <th className={`${thClass} text-right`}>Min/Sv</th>}
+                    {isKeeper && <th className={`${thClass} text-right`}>Min/SF</th>}
                     {isBeater && <th className={`${thClass} text-right`}>BH</th>}
                     {isBeater && <th className={`${thClass} text-right`}>TF</th>}
                     {isBeater && <th className={`${thClass} text-right`}>TP</th>}
-                    {isBeater && <th className={`${thClass} text-right`}>SF/GP</th>}
+                    {isBeater && <th className={`${thClass} text-right`}>Min/BH</th>}
+                    {isBeater && <th className={`${thClass} text-right`}>Min/TF</th>}
+                    {isBeater && <th className={`${thClass} text-right`}>Min/TP</th>}
+                    {isBeater && <th className={`${thClass} text-right`}>SA</th>}
+                    {isBeater && <th className={`${thClass} text-right`}>Min/SA</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -984,22 +1266,17 @@ export default function PlayerProfile() {
                     const rowIsKeeper = s.Position === "Keeper";
                     const rowIsBeater = s.Position === "Beater";
 
-                    const isLeader = rowIsChaser ? isLeagueLeader(s, "Goals")
-                      : rowIsSeeker ? isLeagueLeader(s, "GoldenSnitchCatches")
-                      : rowIsKeeper ? isLeagueLeader(s, "KeeperSaves")
-                      : false;
                     const compKey = compFilter === "domestic" && s.LeagueName && domesticLeagueNames.has(s.LeagueName)
                       ? "domestic"
                       : (s.LeagueName || "Unknown");
                     const compBest = bestByComp.get(compKey);
                     const extBest = bestExtByComp.get(compKey) || null;
 
-                    // All values come directly from player_season_stats view
+                    // All standard values come directly from the player_season_stats view
                     const mins = s.MinPlayed || 0;
                     const shotAtt = s.ShotAtt || 0; const shotScored = s.ShotScored || 0;
                     const passAtt = s.PassAtt || 0; const passComp = s.PassComp || 0;
                     const kPassAtt = s.KeeperPassAtt || 0; const kPassComp = s.KeeperPassComp || 0;
-                    const bsf = s.BludgerShotsFaced || 0;
 
                     // Compute all displayed values
                     const minPerGoalVal = rowIsChaser && (s.Goals || 0) > 0 && mins > 0
@@ -1014,37 +1291,80 @@ export default function PlayerProfile() {
                       ? (s.KeeperSaves || 0) / (s.KeeperShotsFaced || 1) * 100 : null;
                     const passPctKeeperVal = rowIsKeeper && kPassAtt > 0
                       ? (kPassComp / kPassAtt) * 100 : null;
-                    const sfPerGPVal = rowIsBeater && (s.GamesPlayed || 0) > 0 && bsf > 0
-                      ? bsf / (s.GamesPlayed || 1) : null;
                     const bludgersHitVal = rowIsBeater ? (s.BludgersHit || 0) : null;
                     const turnoversVal = rowIsBeater ? (s.TurnoversForced || 0) : null;
                     const teammatesVal = rowIsBeater ? (s.TeammatesProtected || 0) : null;
-                    const snitchSpottedVal = rowIsSeeker ? (s.SnitchSpotted || 0) : null;
                     const sfVal = rowIsKeeper ? (s.KeeperShotsFaced || 0) : null;
+                    const minPerSaveVal = rowIsKeeper && (s.KeeperSaves || 0) > 0 && mins > 0 ? mins / (s.KeeperSaves || 1) : null;
+                    const minPerSFVal = rowIsKeeper && (sfVal || 0) > 0 && mins > 0 ? mins / (sfVal || 1) : null;
+                    const minPerBHVal = rowIsBeater && (bludgersHitVal || 0) > 0 && mins > 0 ? mins / (bludgersHitVal || 1) : null;
+                    const minPerTFVal = rowIsBeater && (turnoversVal || 0) > 0 && mins > 0 ? mins / (turnoversVal || 1) : null;
+                    const minPerTPVal = rowIsBeater && (teammatesVal || 0) > 0 && mins > 0 ? mins / (teammatesVal || 1) : null;
 
-                    // SWAPPED: Gold shading = league leader that season; Bold italic = career best for competition
+                    // Match-level-derived values (Seeker avg catch time, Beater shots
+                    // allowed) — looked up via the season|league|team aggregate maps.
+                    const aggKey = s.SeasonID != null && s.LeagueID != null && s.TeamID != null ? `${s.SeasonID}|${s.LeagueID}|${s.TeamID}` : null;
+                    const seekerAgg = rowIsSeeker && aggKey ? seekerCatchMap.get(aggKey) : undefined;
+                    const avgCatchVal = seekerAgg && seekerAgg.catches > 0 ? seekerAgg.totalTime / seekerAgg.catches : null;
+                    const beaterAgg = rowIsBeater && aggKey ? beaterShotsAllowedMap.get(aggKey) : undefined;
+                    const shotsAllowedVal = beaterAgg ? beaterAgg.totalShotsAllowed : null;
+                    const minPerSAVal = rowIsBeater && (shotsAllowedVal || 0) > 0 && mins > 0 ? mins / (shotsAllowedVal || 1) : null;
+
+                    // Gold shading = this player individually led the league in THIS
+                    // stat that season (checked per-column, not once for the whole row);
+                    // bold italic = career best for this competition.
                     const goldBg = "bg-yellow-100 dark:bg-yellow-900/30";
                     const careerBestStyle = "font-bold italic";
                     const cc = (isBest: boolean, isLead: boolean) => isLead ? goldBg : isBest ? careerBestStyle : "";
 
-                    const goalsBest = rowIsChaser && compBest && (s.Goals || 0) > 0 && (s.Goals || 0) === compBest.goals;
-                    const gscBest = rowIsSeeker && compBest && (s.GoldenSnitchCatches || 0) > 0 && (s.GoldenSnitchCatches || 0) === compBest.gsc;
-                    const savesBest = rowIsKeeper && compBest && (s.KeeperSaves || 0) > 0 && (s.KeeperSaves || 0) === compBest.saves;
-                    const sfBest = rowIsKeeper && compBest && (s.KeeperShotsFaced || 0) > 0 && (s.KeeperShotsFaced || 0) === compBest.sf;
-                    const gpBest = compBest && (s.GamesPlayed || 0) > 0 && (s.GamesPlayed || 0) === compBest.gp;
+                    const gpLead = isLeagueLeader(s, "GP", s.GamesPlayed);
+                    const minLead = isLeagueLeader(s, "Min", mins);
+                    const goalsLead = rowIsChaser && isLeagueLeader(s, "Goals", s.Goals);
+                    const shotPctLead = rowIsChaser && isLeagueLeader(s, "ShotPct", shotPctVal);
+                    const passPctLead = rowIsChaser && isLeagueLeader(s, "PassPct", passPctChaserVal);
+                    const minPerGoalLead = rowIsChaser && isLeagueLeader(s, "MinPerGoal", minPerGoalVal);
+                    const gscLead = rowIsSeeker && isLeagueLeader(s, "GoldenSnitchCatches", s.GoldenSnitchCatches);
+                    const snitchPctLead = rowIsSeeker && isLeagueLeader(s, "SnitchPct", snitchPctVal);
+                    const avgCatchLead = rowIsSeeker && isLeagueLeaderFromMap(leagueCatchBest, s.SeasonID, s.LeagueName, avgCatchVal);
+                    const savesLead = rowIsKeeper && isLeagueLeader(s, "KeeperSaves", s.KeeperSaves);
+                    const sfLead = rowIsKeeper && isLeagueLeader(s, "KeeperShotsFaced", sfVal);
+                    const svPctLead = rowIsKeeper && isLeagueLeader(s, "SavePct", svPctVal);
+                    const keeperPassPctLead = rowIsKeeper && isLeagueLeader(s, "KeeperPassPct", passPctKeeperVal);
+                    const minPerSaveLead = rowIsKeeper && isLeagueLeader(s, "MinPerSave", minPerSaveVal);
+                    const minPerSFLead = rowIsKeeper && isLeagueLeader(s, "MinPerShotFaced", minPerSFVal);
+                    const bhLead = rowIsBeater && isLeagueLeader(s, "BludgersHit", bludgersHitVal);
+                    const tfLead = rowIsBeater && isLeagueLeader(s, "TurnoversForced", turnoversVal);
+                    const tpLead = rowIsBeater && isLeagueLeader(s, "TeammatesProtected", teammatesVal);
+                    const minPerBHLead = rowIsBeater && isLeagueLeader(s, "MinPerBH", minPerBHVal);
+                    const minPerTFLead = rowIsBeater && isLeagueLeader(s, "MinPerTF", minPerTFVal);
+                    const minPerTPLead = rowIsBeater && isLeagueLeader(s, "MinPerTP", minPerTPVal);
+                    const minPerSALead = rowIsBeater && isLeagueLeaderFromMap(leagueShotsAllowedBest, s.SeasonID, s.LeagueName, minPerSAVal);
+
+                    const gpBest = compBest && (s.GamesPlayed || 0) > 0 && s.GamesPlayed === compBest.gp;
                     const minsBest = compBest && mins > 0 && mins === compBest.mins;
 
-                    // Rate stat bests — compare actual value to stored best (null-safe)
+                    // Rate/counting stat bests — compare actual value to stored best (null-safe)
                     const EPS = 0.001; // float tolerance
-                    const shotPctBest = rowIsChaser && shotPctVal !== null && extBest?.shotPct !== null && extBest?.shotPct !== undefined && Math.abs(shotPctVal - extBest.shotPct) < EPS;
-                    const passPctChaserBest = rowIsChaser && passPctChaserVal !== null && extBest?.passPct !== null && extBest?.passPct !== undefined && Math.abs(passPctChaserVal - extBest.passPct) < EPS;
-                    const minPerGoalBest = rowIsChaser && minPerGoalVal !== null && extBest?.minPerGoal !== null && extBest?.minPerGoal !== undefined && Math.abs(minPerGoalVal - extBest.minPerGoal) < EPS;
-                    const snitchPctBest = rowIsSeeker && snitchPctVal !== null && extBest?.snitchPct !== null && extBest?.snitchPct !== undefined && Math.abs(snitchPctVal - extBest.snitchPct) < EPS;
-                    const svPctBest = rowIsKeeper && svPctVal !== null && extBest?.svPct !== null && extBest?.svPct !== undefined && Math.abs(svPctVal - extBest.svPct) < EPS;
-                    const keeperPassPctBest = rowIsKeeper && passPctKeeperVal !== null && extBest?.keeperPassPct !== null && extBest?.keeperPassPct !== undefined && Math.abs(passPctKeeperVal - extBest.keeperPassPct) < EPS;
-                    const bludgersBest = rowIsBeater && bludgersHitVal !== null && bludgersHitVal > 0 && extBest?.bludgersHit !== undefined && bludgersHitVal === extBest.bludgersHit;
-                    const turnoversBest = rowIsBeater && turnoversVal !== null && turnoversVal > 0 && extBest?.turnovers !== undefined && turnoversVal === extBest.turnovers;
-                    const sfPerGPBest = rowIsBeater && sfPerGPVal !== null && extBest?.sfPerGP !== null && extBest?.sfPerGP !== undefined && Math.abs(sfPerGPVal - extBest.sfPerGP) < EPS;
+                    const goalsBest = rowIsChaser && compBest && (s.Goals || 0) > 0 && s.Goals === compBest.goals;
+                    const shotPctBest = rowIsChaser && shotPctVal !== null && extBest?.shotPct != null && Math.abs(shotPctVal - extBest.shotPct) < EPS;
+                    const passPctChaserBest = rowIsChaser && passPctChaserVal !== null && extBest?.passPct != null && Math.abs(passPctChaserVal - extBest.passPct) < EPS;
+                    const minPerGoalBest = rowIsChaser && minPerGoalVal !== null && extBest?.minPerGoal != null && Math.abs(minPerGoalVal - extBest.minPerGoal) < EPS;
+                    const gscBest = rowIsSeeker && compBest && (s.GoldenSnitchCatches || 0) > 0 && s.GoldenSnitchCatches === compBest.gsc;
+                    const snitchPctBest = rowIsSeeker && snitchPctVal !== null && extBest?.snitchPct != null && Math.abs(snitchPctVal - extBest.snitchPct) < EPS;
+                    const avgCatchBest = rowIsSeeker && avgCatchVal !== null && extBest?.avgCatchTime != null && Math.abs(avgCatchVal - extBest.avgCatchTime) < EPS;
+                    const savesBest = rowIsKeeper && compBest && (s.KeeperSaves || 0) > 0 && s.KeeperSaves === compBest.saves;
+                    const sfBest = rowIsKeeper && compBest && (sfVal || 0) > 0 && sfVal === compBest.sf;
+                    const svPctBest = rowIsKeeper && svPctVal !== null && extBest?.svPct != null && Math.abs(svPctVal - extBest.svPct) < EPS;
+                    const keeperPassPctBest = rowIsKeeper && passPctKeeperVal !== null && extBest?.keeperPassPct != null && Math.abs(passPctKeeperVal - extBest.keeperPassPct) < EPS;
+                    const minPerSaveBest = rowIsKeeper && minPerSaveVal !== null && extBest?.minPerSave != null && Math.abs(minPerSaveVal - extBest.minPerSave) < EPS;
+                    const minPerSFBest = rowIsKeeper && minPerSFVal !== null && extBest?.minPerShotFaced != null && Math.abs(minPerSFVal - extBest.minPerShotFaced) < EPS;
+                    const bludgersBest = rowIsBeater && compBest && (bludgersHitVal || 0) > 0 && bludgersHitVal === extBest?.bludgersHit;
+                    const turnoversBest = rowIsBeater && (turnoversVal || 0) > 0 && turnoversVal === extBest?.turnovers;
+                    const teammatesBest = rowIsBeater && (teammatesVal || 0) > 0 && teammatesVal === extBest?.teammates;
+                    const minPerBHBest = rowIsBeater && minPerBHVal !== null && extBest?.minPerBH != null && Math.abs(minPerBHVal - extBest.minPerBH) < EPS;
+                    const minPerTFBest = rowIsBeater && minPerTFVal !== null && extBest?.minPerTF != null && Math.abs(minPerTFVal - extBest.minPerTF) < EPS;
+                    const minPerTPBest = rowIsBeater && minPerTPVal !== null && extBest?.minPerTP != null && Math.abs(minPerTPVal - extBest.minPerTP) < EPS;
+                    const minPerSABest = rowIsBeater && minPerSAVal !== null && extBest?.minPerShotsAllowed != null && Math.abs(minPerSAVal - extBest.minPerShotsAllowed) < EPS;
 
                     const rowClass = `border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`;
 
@@ -1067,28 +1387,35 @@ export default function PlayerProfile() {
                           ) : "—"}
                         </td>
                         {positionsPlayed.length > 1 && <td className={`${tdClass} text-xs text-muted-foreground`}>{s.Position}</td>}
-                        <td className={`px-3 py-1.5 text-right font-mono ${cc(gpBest, false)}`}>{s.GamesPlayed}</td>
-                        <td className={`px-3 py-1.5 text-right font-mono ${cc(minsBest, false)}`}>{fmtMin(mins)}</td>
-                        {isChaser && <td className={`px-3 py-1.5 text-right font-mono ${rowIsChaser ? cc(goalsBest, isLeader) : ""}`}>{rowIsChaser ? (s.Goals || 0) : "—"}</td>}
-                        {isChaser && <td className={`px-3 py-1.5 text-right font-mono ${rowIsChaser ? cc(shotPctBest, isLeader) : "text-muted-foreground"}`}>{rowIsChaser ? (shotPctVal !== null ? shotPctVal.toFixed(1) + "%" : "—") : "—"}</td>}
-                        {isChaser && <td className={`px-3 py-1.5 text-right font-mono ${rowIsChaser ? cc(passPctChaserBest, isLeader) : "text-muted-foreground"}`}>{rowIsChaser ? (passPctChaserVal !== null ? passPctChaserVal.toFixed(1) + "%" : "—") : "—"}</td>}
-                        {isChaser && <td className={`px-3 py-1.5 text-right font-mono ${rowIsChaser ? cc(minPerGoalBest, isLeader) : "text-muted-foreground"}`}>{rowIsChaser ? (minPerGoalVal !== null ? minPerGoalVal.toFixed(1) : "—") : "—"}</td>}
-                        {isSeeker && <td className={`px-3 py-1.5 text-right font-mono ${rowIsSeeker ? cc(gscBest, isLeader) : ""}`}>{rowIsSeeker ? (s.GoldenSnitchCatches || 0) : "—"}</td>}
-                        {isSeeker && <td className={`px-3 py-1.5 text-right font-mono ${rowIsSeeker ? cc(snitchPctBest, isLeader) : "text-muted-foreground"}`}>{rowIsSeeker ? (snitchPctVal !== null ? snitchPctVal.toFixed(1) + "%" : "—") : "—"}</td>}
-                        {isSeeker && <td className={`px-3 py-1.5 text-right font-mono ${rowIsSeeker ? cc(false, isLeader) : "text-muted-foreground"}`}>{rowIsSeeker ? (snitchSpottedVal ?? "—") : "—"}</td>}
-                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? cc(savesBest, isLeader) : ""}`}>{rowIsKeeper ? (s.KeeperSaves || 0) : "—"}</td>}
-                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? cc(sfBest, isLeader) : ""}`}>{rowIsKeeper ? (sfVal ?? "—") : "—"}</td>}
-                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? cc(svPctBest, isLeader) : "text-muted-foreground"}`}>{rowIsKeeper ? (svPctVal !== null ? svPctVal.toFixed(1) + "%" : "—") : "—"}</td>}
-                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? cc(keeperPassPctBest, isLeader) : "text-muted-foreground"}`}>{rowIsKeeper ? (passPctKeeperVal !== null ? passPctKeeperVal.toFixed(1) + "%" : "—") : "—"}</td>}
-                        {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(bludgersBest, isLeader) : ""}`}>{rowIsBeater ? (bludgersHitVal ?? "—") : "—"}</td>}
-                        {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(turnoversBest, isLeader) : ""}`}>{rowIsBeater ? (turnoversVal ?? "—") : "—"}</td>}
-                        {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(false, isLeader) : ""}`}>{rowIsBeater ? (teammatesVal ?? "—") : "—"}</td>}
-                        {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(sfPerGPBest, isLeader) : "text-muted-foreground"}`}>{rowIsBeater ? (sfPerGPVal !== null ? sfPerGPVal.toFixed(2) : "—") : "—"}</td>}
+                        <td className={`px-3 py-1.5 text-right font-mono ${cc(!!gpBest, gpLead)}`}>{s.GamesPlayed}</td>
+                        <td className={`px-3 py-1.5 text-right font-mono ${cc(!!minsBest, minLead)}`}>{fmtMin(mins)}</td>
+                        {isChaser && <td className={`px-3 py-1.5 text-right font-mono ${rowIsChaser ? cc(!!goalsBest, !!goalsLead) : ""}`}>{rowIsChaser ? (s.Goals || 0) : "—"}</td>}
+                        {isChaser && <td className={`px-3 py-1.5 text-right font-mono ${rowIsChaser ? cc(!!shotPctBest, !!shotPctLead) : "text-muted-foreground"}`}>{rowIsChaser ? (shotPctVal !== null ? shotPctVal.toFixed(1) + "%" : "—") : "—"}</td>}
+                        {isChaser && <td className={`px-3 py-1.5 text-right font-mono ${rowIsChaser ? cc(!!passPctChaserBest, !!passPctLead) : "text-muted-foreground"}`}>{rowIsChaser ? (passPctChaserVal !== null ? passPctChaserVal.toFixed(1) + "%" : "—") : "—"}</td>}
+                        {isChaser && <td className={`px-3 py-1.5 text-right font-mono ${rowIsChaser ? cc(!!minPerGoalBest, !!minPerGoalLead) : "text-muted-foreground"}`}>{rowIsChaser ? (minPerGoalVal !== null ? minPerGoalVal.toFixed(1) : "—") : "—"}</td>}
+                        {isSeeker && <td className={`px-3 py-1.5 text-right font-mono ${rowIsSeeker ? cc(!!gscBest, !!gscLead) : ""}`}>{rowIsSeeker ? (s.GoldenSnitchCatches || 0) : "—"}</td>}
+                        {isSeeker && <td className={`px-3 py-1.5 text-right font-mono ${rowIsSeeker ? cc(!!snitchPctBest, !!snitchPctLead) : "text-muted-foreground"}`}>{rowIsSeeker ? (snitchPctVal !== null ? snitchPctVal.toFixed(1) + "%" : "—") : "—"}</td>}
+                        {isSeeker && <td className={`px-3 py-1.5 text-right font-mono ${rowIsSeeker ? cc(!!avgCatchBest, !!avgCatchLead) : "text-muted-foreground"}`} title="Average minutes elapsed when THIS seeker personally caught the snitch — games they didn't catch it are excluded, not counted as 0.">{rowIsSeeker ? (avgCatchVal !== null ? avgCatchVal.toFixed(1) : "—") : "—"}</td>}
+                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? cc(!!savesBest, !!savesLead) : ""}`}>{rowIsKeeper ? (s.KeeperSaves || 0) : "—"}</td>}
+                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? cc(!!sfBest, !!sfLead) : ""}`}>{rowIsKeeper ? (sfVal ?? "—") : "—"}</td>}
+                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? cc(!!svPctBest, !!svPctLead) : "text-muted-foreground"}`}>{rowIsKeeper ? (svPctVal !== null ? svPctVal.toFixed(1) + "%" : "—") : "—"}</td>}
+                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? cc(!!keeperPassPctBest, !!keeperPassPctLead) : "text-muted-foreground"}`}>{rowIsKeeper ? (passPctKeeperVal !== null ? passPctKeeperVal.toFixed(1) + "%" : "—") : "—"}</td>}
+                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? cc(!!minPerSaveBest, !!minPerSaveLead) : "text-muted-foreground"}`}>{rowIsKeeper ? (minPerSaveVal !== null ? minPerSaveVal.toFixed(1) : "—") : "—"}</td>}
+                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${rowIsKeeper ? cc(!!minPerSFBest, !!minPerSFLead) : "text-muted-foreground"}`}>{rowIsKeeper ? (minPerSFVal !== null ? minPerSFVal.toFixed(1) : "—") : "—"}</td>}
+                        {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(!!bludgersBest, !!bhLead) : ""}`}>{rowIsBeater ? (bludgersHitVal ?? "—") : "—"}</td>}
+                        {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(!!turnoversBest, !!tfLead) : ""}`}>{rowIsBeater ? (turnoversVal ?? "—") : "—"}</td>}
+                        {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(!!teammatesBest, !!tpLead) : ""}`}>{rowIsBeater ? (teammatesVal ?? "—") : "—"}</td>}
+                        {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(!!minPerBHBest, !!minPerBHLead) : "text-muted-foreground"}`}>{rowIsBeater ? (minPerBHVal !== null ? minPerBHVal.toFixed(1) : "—") : "—"}</td>}
+                        {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(!!minPerTFBest, !!minPerTFLead) : "text-muted-foreground"}`}>{rowIsBeater ? (minPerTFVal !== null ? minPerTFVal.toFixed(1) : "—") : "—"}</td>}
+                        {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(!!minPerTPBest, !!minPerTPLead) : "text-muted-foreground"}`}>{rowIsBeater ? (minPerTPVal !== null ? minPerTPVal.toFixed(1) : "—") : "—"}</td>}
+                        {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? "" : ""}`} title="Chaser shot attempts allowed by the opposing team while these beaters played">{rowIsBeater ? (shotsAllowedVal ?? "—") : "—"}</td>}
+                        {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(!!minPerSABest, !!minPerSALead) : "text-muted-foreground"}`} title="Higher is better here — more minutes elapsing per shot allowed means better defense">{rowIsBeater ? (minPerSAVal !== null ? minPerSAVal.toFixed(1) : "—") : "—"}</td>}
                       </tr>
                     );
                   })}
                   {(() => {
                     const ct = "px-3 py-1.5 text-right font-mono text-foreground";
+                    const careerAvgCatch = careerTotals.seekerCatches > 0 ? careerTotals.seekerCatchTotalTime / careerTotals.seekerCatches : null;
                     return (
                       <tr className="border-t-2 border-primary bg-primary/5 font-bold">
                         <td className="px-3 py-1.5 text-foreground font-mono" colSpan={positionsPlayed.length > 1 ? 5 : 4}>Career Totals</td>
@@ -1100,15 +1427,21 @@ export default function PlayerProfile() {
                         {isChaser && <td className={ct}>{careerTotals.minutes > 0 && careerTotals.goals > 0 ? (careerTotals.minutes / careerTotals.goals).toFixed(1) : "—"}</td>}
                         {isSeeker && <td className={ct}>{careerTotals.gsc}</td>}
                         {isSeeker && <td className={ct}>{careerTotals.gp > 0 ? ((careerTotals.gsc / careerTotals.gp) * 100).toFixed(1) + "%" : "—"}</td>}
-                        {isSeeker && <td className={ct}>{careerTotals.snitchSpotted}</td>}
+                        {isSeeker && <td className={ct}>{careerAvgCatch !== null ? careerAvgCatch.toFixed(1) : "—"}</td>}
                         {isKeeper && <td className={ct}>{careerTotals.saves}</td>}
                         {isKeeper && <td className={ct}>{careerTotals.shotsFaced}</td>}
                         {isKeeper && <td className={ct}>{careerTotals.shotsFaced > 0 ? ((careerTotals.saves / careerTotals.shotsFaced) * 100).toFixed(1) + "%" : "—"}</td>}
                         {isKeeper && <td className={ct}>{careerTotals.keeperPassAtt > 0 ? ((careerTotals.keeperPassComp / careerTotals.keeperPassAtt) * 100).toFixed(1) + "%" : "—"}</td>}
+                        {isKeeper && <td className={ct}>{careerTotals.minutes > 0 && careerTotals.saves > 0 ? (careerTotals.minutes / careerTotals.saves).toFixed(1) : "—"}</td>}
+                        {isKeeper && <td className={ct}>{careerTotals.minutes > 0 && careerTotals.shotsFaced > 0 ? (careerTotals.minutes / careerTotals.shotsFaced).toFixed(1) : "—"}</td>}
                         {isBeater && <td className={ct}>{careerTotals.bludgersHit}</td>}
                         {isBeater && <td className={ct}>{careerTotals.turnoversForced}</td>}
                         {isBeater && <td className={ct}>{careerTotals.teammatesProtected}</td>}
-                        {isBeater && <td className={ct}>{careerTotals.gp > 0 && careerTotals.bludgerShotsFaced > 0 ? (careerTotals.bludgerShotsFaced / careerTotals.gp).toFixed(2) : "—"}</td>}
+                        {isBeater && <td className={ct}>{careerTotals.minutes > 0 && careerTotals.bludgersHit > 0 ? (careerTotals.minutes / careerTotals.bludgersHit).toFixed(1) : "—"}</td>}
+                        {isBeater && <td className={ct}>{careerTotals.minutes > 0 && careerTotals.turnoversForced > 0 ? (careerTotals.minutes / careerTotals.turnoversForced).toFixed(1) : "—"}</td>}
+                        {isBeater && <td className={ct}>{careerTotals.minutes > 0 && careerTotals.teammatesProtected > 0 ? (careerTotals.minutes / careerTotals.teammatesProtected).toFixed(1) : "—"}</td>}
+                        {isBeater && <td className={ct}>{careerTotals.shotsAllowed > 0 ? careerTotals.shotsAllowed : "—"}</td>}
+                        {isBeater && <td className={ct}>{careerTotals.minutes > 0 && careerTotals.shotsAllowed > 0 ? (careerTotals.minutes / careerTotals.shotsAllowed).toFixed(1) : "—"}</td>}
                       </tr>
                     );
                   })()}
@@ -1116,11 +1449,12 @@ export default function PlayerProfile() {
               </table>
             </div>
             <div className="px-3 py-1.5 bg-secondary/50 text-xs text-muted-foreground font-sans flex gap-4 flex-wrap">
-              <span><span className="bg-yellow-100 dark:bg-yellow-900/30 px-1 rounded">Shaded</span> = league leader that season</span>
+              <span><span className="bg-yellow-100 dark:bg-yellow-900/30 px-1 rounded">Shaded</span> = led the league in that stat that season</span>
               <span><span className="font-bold italic">Bold italic</span> = career best for competition</span>
-              {isChaser && <span>Sh% = Shooting%, Pass% = Passing%</span>}
-              {isBeater && <span>BH = Bludgers Hit, TF = Turnovers Forced, TP = Teammates Protected</span>}
-              {isSeeker && <span>Spotted = Snitch Spottings</span>}
+              {isChaser && <span>Sh% = Shooting%, Pass% = Passing%, Min/G = Minutes per Goal</span>}
+              {isSeeker && <span>Avg Catch = average minutes to catch, over games caught only</span>}
+              {isKeeper && <span>SF = Shots Faced, Sv% = Save%</span>}
+              {isBeater && <span>BH = Bludgers Hit, TF = Turnovers Forced, TP = Teammates Protected, SA = Shots Allowed (higher Min/SA = better defense)</span>}
             </div>
           </div>
 
@@ -1142,19 +1476,27 @@ export default function PlayerProfile() {
                     {isChaser && <th className={`${thClass} text-right`}>Min/G</th>}
                     {isSeeker && <th className={`${thClass} text-right`}>GSC</th>}
                     {isSeeker && <th className={`${thClass} text-right`}>Snitch%</th>}
-                    {isSeeker && <th className={`${thClass} text-right`}>Spotted</th>}
+                    {isSeeker && <th className={`${thClass} text-right`}>Avg Catch</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>Saves</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>SF</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>Sv%</th>}
                     {isKeeper && <th className={`${thClass} text-right`}>Pass%</th>}
+                    {isKeeper && <th className={`${thClass} text-right`}>Min/Sv</th>}
+                    {isKeeper && <th className={`${thClass} text-right`}>Min/SF</th>}
                     {isBeater && <th className={`${thClass} text-right`}>BH</th>}
                     {isBeater && <th className={`${thClass} text-right`}>TF</th>}
                     {isBeater && <th className={`${thClass} text-right`}>TP</th>}
-                    {isBeater && <th className={`${thClass} text-right`}>SF/GP</th>}
+                    {isBeater && <th className={`${thClass} text-right`}>Min/BH</th>}
+                    {isBeater && <th className={`${thClass} text-right`}>Min/TF</th>}
+                    {isBeater && <th className={`${thClass} text-right`}>Min/TP</th>}
+                    {isBeater && <th className={`${thClass} text-right`}>SA</th>}
+                    {isBeater && <th className={`${thClass} text-right`}>Min/SA</th>}
                   </tr>
                 </thead>
                 <tbody>
-                  {[...byCompetition.entries()].map(([comp, totals], i) => (
+                  {[...byCompetition.entries()].map(([comp, totals], i) => {
+                    const compAvgCatch = totals.seekerCatches > 0 ? totals.seekerCatchTotalTime / totals.seekerCatches : null;
+                    return (
                     <tr key={comp} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
                       <td className={`${tdClass}`}>{comp}</td>
                       <td className={`${tdClass} text-right font-mono`}>{totals.gp}</td>
@@ -1165,17 +1507,24 @@ export default function PlayerProfile() {
                       {isChaser && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.minutes > 0 && totals.goals > 0 ? (totals.minutes / totals.goals).toFixed(1) : "—"}</td>}
                       {isSeeker && <td className={`${tdClass} text-right font-mono`}>{totals.gsc}</td>}
                       {isSeeker && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.gp > 0 ? ((totals.gsc / totals.gp) * 100).toFixed(1) + "%" : "—"}</td>}
-                      {isSeeker && <td className={`${tdClass} text-right font-mono`}>{totals.snitchSpotted}</td>}
+                      {isSeeker && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{compAvgCatch !== null ? compAvgCatch.toFixed(1) : "—"}</td>}
                       {isKeeper && <td className={`${tdClass} text-right font-mono`}>{totals.saves}</td>}
                       {isKeeper && <td className={`${tdClass} text-right font-mono`}>{totals.shotsFaced}</td>}
                       {isKeeper && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.shotsFaced > 0 ? ((totals.saves / totals.shotsFaced) * 100).toFixed(1) + "%" : "—"}</td>}
                       {isKeeper && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.kPassAtt > 0 ? ((totals.kPassComp / totals.kPassAtt) * 100).toFixed(1) + "%" : "—"}</td>}
+                      {isKeeper && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.minutes > 0 && totals.saves > 0 ? (totals.minutes / totals.saves).toFixed(1) : "—"}</td>}
+                      {isKeeper && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.minutes > 0 && totals.shotsFaced > 0 ? (totals.minutes / totals.shotsFaced).toFixed(1) : "—"}</td>}
                       {isBeater && <td className={`${tdClass} text-right font-mono`}>{totals.bh}</td>}
                       {isBeater && <td className={`${tdClass} text-right font-mono`}>{totals.tf}</td>}
                       {isBeater && <td className={`${tdClass} text-right font-mono`}>{totals.tp}</td>}
-                      {isBeater && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.gp > 0 && totals.bsf > 0 ? (totals.bsf / totals.gp).toFixed(2) : "—"}</td>}
+                      {isBeater && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.minutes > 0 && totals.bh > 0 ? (totals.minutes / totals.bh).toFixed(1) : "—"}</td>}
+                      {isBeater && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.minutes > 0 && totals.tf > 0 ? (totals.minutes / totals.tf).toFixed(1) : "—"}</td>}
+                      {isBeater && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.minutes > 0 && totals.tp > 0 ? (totals.minutes / totals.tp).toFixed(1) : "—"}</td>}
+                      {isBeater && <td className={`${tdClass} text-right font-mono`}>{totals.shotsAllowed > 0 ? totals.shotsAllowed : "—"}</td>}
+                      {isBeater && <td className={`${tdClass} text-right font-mono text-muted-foreground`}>{totals.minutes > 0 && totals.shotsAllowed > 0 ? (totals.minutes / totals.shotsAllowed).toFixed(1) : "—"}</td>}
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
