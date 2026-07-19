@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
-import { getLeagueTierLabel } from "@/lib/helpers";
+import { getLeagueTierLabel, groupTotyByPosition } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
 
 interface League {
@@ -96,6 +96,7 @@ export default function LeagueHistory() {
   const [seasons, setSeasons] = useState<SeasonSummary[]>([]);
   const [awards, setAwards] = useState<AwardEntry[]>([]);
   const [playerMap, setPlayerMap] = useState<Map<number,string>>(new Map());
+  const [playerPosMap, setPlayerPosMap] = useState<Map<number,string>>(new Map());
   const [expandedSeason, setExpandedSeason] = useState<number|null>(null);
   const [seasonResults, setSeasonResults] = useState<any[]>([]);
   const [teamMap, setTeamMap] = useState<Record<number,string>>({});
@@ -120,7 +121,7 @@ export default function LeagueHistory() {
         : fetchAllRows("teams", { select:"TeamID,FullName", filters:[{method:"eq",args:["LeagueID",lid]}] }),
       cup ? Promise.resolve([]) : fetchAllRows("standings", { select:"*", filters:[{method:"eq",args:["LeagueID",lid]}], order:{column:"totalpoints",ascending:false} }),
       fetchAllRows("awards", { select:"*", filters:[{method:"eq",args:["leagueid",lid]}], order:{column:"seasonid",ascending:true} }),
-      fetchAllRows("players", { select:"PlayerID,PlayerName" }),
+      fetchAllRows("players", { select:"PlayerID,PlayerName,Position" }),
       cup ? fetchAllRows("results", { select:"MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID,SeasonID", filters:[{method:"eq",args:["LeagueID",lid]}], order:{column:"WeekID",ascending:true} }) : Promise.resolve([]),
       cup ? fetchAllRows("matchdays", { select:"Matchday,MatchdayWeek,SeasonID,LeagueID", filters:[{method:"eq",args:["LeagueID",lid]}] }) : Promise.resolve([]),
     ]).then(async ([{data:leagueData}, teamData, standingsData, awardsData, playerData, resultsData, matchdaysData]) => {
@@ -338,8 +339,13 @@ export default function LeagueHistory() {
       if (awardsData) setAwards(awardsData as AwardEntry[]);
       if (playerData) {
         const pm = new Map<number,string>();
-        (playerData as any[]).forEach(p => { if (p.PlayerID&&p.PlayerName) pm.set(p.PlayerID,p.PlayerName); });
+        const ppm = new Map<number,string>();
+        (playerData as any[]).forEach(p => {
+          if (p.PlayerID&&p.PlayerName) pm.set(p.PlayerID,p.PlayerName);
+          if (p.PlayerID&&p.Position) ppm.set(p.PlayerID,p.Position);
+        });
         setPlayerMap(pm);
+        setPlayerPosMap(ppm);
       }
     });
   }, [id]);
@@ -609,12 +615,6 @@ export default function LeagueHistory() {
                               const isTeamNum=[...plCounts.values()].some(c=>c>1);
                               const pls=[...new Set(toty.map(e=>e.placement))].sort();
                               const TEAM_LABELS: Record<number,string> = {1:"1st Team",2:"2nd Team",3:"3rd Team"};
-                              const slotGroups = (entries: AwardEntry[]) => [
-                                {label:"Chasers", players: entries.slice(0,3)},
-                                {label:"Beaters", players: entries.slice(3,5)},
-                                {label:"Keeper",  players: entries.slice(5,6)},
-                                {label:"Seeker",  players: entries.slice(6,7)},
-                              ].filter(s=>s.players.length>0);
                               return (
                                 <div className="pt-1">
                                   <Link to={`/league/${id}/award/${encodeURIComponent("Team of the Year")}`} className="text-sm font-semibold text-accent hover:underline font-sans block mb-2">Team of the Year →</Link>
@@ -624,7 +624,7 @@ export default function LeagueHistory() {
                                         ? toty.filter(e=>e.placement===pl)
                                         : [...toty].sort((a,b)=>a.placement-b.placement);
                                       const m = pl===1?MEDAL.gold:pl===2?MEDAL.silver:MEDAL.bronze;
-                                      const slots = slotGroups(teamEntries);
+                                      const slots = groupTotyByPosition(teamEntries, playerPosMap);
                                       return (
                                         <div key={pl} className={`rounded border ${m.border} ${m.bg} p-2.5`}>
                                           {isTeamNum && <p className={`text-xs font-bold mb-1.5 ${m.text}`}>{TEAM_LABELS[pl] || `${pl}th Team`}</p>}
@@ -777,12 +777,6 @@ export default function LeagueHistory() {
                         const entries=totyEntries.filter(e=>e.seasonid===sid);
                         const pls = totyIsTeamNum ? [...new Set(entries.map(e=>e.placement))].sort() : [1];
                         const TEAM_LABELS: Record<number,string> = {1:"1st Team",2:"2nd Team",3:"3rd Team"};
-                        const slotGroups = (es: AwardEntry[]) => [
-                          {label:"Chasers", players: es.slice(0,3)},
-                          {label:"Beaters", players: es.slice(3,5)},
-                          {label:"Keeper",  players: es.slice(5,6)},
-                          {label:"Seeker",  players: es.slice(6,7)},
-                        ].filter(s=>s.players.length>0);
                         return (
                           <div key={sid} className={`border-t border-border ${i%2===0?"bg-card":"bg-table-stripe"}`}>
                             <div className="px-4 pt-3 pb-1">
@@ -794,7 +788,7 @@ export default function LeagueHistory() {
                                   ? entries.filter(e=>e.placement===pl)
                                   : [...entries].sort((a,b)=>a.placement-b.placement);
                                 const m = pl===1?MEDAL.gold:pl===2?MEDAL.silver:MEDAL.bronze;
-                                const slots = slotGroups(teamEntries);
+                                const slots = groupTotyByPosition(teamEntries, playerPosMap);
                                 return (
                                   <div key={pl} className={`rounded border ${m.border} ${m.bg} p-3`}>
                                     {totyIsTeamNum&&<p className={`text-xs font-bold mb-1.5 ${m.text}`}>{TEAM_LABELS[pl]||`${pl}th Team`}</p>}

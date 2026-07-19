@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
-import { getLeagueTierLabel } from "@/lib/helpers";
+import { getLeagueTierLabel, groupTotyByPosition } from "@/lib/helpers";
 import { useSortableTable } from "@/hooks/useSortableTable";
 import { fetchAllRows } from "@/lib/fetchAll";
 
@@ -1016,6 +1016,9 @@ export default function LeaguePage() {
                                   const teamNumbers = [...new Set(teamOfYear.map(e => e.placement))].sort();
                                   return teamNumbers.map(placement => {
                                     const teamEntries = teamOfYear.filter(e => e.placement === placement);
+                                    // Ordered by actual position (Chasers, Beaters, Keeper, Seeker) —
+                                    // not raw DB order — so the full 7-player scope reads consistently.
+                                    const orderedEntries = groupTotyByPosition(teamEntries, playerPosMap).flatMap(g => g.players);
                                     return (
                                       <div key={placement} className="mb-2">
                                         <p className="text-xs text-muted-foreground font-mono mb-0.5">{ordinal(placement)} Team</p>
@@ -1027,7 +1030,7 @@ export default function LeaguePage() {
                                             </tr>
                                           </thead>
                                           <tbody>
-                                            {teamEntries.map((entry, i) => {
+                                            {orderedEntries.map((entry, i) => {
                                               const pName = playerMap.get(entry.playerid) || `Player #${entry.playerid}`;
                                               const pos = playerPosMap.get(entry.playerid) || "—";
                                               return (
@@ -1045,7 +1048,7 @@ export default function LeaguePage() {
                                     );
                                   });
                                 } else {
-                                  const sorted = [...teamOfYear].sort((a, b) => a.placement - b.placement);
+                                  const sorted = groupTotyByPosition(teamOfYear, playerPosMap).flatMap(g => g.players);
                                   return (
                                     <table className="w-full text-sm font-sans">
                                       <thead>

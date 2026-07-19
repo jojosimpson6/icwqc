@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
-import { getLeagueTierLabel } from "@/lib/helpers";
+import { getLeagueTierLabel, groupTotyByPosition } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { cachedQuery } from "@/lib/queryCache";
 import { CardSkeleton, ErrorState } from "@/components/StateMessage";
@@ -45,6 +45,7 @@ export default function AwardHistory() {
   const [league, setLeague] = useState<League | null>(null);
   const [awards, setAwards] = useState<AwardEntry[]>([]);
   const [playerMap, setPlayerMap] = useState<Map<number, string>>(new Map());
+  const [playerPosMap, setPlayerPosMap] = useState<Map<number, string>>(new Map());
   const [loadError, setLoadError] = useState(false);
 
   useEffect(() => {
@@ -61,16 +62,19 @@ export default function AwardHistory() {
         ],
         order: { column: "seasonid", ascending: false },
       }),
-      fetchAllRows("players", { select: "PlayerID, PlayerName" }),
+      fetchAllRows("players", { select: "PlayerID, PlayerName, Position" }),
     ]).then(([{ data: leagueData }, awardsData, playerData]) => {
       if (leagueData) setLeague(leagueData);
       if (awardsData) setAwards(awardsData as AwardEntry[]);
       if (playerData) {
         const pm = new Map<number, string>();
+        const ppm = new Map<number, string>();
         (playerData as any[]).forEach((p: any) => {
           if (p.PlayerID && p.PlayerName) pm.set(p.PlayerID, p.PlayerName);
+          if (p.PlayerID && p.Position) ppm.set(p.PlayerID, p.Position);
         });
         setPlayerMap(pm);
+        setPlayerPosMap(ppm);
       }
     }).catch(err => {
       console.error("Failed to load award history:", err);
@@ -100,8 +104,7 @@ export default function AwardHistory() {
   awards.forEach(e => totyPlacementCounts.set(e.placement, (totyPlacementCounts.get(e.placement) || 0) + 1));
   const totyIsTeamNumber = [...totyPlacementCounts.values()].some(c => c > 1);
 
-  // TOTY position labels for display
-  const TOTY_POSITIONS = ["Chaser", "Chaser", "Chaser", "Beater", "Beater", "Keeper", "Seeker"] as const;
+  // TOTY team labels for display
   const TOTY_TEAM_LABELS: Record<number, string> = { 1: "1st Team", 2: "2nd Team", 3: "3rd Team" };
 
   const leaderboard = [...winnerStats.entries()]
@@ -192,13 +195,10 @@ export default function AwardHistory() {
                               : entries.sort((a, b) => a.placement - b.placement);
                             const m = pl === 1 ? MEDAL[1] : pl === 2 ? MEDAL[2] : MEDAL[3];
                             const teamLabel = TOTY_TEAM_LABELS[pl] || `${pl}th Team`;
-                            // Group by inferred position (by slot order: 3 Chasers, 2 Beaters, 1 Keeper, 1 Seeker)
-                            const slots: { label: string; players: AwardEntry[] }[] = [
-                              { label: "Chasers", players: teamEntries.slice(0, 3) },
-                              { label: "Beaters", players: teamEntries.slice(3, 5) },
-                              { label: "Keeper", players: teamEntries.slice(5, 6) },
-                              { label: "Seeker", players: teamEntries.slice(6, 7) },
-                            ].filter(s => s.players.length > 0);
+                            // Group by each player's ACTUAL position (not array order — the
+                            // awards table has no position column, and slot order in the
+                            // data isn't guaranteed to follow Chaser/Beater/Keeper/Seeker).
+                            const slots = groupTotyByPosition(teamEntries, playerPosMap);
 
                             return (
                               <div key={pl} className={`rounded border ${m.border} ${m.bg} p-3`}>

@@ -315,3 +315,41 @@ export function getLeagueTierLabel(tier: number | null): string {
     default: return "League";
   }
 }
+
+// ── Team of the Year / Cup honours-team grouping ──
+// A "Team of the Year" (or similar honours-team) award selects 7 players per
+// team: 3 Chasers, 2 Beaters, 1 Keeper, 1 Seeker. The `awards` table has no
+// position column, so position must come from each player's own record — NOT
+// be inferred from array order (which isn't guaranteed to match any particular
+// position sequence and silently mislabels players when it doesn't).
+export const TOTY_POSITION_ORDER = ["Chaser", "Beater", "Keeper", "Seeker"] as const;
+
+export function totyPositionLabel(position: string): string {
+  return position === "Chaser" ? "Chasers" : position === "Beater" ? "Beaters" : position;
+}
+
+export function groupTotyByPosition<T extends { playerid: number }>(
+  entries: T[],
+  positionMap: Map<number, string>
+): { label: string; players: T[] }[] {
+  const buckets = new Map<string, T[]>();
+  entries.forEach(e => {
+    const pos = positionMap.get(e.playerid) || "Unknown";
+    if (!buckets.has(pos)) buckets.set(pos, []);
+    buckets.get(pos)!.push(e);
+  });
+  const ordered: { label: string; players: T[] }[] = [];
+  TOTY_POSITION_ORDER.forEach(pos => {
+    const players = buckets.get(pos);
+    if (players && players.length > 0) {
+      ordered.push({ label: totyPositionLabel(pos), players });
+      buckets.delete(pos);
+    }
+  });
+  // Any player whose position couldn't be resolved is still shown (never silently
+  // dropped) — just grouped separately rather than mis-slotted into a wrong position.
+  buckets.forEach((players, pos) => {
+    ordered.push({ label: pos === "Unknown" ? "Other" : totyPositionLabel(pos), players });
+  });
+  return ordered;
+}
