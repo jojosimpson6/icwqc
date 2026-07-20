@@ -99,10 +99,10 @@ export default function AwardHistory() {
     s.seasons.push(a.seasonid);
   });
   const isTOTY = isTeamStyleAward(awards);
-  // For TOTY: placement 1 = 1st Team, placement 2 = 2nd Team (multiple players per placement)
-  const totyPlacementCounts = new Map<number, number>();
-  awards.forEach(e => totyPlacementCounts.set(e.placement, (totyPlacementCounts.get(e.placement) || 0) + 1));
-  const totyIsTeamNumber = [...totyPlacementCounts.values()].some(c => c > 1);
+  // Alias — isTOTY already answers "does any season have multiple players sharing
+  // a placement" via the season-scoped isTeamStyleAward check above; no need for a
+  // second, separately (and previously incorrectly) computed version of the same thing.
+  const totyIsTeamNumber = isTOTY;
 
   // TOTY team labels for display
   const TOTY_TEAM_LABELS: Record<number, string> = { 1: "1st Team", 2: "2nd Team", 3: "3rd Team" };

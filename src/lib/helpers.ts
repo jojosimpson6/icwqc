@@ -325,14 +325,24 @@ export function getLeagueTierLabel(tier: number | null): string {
 export const TOTY_POSITION_ORDER = ["Chaser", "Beater", "Keeper", "Seeker"] as const;
 
 // A "team style" award is detected from its actual data shape — multiple players
-// sharing the same placement value — rather than matching a hardcoded award name
-// like "Team of the Year". This way any similarly-structured award (e.g. a cup
-// competition's own "Cup Team of the Year") is picked up automatically, even
-// though its name differs from the domestic league's award.
-export function isTeamStyleAward(entries: { placement: number }[]): boolean {
-  const counts = new Map<number, number>();
-  entries.forEach(e => counts.set(e.placement, (counts.get(e.placement) || 0) + 1));
-  return [...counts.values()].some(c => c > 1);
+// sharing the same placement value WITHIN THE SAME SEASON — rather than matching a
+// hardcoded award name like "Team of the Year". This way any similarly-structured
+// award (e.g. a cup competition's own "Cup Team of the Year") is picked up
+// automatically, even though its name differs from the domestic league's award.
+//
+// The check MUST be scoped per season: an ordinary individual award (e.g. "Iron Man
+// Award", or any top-N leaderboard award) naturally reuses "1st place" once every
+// season across its multi-season history — that's expected and is NOT team-style.
+// The real signature of a team award is two different PLAYERS sharing the SAME
+// placement in the SAME season (e.g. both selected to "1st Team" in 2007-08).
+export function isTeamStyleAward(entries: { placement: number; seasonid?: number | null }[]): boolean {
+  const bySeasonPlacement = new Map<string, number>();
+  entries.forEach(e => {
+    const seasonKey = e.seasonid ?? "unknown";
+    const key = `${seasonKey}|${e.placement}`;
+    bySeasonPlacement.set(key, (bySeasonPlacement.get(key) || 0) + 1);
+  });
+  return [...bySeasonPlacement.values()].some(c => c > 1);
 }
 
 export function totyPositionLabel(position: string): string {

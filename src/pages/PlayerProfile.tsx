@@ -251,8 +251,8 @@ export default function PlayerProfile() {
         const pairs = [...new Set((awardsData as any[]).map(a => `${a.leagueid}|${a.awardname}`))];
         Promise.all(pairs.map(pairKey => {
           const [leagueidStr, awardname] = pairKey.split("|");
-          return fetchAllRows<{ placement: number }>("awards", {
-            select: "placement",
+          return fetchAllRows<{ placement: number; seasonid: number }>("awards", {
+            select: "placement,seasonid",
             filters: [
               { method: "eq", args: ["leagueid", Number(leagueidStr)] },
               { method: "eq", args: ["awardname", awardname] },
