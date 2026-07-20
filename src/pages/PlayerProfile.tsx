@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
-import { formatHeight, calculateAge, formatDate, getNationFlag } from "@/lib/helpers";
+import { formatHeight, calculateAge, formatDate, getNationFlag, isTeamStyleAward } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { cachedQuery } from "@/lib/queryCache";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -182,6 +182,11 @@ export default function PlayerProfile() {
   const [posFilter, setPosFilter] = useState<string>("all");
   const [detectedPositions, setDetectedPositions] = useState<string[]>([]);
   const [playerAwards, setPlayerAwards] = useState<{ awardname: string; placement: number; seasonid: number; leagueid: number; leagueName?: string }[]>([]);
+  // Whether a given (leagueid, awardname) behaves as a "team style" award (multiple
+  // players sharing a placement, e.g. Team of the Year) — determined from the full
+  // award history for that league+award, not from this player's own rows alone,
+  // since a single player's row can never reveal whether teammates share their slot.
+  const [teamStyleAwardMap, setTeamStyleAwardMap] = useState<Map<string, boolean>>(new Map());
   const [leagueNameMap, setLeagueNameMap] = useState<Map<number, string>>(new Map());
   const [teamCompWins, setTeamCompWins] = useState<{ leagueId: number; leagueName: string; seasonId: number; teamName: string }[]>([]);
   // Derived from match-level data (not available in the player_season_stats view) —
@@ -239,6 +244,25 @@ export default function PlayerProfile() {
           ...a,
           leagueName: lnm.get(a.leagueid) || `League ${a.leagueid}`,
         })));
+
+        // Determine which (league, award name) combos are team-style awards. This
+        // can't be inferred from the player's own rows alone (one row per season),
+        // so pull the full award history for each distinct combo they appear in.
+        const pairs = [...new Set((awardsData as any[]).map(a => `${a.leagueid}|${a.awardname}`))];
+        Promise.all(pairs.map(pairKey => {
+          const [leagueidStr, awardname] = pairKey.split("|");
+          return fetchAllRows<{ placement: number }>("awards", {
+            select: "placement",
+            filters: [
+              { method: "eq", args: ["leagueid", Number(leagueidStr)] },
+              { method: "eq", args: ["awardname", awardname] },
+            ],
+          }).then(rows => ({ pairKey, isTeamStyle: isTeamStyleAward(rows) }));
+        })).then(results => {
+          const m = new Map<string, boolean>();
+          results.forEach(r => m.set(r.pairKey, r.isTeamStyle));
+          setTeamStyleAwardMap(m);
+        });
       }
     });
 
@@ -1548,11 +1572,16 @@ export default function PlayerProfile() {
 
             const totyByLeague = new Map<number, AwardEntry[]>();
             const regularByLeague = new Map<number, AwardEntry[]>();
+            // Track the actual award name(s) used for team-style awards per league,
+            // since it may differ across leagues (e.g. a cup competition's own
+            // "Cup Team of the Year" alongside a domestic league's "Team of the Year").
+            const totyNameByLeague = new Map<number, string>();
 
             playerAwards.forEach(a => {
-              if (a.awardname === "Team of the Year") {
+              if (teamStyleAwardMap.get(`${a.leagueid}|${a.awardname}`)) {
                 if (!totyByLeague.has(a.leagueid)) totyByLeague.set(a.leagueid, []);
                 totyByLeague.get(a.leagueid)!.push(a);
+                if (!totyNameByLeague.has(a.leagueid)) totyNameByLeague.set(a.leagueid, a.awardname);
               } else {
                 if (!regularByLeague.has(a.leagueid)) regularByLeague.set(a.leagueid, []);
                 regularByLeague.get(a.leagueid)!.push(a);
@@ -1584,6 +1613,7 @@ export default function PlayerProfile() {
                   const labbr = abbrevLeague(lname);
                   const regular = regularByLeague.get(lid) || [];
                   const toty = totyByLeague.get(lid) || [];
+                  const totyAwardName = totyNameByLeague.get(lid) || "Team of the Year";
 
                   // Group regular awards by awardname
                   const awardGroups = new Map<string, AwardEntry[]>();
@@ -1676,8 +1706,8 @@ export default function PlayerProfile() {
                                   return (
                                     <tr key="toty" className={`border-t border-border/50 ${stripeCls}`}>
                                       <td className="px-3 py-2 font-medium text-foreground text-sm align-top">
-                                        <Link to={`/league/${lid}/award/${encodeURIComponent("Team of the Year")}`} className="hover:text-accent hover:underline">
-                                          Team of the Year
+                                        <Link to={`/league/${lid}/award/${encodeURIComponent(totyAwardName)}`} className="hover:text-accent hover:underline">
+                                          {totyAwardName}
                                         </Link>
                                       </td>
                                       <td className="px-3 py-2">
@@ -1691,14 +1721,11 @@ export default function PlayerProfile() {
 
                                             const myPlacements = entries.map(e => e.placement).sort();
                                             const uniquePlacements = [...new Set(myPlacements)];
-                                            // The position this player actually held that season/league —
-                                            // pulled from their own stats row, not guessed or assumed.
-                                            const posThatSeason = stats.find(s => s.SeasonID === sid && s.LeagueID === lid)?.Position;
 
                                             return uniquePlacements.map(pl => (
                                               <span
                                                 key={`toty-${sid}-${pl}`}
-                                                title={`${isTeamNumber ? `${plLabel(pl)} Team` : "Selection"}${posThatSeason ? ` · ${posThatSeason}` : ""}`}
+                                                title={isTeamNumber ? `${plLabel(pl)} Team` : "Selection"}
                                                 className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border font-mono
                                                   ${pl === 1 ? "bg-yellow-500/15 border-yellow-500/40 text-yellow-700 dark:text-yellow-400"
                                                     : pl === 2 ? "bg-slate-400/15 border-slate-400/40 text-slate-600 dark:text-slate-300"
@@ -1707,7 +1734,6 @@ export default function PlayerProfile() {
                                               >
                                                 {isTeamNumber && <span className="font-bold">{plLabel(pl)}</span>}
                                                 <span>{seasonLabel(sid)}</span>
-                                                {posThatSeason && <span className="opacity-70">({posThatSeason})</span>}
                                               </span>
                                             ));
                                           })}

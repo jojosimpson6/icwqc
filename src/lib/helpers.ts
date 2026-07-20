@@ -324,6 +324,17 @@ export function getLeagueTierLabel(tier: number | null): string {
 // position sequence and silently mislabels players when it doesn't).
 export const TOTY_POSITION_ORDER = ["Chaser", "Beater", "Keeper", "Seeker"] as const;
 
+// A "team style" award is detected from its actual data shape — multiple players
+// sharing the same placement value — rather than matching a hardcoded award name
+// like "Team of the Year". This way any similarly-structured award (e.g. a cup
+// competition's own "Cup Team of the Year") is picked up automatically, even
+// though its name differs from the domestic league's award.
+export function isTeamStyleAward(entries: { placement: number }[]): boolean {
+  const counts = new Map<number, number>();
+  entries.forEach(e => counts.set(e.placement, (counts.get(e.placement) || 0) + 1));
+  return [...counts.values()].some(c => c > 1);
+}
+
 export function totyPositionLabel(position: string): string {
   return position === "Chaser" ? "Chasers" : position === "Beater" ? "Beaters" : position;
 }

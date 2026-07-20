@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
-import { getLeagueTierLabel, groupTotyByPosition } from "@/lib/helpers";
+import { getLeagueTierLabel, groupTotyByPosition, isTeamStyleAward } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
 
 interface League {
@@ -505,7 +505,7 @@ export default function LeagueHistory() {
             {seasons.map(s=>{
               const isExpanded=expandedSeason===s.seasonId;
               const seasonAwards=awardsBySeason.get(s.seasonId);
-              const indivAwards=seasonAwards?[...seasonAwards.entries()].filter(([n])=>n!=="Team of the Year"):[];
+              const indivAwards=seasonAwards?[...seasonAwards.entries()].filter(([, entries])=>!isTeamStyleAward(entries)):[];
               const medals=(["gold","silver",...(s.isCupFinal&&!s.third?[]:["bronze"])] as const);
               return (
                 <div key={s.seasonId} className="border border-border rounded overflow-hidden">
@@ -607,17 +607,18 @@ export default function LeagueHistory() {
                                 </div>
                               );
                             })}
-                            {/* TOTY */}
-                            {seasonAwards.has("Team of the Year")&&(()=>{
-                              const toty=seasonAwards.get("Team of the Year")!;
+                            {/* Team-style awards (Team of the Year, Cup Team of the Year, etc.) —
+                                detected by data shape (multiple players sharing a placement),
+                                not by matching a specific hardcoded award name. */}
+                            {[...seasonAwards.entries()].filter(([, entries]) => isTeamStyleAward(entries)).map(([totyAwardName, toty]) => {
                               const plCounts=new Map<number,number>();
                               toty.forEach(e=>plCounts.set(e.placement,(plCounts.get(e.placement)||0)+1));
                               const isTeamNum=[...plCounts.values()].some(c=>c>1);
                               const pls=[...new Set(toty.map(e=>e.placement))].sort();
                               const TEAM_LABELS: Record<number,string> = {1:"1st Team",2:"2nd Team",3:"3rd Team"};
                               return (
-                                <div className="pt-1">
-                                  <Link to={`/league/${id}/award/${encodeURIComponent("Team of the Year")}`} className="text-sm font-semibold text-accent hover:underline font-sans block mb-2">Team of the Year →</Link>
+                                <div key={totyAwardName} className="pt-1">
+                                  <Link to={`/league/${id}/award/${encodeURIComponent(totyAwardName)}`} className="text-sm font-semibold text-accent hover:underline font-sans block mb-2">{totyAwardName} →</Link>
                                   <div className={`grid gap-3 ${isTeamNum && pls.length > 1 ? "md:grid-cols-2" : "grid-cols-1"}`}>
                                     {(isTeamNum ? pls : [1]).map(pl => {
                                       const teamEntries = isTeamNum
@@ -632,9 +633,9 @@ export default function LeagueHistory() {
                                             {slots.map(slot=>(
                                               <div key={slot.label} className="flex items-start gap-2">
                                                 <span className="text-xs text-muted-foreground w-14 shrink-0 pt-0.5">{slot.label}</span>
-                                                <div className="flex flex-wrap gap-x-2 gap-y-0">
+                                                <div className="flex flex-col">
                                                   {slot.players.map(e=>(
-                                                    <Link key={e.playerid} to={`/player/${e.playerid}`} className="text-accent hover:underline text-xs">{playerMap.get(e.playerid)||`#${e.playerid}`}</Link>
+                                                    <Link key={e.playerid} to={`/player/${e.playerid}`} className="text-accent hover:underline text-xs leading-5">{playerMap.get(e.playerid)||`#${e.playerid}`}</Link>
                                                   ))}
                                                 </div>
                                               </div>
@@ -646,7 +647,7 @@ export default function LeagueHistory() {
                                   </div>
                                 </div>
                               );
-                            })()}
+                            })}
                           </div>
                         </div>
                       )}
@@ -743,15 +744,14 @@ export default function LeagueHistory() {
           <div className="space-y-6">
             {allAwardNames.length===0&&<p className="text-sm text-muted-foreground font-sans italic">No award history found.</p>}
             {allAwardNames.map(awardName=>{
-              const isTOTY=awardName==="Team of the Year";
+              const cardEntries=awards.filter(a=>a.awardname===awardName);
+              const isTOTY=isTeamStyleAward(cardEntries);
               const allWinners=awards.filter(a=>a.awardname===awardName&&a.placement===1).sort((a,b)=>a.seasonid-b.seasonid);
               const winCounts=new Map<number,number>();
               allWinners.forEach(w=>winCounts.set(w.playerid,(winCounts.get(w.playerid)||0)+1));
               const leaders=[...winCounts.entries()].sort((a,b)=>b[1]-a[1]).slice(0,3);
-              const totyEntries=awards.filter(a=>a.awardname==="Team of the Year");
-              const totyPlCounts=new Map<number,number>();
-              totyEntries.forEach(e=>totyPlCounts.set(e.placement,(totyPlCounts.get(e.placement)||0)+1));
-              const totyIsTeamNum=[...totyPlCounts.values()].some(c=>c>1);
+              const totyEntries=cardEntries;
+              const totyIsTeamNum=isTOTY;
               return (
                 <div key={awardName} className="border border-border rounded overflow-hidden">
                   <div className="bg-table-header px-4 py-2.5 flex items-center justify-between">
@@ -796,8 +796,8 @@ export default function LeagueHistory() {
                                       {slots.map(slot=>(
                                         <div key={slot.label} className="flex items-start gap-2">
                                           <span className="text-xs text-muted-foreground w-14 shrink-0 pt-0.5">{slot.label}</span>
-                                          <div className="flex flex-wrap gap-x-2">
-                                            {slot.players.map(e=><Link key={e.playerid} to={`/player/${e.playerid}`} className="text-accent hover:underline text-xs">{playerMap.get(e.playerid)||`#${e.playerid}`}</Link>)}
+                                          <div className="flex flex-col">
+                                            {slot.players.map(e=><Link key={e.playerid} to={`/player/${e.playerid}`} className="text-accent hover:underline text-xs leading-5">{playerMap.get(e.playerid)||`#${e.playerid}`}</Link>)}
                                           </div>
                                         </div>
                                       ))}

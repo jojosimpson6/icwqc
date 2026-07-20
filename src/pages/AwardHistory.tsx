@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
-import { getLeagueTierLabel, groupTotyByPosition } from "@/lib/helpers";
+import { getLeagueTierLabel, groupTotyByPosition, isTeamStyleAward } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { cachedQuery } from "@/lib/queryCache";
 import { CardSkeleton, ErrorState } from "@/components/StateMessage";
@@ -98,7 +98,7 @@ export default function AwardHistory() {
     s.wins++;
     s.seasons.push(a.seasonid);
   });
-  const isTOTY = awardName === "Team of the Year";
+  const isTOTY = isTeamStyleAward(awards);
   // For TOTY: placement 1 = 1st Team, placement 2 = 2nd Team (multiple players per placement)
   const totyPlacementCounts = new Map<number, number>();
   awards.forEach(e => totyPlacementCounts.set(e.placement, (totyPlacementCounts.get(e.placement) || 0) + 1));
@@ -202,14 +202,14 @@ export default function AwardHistory() {
 
                             return (
                               <div key={pl} className={`rounded border ${m.border} ${m.bg} p-3`}>
-                                <p className={`text-xs font-bold mb-2 ${m.text}`}>{totyIsTeamNumber ? teamLabel : "Team of the Year"}</p>
+                                <p className={`text-xs font-bold mb-2 ${m.text}`}>{totyIsTeamNumber ? teamLabel : awardName}</p>
                                 <div className="space-y-1.5">
                                   {slots.map(slot => (
                                     <div key={slot.label} className="flex items-start gap-2">
                                       <span className="text-xs text-muted-foreground w-16 shrink-0 pt-0.5">{slot.label}</span>
-                                      <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                                      <div className="flex flex-col">
                                         {slot.players.map(e => (
-                                          <Link key={e.playerid} to={`/player/${e.playerid}`} className="text-accent hover:underline text-sm font-medium">
+                                          <Link key={e.playerid} to={`/player/${e.playerid}`} className="text-accent hover:underline text-sm font-medium leading-6">
                                             {playerMap.get(e.playerid) || `#${e.playerid}`}
                                           </Link>
                                         ))}

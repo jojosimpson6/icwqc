@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
-import { getLeagueTierLabel, groupTotyByPosition } from "@/lib/helpers";
+import { getLeagueTierLabel, groupTotyByPosition, isTeamStyleAward } from "@/lib/helpers";
 import { useSortableTable } from "@/hooks/useSortableTable";
 import { fetchAllRows } from "@/lib/fetchAll";
 
@@ -952,8 +952,8 @@ export default function LeaguePage() {
                   {awardSeasons.map(seasonId => {
                     const seasonAwards = awardsBySeasonMap.get(seasonId)!;
                     const awardNames = [...seasonAwards.keys()];
-                    const individualAwards = awardNames.filter(n => n !== "Team of the Year");
-                    const teamOfYear = seasonAwards.get("Team of the Year");
+                    const individualAwards = awardNames.filter(n => !isTeamStyleAward(seasonAwards.get(n)!));
+                    const teamStyleAwardNames = awardNames.filter(n => isTeamStyleAward(seasonAwards.get(n)!));
 
                     return (
                       <div key={seasonId} className="px-3 py-3">
@@ -1001,11 +1001,13 @@ export default function LeaguePage() {
                               </tbody>
                             </table>
                           )}
-                          {teamOfYear && teamOfYear.length > 0 && (
-                            <div>
+                          {teamStyleAwardNames.map(totyAwardName => {
+                            const teamOfYear = seasonAwards.get(totyAwardName)!;
+                            return (
+                            <div key={totyAwardName}>
                               <p className="text-xs text-muted-foreground uppercase tracking-wide font-semibold mb-1">
-                                <Link to={`/league/${league.LeagueID}/award/${encodeURIComponent("Team of the Year")}`} className="hover:text-accent hover:underline">
-                                  Team of the Year →
+                                <Link to={`/league/${league.LeagueID}/award/${encodeURIComponent(totyAwardName)}`} className="hover:text-accent hover:underline">
+                                  {totyAwardName} →
                                 </Link>
                               </p>
                               {(() => {
@@ -1076,7 +1078,8 @@ export default function LeaguePage() {
                                 }
                               })()}
                             </div>
-                          )}
+                            );
+                          })}
                         </div>
                       </div>
                     );
