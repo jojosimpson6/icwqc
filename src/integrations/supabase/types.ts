@@ -765,24 +765,6 @@ export type Database = {
       }
     }
     Views: {
-      elo_new: {
-        Row: {
-          current_game_number: number | null
-          elo_rating: number | null
-          FullName: string | null
-          Matchday: string | null
-        }
-        Relationships: []
-      }
-      elo_ratings: {
-        Row: {
-          current_game_number: number | null
-          elo_rating: number | null
-          FullName: string | null
-          Matchday: string | null
-        }
-        Relationships: []
-      }
       player_season_minutes: {
         Row: {
           FullName: string | null
