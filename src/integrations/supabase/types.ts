@@ -95,6 +95,47 @@ export type Database = {
         }
         Relationships: []
       }
+      managers: {
+        Row: {
+          DOB: string
+          FirstName: string
+          FormerPlayerFlag: boolean
+          FormerPlayerID: number | null
+          Gender: string
+          LastName: string
+          ManagerID: number
+          NationalityID: number | null
+        }
+        Insert: {
+          DOB: string
+          FirstName: string
+          FormerPlayerFlag: boolean
+          FormerPlayerID?: number | null
+          Gender: string
+          LastName: string
+          ManagerID: number
+          NationalityID?: number | null
+        }
+        Update: {
+          DOB?: string
+          FirstName?: string
+          FormerPlayerFlag?: boolean
+          FormerPlayerID?: number | null
+          Gender?: string
+          LastName?: string
+          ManagerID?: number
+          NationalityID?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fk_managers_player"
+            columns: ["FormerPlayerID"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["PlayerID"]
+          },
+        ]
+      }
       matchdays: {
         Row: {
           LeagueID: number | null
@@ -140,42 +181,6 @@ export type Database = {
           Region?: string | null
           ValidFromDt?: string
           ValidToDt?: string
-        }
-        Relationships: []
-      }
-      managers: {
-        Row: {
-          ManagerID: number
-          FirstName: string
-          LastName: string
-          Gender: string
-          DOB: string
-          NationalityID: number | null
-          FormerPlayerFlag: boolean
-          FormerPlayerID: number | null
-          headshot_url: string | null
-        }
-        Insert: {
-          ManagerID: number
-          FirstName: string
-          LastName: string
-          Gender: string
-          DOB: string
-          NationalityID?: number | null
-          FormerPlayerFlag?: boolean
-          FormerPlayerID?: number | null
-          headshot_url?: string | null
-        }
-        Update: {
-          ManagerID?: number
-          FirstName?: string
-          LastName?: string
-          Gender?: string
-          DOB?: string
-          NationalityID?: number | null
-          FormerPlayerFlag?: boolean
-          FormerPlayerID?: number | null
-          headshot_url?: string | null
         }
         Relationships: []
       }
@@ -611,6 +616,84 @@ export type Database = {
         }
         Relationships: []
       }
+      team_captains: {
+        Row: {
+          AppearanceShare: number
+          CaptainAppearances: number
+          CaptainPlayerID: number
+          MatchesPlayed: number
+          SeasonID: number
+          SelectionMethod: string
+          TeamID: number
+        }
+        Insert: {
+          AppearanceShare: number
+          CaptainAppearances: number
+          CaptainPlayerID: number
+          MatchesPlayed: number
+          SeasonID: number
+          SelectionMethod: string
+          TeamID: number
+        }
+        Update: {
+          AppearanceShare?: number
+          CaptainAppearances?: number
+          CaptainPlayerID?: number
+          MatchesPlayed?: number
+          SeasonID?: number
+          SelectionMethod?: string
+          TeamID?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fk_team_captains_player"
+            columns: ["CaptainPlayerID"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["PlayerID"]
+          },
+          {
+            foreignKeyName: "fk_team_captains_team"
+            columns: ["TeamID"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["TeamID"]
+          },
+        ]
+      }
+      team_managers: {
+        Row: {
+          ManagerID: number
+          SeasonID: number
+          TeamID: number
+        }
+        Insert: {
+          ManagerID: number
+          SeasonID: number
+          TeamID: number
+        }
+        Update: {
+          ManagerID?: number
+          SeasonID?: number
+          TeamID?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fk_team_managers_manager"
+            columns: ["ManagerID"]
+            isOneToOne: false
+            referencedRelation: "managers"
+            referencedColumns: ["ManagerID"]
+          },
+          {
+            foreignKeyName: "fk_team_managers_team"
+            columns: ["TeamID"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["TeamID"]
+          },
+        ]
+      }
       teams: {
         Row: {
           City: string | null
@@ -659,54 +742,6 @@ export type Database = {
           TeamID?: number
           ValidFromDt?: string
           ValidToDt?: string
-        }
-        Relationships: []
-      }
-      team_captains: {
-        Row: {
-          TeamID: number
-          SeasonID: number
-          CaptainPlayerID: number
-          MatchesPlayed: number
-          CaptainAppearances: number
-          AppearanceShare: number
-          SelectionMethod: string
-        }
-        Insert: {
-          TeamID: number
-          SeasonID: number
-          CaptainPlayerID: number
-          MatchesPlayed: number
-          CaptainAppearances: number
-          AppearanceShare: number
-          SelectionMethod: string
-        }
-        Update: {
-          TeamID?: number
-          SeasonID?: number
-          CaptainPlayerID?: number
-          MatchesPlayed?: number
-          CaptainAppearances?: number
-          AppearanceShare?: number
-          SelectionMethod?: string
-        }
-        Relationships: []
-      }
-      team_managers: {
-        Row: {
-          TeamID: number
-          SeasonID: number
-          ManagerID: number
-        }
-        Insert: {
-          TeamID: number
-          SeasonID: number
-          ManagerID: number
-        }
-        Update: {
-          TeamID?: number
-          SeasonID?: number
-          ManagerID?: number
         }
         Relationships: []
       }
@@ -821,8 +856,8 @@ export type Database = {
           Matchday: string | null
           MatchID: number | null
           SeasonID: number | null
-          WeekID: number | null
           TeamsDetermined: boolean | null
+          WeekID: number | null
         }
         Relationships: []
       }

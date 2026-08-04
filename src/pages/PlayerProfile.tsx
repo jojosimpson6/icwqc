@@ -211,7 +211,7 @@ export default function PlayerProfile() {
             .then(({ data: nd }) => { if (nd?.[0]) setNation(nd[0].Nation || ""); });
         }
       }
-    }).catch(err => {
+    }, err => {
       console.error("Failed to load player:", err);
       setLoadError(true);
     });
