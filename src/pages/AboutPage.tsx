@@ -19,8 +19,7 @@ export default function AboutPage() {
           setContent(data.content);
         }
         setLoading(false);
-      })
-      .catch(err => {
+      }, err => {
         console.error("Failed to load About content:", err);
         setLoadError(true);
         setLoading(false);

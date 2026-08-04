@@ -31,8 +31,7 @@ export default function GlossaryPage() {
       .then(({ data }) => {
         if (data) setTerms(parseGlossaryTerms(data.content).sort((a, b) => a.term.localeCompare(b.term)));
         setLoading(false);
-      })
-      .catch(err => {
+      }, err => {
         console.error("Failed to load glossary:", err);
         setLoadError(true);
         setLoading(false);
