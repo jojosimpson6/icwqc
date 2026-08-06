@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { useDarkMode } from "@/hooks/useDarkMode";
-import { Moon, Sun, Menu, X } from "lucide-react";
+import { Moon, Sun, Menu, X, User as UserIcon } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 
 interface League {
   LeagueID: number;
