@@ -399,11 +399,13 @@ export default function SchedulePage() {
                         return (
                           <div key={i} className="leading-tight mb-0.5">
                             <div className="font-semibold truncate">{isHome ? "vs." : "@"} {opp}</div>
-                            {g.played && g.HomeScore != null && (
+                            {g.played && g.HomeScore != null ? (
                               <div className="font-mono text-[10px] text-muted-foreground">
                                 {isHome ? `${g.HomeScore}–${g.AwayScore}` : `${g.AwayScore}–${g.HomeScore}`}
                               </div>
-                            )}
+                            ) : g.inProgress ? (
+                              <div className="text-[10px] text-accent">In progress</div>
+                            ) : null}
                           </div>
                         );
                       })}
