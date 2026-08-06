@@ -71,6 +71,16 @@ export function SiteHeader() {
                 </Link>
               ))}
               <GlobalSearch />
+              <Link
+                to={user ? "/account" : "/auth"}
+                aria-label={user ? "My account" : "Sign in"}
+                className="flex items-center gap-1.5 opacity-80 hover:opacity-100 transition-opacity"
+              >
+                <UserIcon size={16} />
+                <span className="hidden lg:inline max-w-[110px] truncate">
+                  {user ? (profile?.display_name || "Account") : "Sign in"}
+                </span>
+              </Link>
               <button
                 onClick={toggle}
                 aria-label="Toggle dark mode"
