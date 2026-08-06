@@ -139,7 +139,6 @@ export default function SchedulePage() {
           filters: [{ method: "eq", args: ["SeasonID", season] }, ...leagueFilter],
         }),
         fetchAllRows<any>("scheduled_matches", {
-          select: '"MatchID","SeasonID","LeagueID","WeekID","HomeTeamID","AwayTeamID","Matchday"',
           select: '"MatchID","SeasonID","LeagueID","WeekID","HomeTeamID","AwayTeamID","Matchday","Status"',
           filters: [{ method: "eq", args: ["SeasonID", season] }, ...leagueFilter],
         }).catch(() => []),
