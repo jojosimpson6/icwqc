@@ -26,6 +26,7 @@ interface Game {
   HomeScore: number | null;
   AwayScore: number | null;
   played: boolean;
+  inProgress?: boolean;
 }
 
 function seasonLabel(id: number): string {
@@ -138,7 +139,7 @@ export default function SchedulePage() {
           filters: [{ method: "eq", args: ["SeasonID", season] }, ...leagueFilter],
         }),
         fetchAllRows<any>("scheduled_matches", {
-          select: '"MatchID","SeasonID","LeagueID","WeekID","HomeTeamID","AwayTeamID","Matchday"',
+          select: '"MatchID","SeasonID","LeagueID","WeekID","HomeTeamID","AwayTeamID","Matchday","Status"',
           filters: [{ method: "eq", args: ["SeasonID", season] }, ...leagueFilter],
         }).catch(() => []),
         fetchAllRows<any>("matchdays", {
@@ -188,6 +189,7 @@ export default function SchedulePage() {
           HomeScore: null,
           AwayScore: null,
           played: false,
+          inProgress: r.Status === "in_progress",
         });
       });
 
@@ -397,11 +399,13 @@ export default function SchedulePage() {
                         return (
                           <div key={i} className="leading-tight mb-0.5">
                             <div className="font-semibold truncate">{isHome ? "vs." : "@"} {opp}</div>
-                            {g.played && g.HomeScore != null && (
+                            {g.played && g.HomeScore != null ? (
                               <div className="font-mono text-[10px] text-muted-foreground">
                                 {isHome ? `${g.HomeScore}–${g.AwayScore}` : `${g.AwayScore}–${g.HomeScore}`}
                               </div>
-                            )}
+                            ) : g.inProgress ? (
+                              <div className="text-[10px] text-accent">In progress</div>
+                            ) : null}
                           </div>
                         );
                       })}
@@ -442,6 +446,8 @@ export default function SchedulePage() {
                             </span>
                             {g.played && g.HomeScore != null ? (
                               <span className="font-mono text-[10px]">{g.HomeScore}–{g.AwayScore}</span>
+                            ) : g.inProgress ? (
+                              <span className="text-[10px] text-accent">In progress</span>
                             ) : (
                               <span className="text-[10px] text-muted-foreground">TBD</span>
                             )}
@@ -495,6 +501,8 @@ export default function SchedulePage() {
                             {g.HomeScore}–{g.AwayScore}
                           </Link>
                         ) : <span>{g.HomeScore}–{g.AwayScore}</span>
+                      ) : g.inProgress ? (
+                        <span className="text-[10px] font-sans uppercase tracking-wide text-accent whitespace-nowrap">In progress</span>
                       ) : (
                         <span className="text-xs text-muted-foreground">vs</span>
                       )}

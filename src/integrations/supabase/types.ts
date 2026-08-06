@@ -71,6 +71,150 @@ export type Database = {
         }
         Relationships: []
       }
+      fantasy_leagues: {
+        Row: {
+          created_at: string
+          id: string
+          invite_code: string
+          is_public: boolean
+          max_teams: number
+          name: string
+          owner_id: string
+          roster_size: number
+          season_id: number | null
+          settings: Json
+          source_league_id: number | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          invite_code?: string
+          is_public?: boolean
+          max_teams?: number
+          name: string
+          owner_id: string
+          roster_size?: number
+          season_id?: number | null
+          settings?: Json
+          source_league_id?: number | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          invite_code?: string
+          is_public?: boolean
+          max_teams?: number
+          name?: string
+          owner_id?: string
+          roster_size?: number
+          season_id?: number | null
+          settings?: Json
+          source_league_id?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      fantasy_rosters: {
+        Row: {
+          acquired_at: string
+          fantasy_team_id: string
+          id: string
+          is_starter: boolean
+          player_id: number
+          slot: string
+        }
+        Insert: {
+          acquired_at?: string
+          fantasy_team_id: string
+          id?: string
+          is_starter?: boolean
+          player_id: number
+          slot?: string
+        }
+        Update: {
+          acquired_at?: string
+          fantasy_team_id?: string
+          id?: string
+          is_starter?: boolean
+          player_id?: number
+          slot?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fantasy_rosters_fantasy_team_id_fkey"
+            columns: ["fantasy_team_id"]
+            isOneToOne: false
+            referencedRelation: "fantasy_teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fantasy_scoring_rules: {
+        Row: {
+          fantasy_league_id: string
+          id: string
+          points: number
+          stat_key: string
+        }
+        Insert: {
+          fantasy_league_id: string
+          id?: string
+          points?: number
+          stat_key: string
+        }
+        Update: {
+          fantasy_league_id?: string
+          id?: string
+          points?: number
+          stat_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fantasy_scoring_rules_fantasy_league_id_fkey"
+            columns: ["fantasy_league_id"]
+            isOneToOne: false
+            referencedRelation: "fantasy_leagues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      fantasy_teams: {
+        Row: {
+          created_at: string
+          fantasy_league_id: string
+          id: string
+          name: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          fantasy_league_id: string
+          id?: string
+          name: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          fantasy_league_id?: string
+          id?: string
+          name?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "fantasy_teams_fantasy_league_id_fkey"
+            columns: ["fantasy_league_id"]
+            isOneToOne: false
+            referencedRelation: "fantasy_leagues"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       leagues: {
         Row: {
           LeagueID: number
@@ -262,6 +406,33 @@ export type Database = {
           PlayerName?: string | null
           Position?: string | null
           Weight?: number | null
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          avatar_url: string | null
+          created_at: string
+          display_name: string | null
+          favorite_team_id: number | null
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          favorite_team_id?: number | null
+          id: string
+          updated_at?: string
+        }
+        Update: {
+          avatar_url?: string | null
+          created_at?: string
+          display_name?: string | null
+          favorite_team_id?: number | null
+          id?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -745,6 +916,33 @@ export type Database = {
         }
         Relationships: []
       }
+      user_favorites: {
+        Row: {
+          created_at: string
+          entity_id: number
+          entity_type: string
+          id: string
+          sort_order: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          entity_id: number
+          entity_type: string
+          id?: string
+          sort_order?: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          entity_id?: number
+          entity_type?: string
+          id?: string
+          sort_order?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           id: string
@@ -837,7 +1035,9 @@ export type Database = {
           LeagueID: number | null
           Matchday: string | null
           MatchID: number | null
+          ReleaseDate: string | null
           SeasonID: number | null
+          Status: string | null
           TeamsDetermined: boolean | null
           WeekID: number | null
         }
@@ -894,11 +1094,31 @@ export type Database = {
       }
     }
     Functions: {
+      fantasy_team_league: { Args: { _team: string }; Returns: string }
+      fantasy_team_owner: { Args: { _team: string }; Returns: string }
       get_complete_schema: { Args: never; Returns: Json }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
           _user_id: string
+        }
+        Returns: boolean
+      }
+      is_fantasy_member: {
+        Args: { _league: string; _user: string }
+        Returns: boolean
+      }
+      match_is_released: { Args: { _matchid: number }; Returns: boolean }
+      match_release_date: {
+        Args: { _matchday: string; _snitch: number }
+        Returns: string
+      }
+      match_result_released: {
+        Args: {
+          _league: number
+          _season: number
+          _snitch: number
+          _week: number
         }
         Returns: boolean
       }

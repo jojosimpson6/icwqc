@@ -3,7 +3,8 @@ import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { useDarkMode } from "@/hooks/useDarkMode";
-import { Moon, Sun, Menu, X } from "lucide-react";
+import { Moon, Sun, Menu, X, User as UserIcon } from "lucide-react";
+import { useAuth } from "@/hooks/useAuth";
 
 interface League {
   LeagueID: number;
@@ -16,6 +17,7 @@ export function SiteHeader() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { dark, toggle } = useDarkMode();
   const { pathname } = useLocation();
+  const { user, profile } = useAuth();
 
   useEffect(() => {
     supabase.from("leagues").select("*").order("LeagueTier").order("LeagueName").then(({ data }) => {
@@ -71,6 +73,16 @@ export function SiteHeader() {
                 </Link>
               ))}
               <GlobalSearch />
+              <Link
+                to={user ? "/account" : "/auth"}
+                aria-label={user ? "My account" : "Sign in"}
+                className="flex items-center gap-1.5 opacity-80 hover:opacity-100 transition-opacity"
+              >
+                <UserIcon size={16} />
+                <span className="hidden lg:inline max-w-[110px] truncate">
+                  {user ? (profile?.display_name || "Account") : "Sign in"}
+                </span>
+              </Link>
               <button
                 onClick={toggle}
                 aria-label="Toggle dark mode"
@@ -114,6 +126,20 @@ export function SiteHeader() {
                   {label}
                 </Link>
               ))}
+              <Link
+                to={user ? "/account" : "/auth"}
+                className="text-sm font-sans text-primary-foreground py-2 px-2 rounded hover:bg-primary-foreground/10 transition-colors text-center opacity-80"
+              >
+                {user ? "Account" : "Sign in"}
+              </Link>
+              {user && (
+                <Link
+                  to="/fantasy"
+                  className="text-sm font-sans text-primary-foreground py-2 px-2 rounded hover:bg-primary-foreground/10 transition-colors text-center opacity-80"
+                >
+                  Fantasy
+                </Link>
+              )}
             </div>
             {/* League links in mobile menu */}
             <div className="border-t border-primary-foreground/20 px-3 py-2 space-y-1">
