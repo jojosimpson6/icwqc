@@ -189,7 +189,7 @@ export default function SchedulePage() {
           HomeScore: null,
           AwayScore: null,
           played: false,
-        });
+          inProgress: r.Status === "in_progress",
       });
 
 
