@@ -497,6 +497,8 @@ export default function SchedulePage() {
                             {g.HomeScore}–{g.AwayScore}
                           </Link>
                         ) : <span>{g.HomeScore}–{g.AwayScore}</span>
+                      ) : g.inProgress ? (
+                        <span className="text-[10px] font-sans uppercase tracking-wide text-accent whitespace-nowrap">In progress</span>
                       ) : (
                         <span className="text-xs text-muted-foreground">vs</span>
                       )}
