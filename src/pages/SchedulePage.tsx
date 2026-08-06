@@ -444,6 +444,8 @@ export default function SchedulePage() {
                             </span>
                             {g.played && g.HomeScore != null ? (
                               <span className="font-mono text-[10px]">{g.HomeScore}–{g.AwayScore}</span>
+                            ) : g.inProgress ? (
+                              <span className="text-[10px] text-accent">In progress</span>
                             ) : (
                               <span className="text-[10px] text-muted-foreground">TBD</span>
                             )}
