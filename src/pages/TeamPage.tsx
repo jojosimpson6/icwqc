@@ -702,12 +702,15 @@ export default function TeamPage() {
                 <h1 className="font-display text-3xl font-bold" style={safeTextColor ? { color: safeTextColor } : undefined}>
                   {team.FullName}
                 </h1>
-                <Link
-                  to={`/compare?mode=teams&t1=${team.TeamID}`}
-                  className="text-xs font-sans text-muted-foreground hover:text-accent border border-border rounded px-2 py-1 hover:border-accent transition-colors shrink-0 mt-1.5"
-                >
-                  Compare →
-                </Link>
+                <div className="flex items-center gap-2 shrink-0 mt-1.5">
+                  <FavoriteButton type="team" id={team.TeamID} />
+                  <Link
+                    to={`/compare?mode=teams&t1=${team.TeamID}`}
+                    className="text-xs font-sans text-muted-foreground hover:text-accent border border-border rounded px-2 py-1 hover:border-accent transition-colors"
+                  >
+                    Compare →
+                  </Link>
+                </div>
               </div>
               <p className="text-sm text-muted-foreground font-sans mt-1">
                 {team.City}{team.Country ? `, ${team.Country}` : ""}
