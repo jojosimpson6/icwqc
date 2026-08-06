@@ -17,6 +17,7 @@ export function SiteHeader() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const { dark, toggle } = useDarkMode();
   const { pathname } = useLocation();
+  const { user, profile } = useAuth();
 
   useEffect(() => {
     supabase.from("leagues").select("*").order("LeagueTier").order("LeagueName").then(({ data }) => {
