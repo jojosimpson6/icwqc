@@ -26,6 +26,7 @@ interface Game {
   HomeScore: number | null;
   AwayScore: number | null;
   played: boolean;
+  inProgress?: boolean;
 }
 
 function seasonLabel(id: number): string {
