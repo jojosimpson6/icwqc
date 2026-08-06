@@ -126,6 +126,20 @@ export function SiteHeader() {
                   {label}
                 </Link>
               ))}
+              <Link
+                to={user ? "/account" : "/auth"}
+                className="text-sm font-sans text-primary-foreground py-2 px-2 rounded hover:bg-primary-foreground/10 transition-colors text-center opacity-80"
+              >
+                {user ? "Account" : "Sign in"}
+              </Link>
+              {user && (
+                <Link
+                  to="/fantasy"
+                  className="text-sm font-sans text-primary-foreground py-2 px-2 rounded hover:bg-primary-foreground/10 transition-colors text-center opacity-80"
+                >
+                  Fantasy
+                </Link>
+              )}
             </div>
             {/* League links in mobile menu */}
             <div className="border-t border-primary-foreground/20 px-3 py-2 space-y-1">
