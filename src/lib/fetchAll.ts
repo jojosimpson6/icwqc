@@ -34,9 +34,20 @@ export async function fetchAllRows<T = any>(
           q = (q as any)[f.method](...f.args);
         }
       }
+      // A stable sort is REQUIRED for range-based pagination: without it Postgres
+      // may order rows differently per page, producing duplicates and gaps.
       if (query?.order) {
         q = q.order(query.order.column, { ascending: query.order.ascending ?? true });
+      } else {
+        const firstCol = (query?.select || "")
+          .split(",")[0]
+          ?.trim()
+          .replace(/^"|"$/g, "");
+        if (firstCol && firstCol !== "*" && !firstCol.includes("(")) {
+          q = q.order(firstCol, { ascending: true });
+        }
       }
+
 
       const { data, error } = await q.range(from, from + PAGE_SIZE - 1);
 
