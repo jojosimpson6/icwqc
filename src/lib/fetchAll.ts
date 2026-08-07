@@ -20,7 +20,7 @@ export async function fetchAllRows<T = any>(
     filters?: Array<{ method: string; args: any[] }>;
   }
 ): Promise<T[]> {
-  const cacheKey = `fetchAll2:${table}:${JSON.stringify(query || {})}`;
+  const cacheKey = `fetchAll3:${table}:${JSON.stringify(query || {})}`;
 
   return cachedQuery<T[]>(cacheKey, async () => {
     const allData: T[] = [];

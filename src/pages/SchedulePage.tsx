@@ -81,7 +81,9 @@ export default function SchedulePage() {
   }, [leagues]);
 
   const [seasons, setSeasons] = useState<number[]>([]);
-  const [season, setSeason] = useState<number | null>(null);
+  const currentDate = new Date();
+  const inferredSeason = currentDate.getMonth() >= 7 ? currentDate.getFullYear() + 1 : currentDate.getFullYear();
+  const [season, setSeason] = useState<number | null>(inferredSeason);
   const [leagueId, setLeagueId] = useState<number | "all">("all");
   const [teamId, setTeamId] = useState<number | "all">("all");
 
@@ -89,7 +91,7 @@ export default function SchedulePage() {
   const [loading, setLoading] = useState(false);
 
   // Calendar focus month
-  const today = new Date();
+  const today = currentDate;
   const [cursor, setCursor] = useState<{ y: number; m: number }>({ y: today.getFullYear(), m: today.getMonth() });
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
@@ -118,8 +120,7 @@ export default function SchedulePage() {
       });
       setLeagues((l || []) as League[]);
       setTeams([...latest.values()]);
-      setSeasons(s);
-      if (s.length) setSeason(s[0]);
+      setSeasons(s.includes(inferredSeason) ? s : [inferredSeason, ...s]);
     })();
   }, []);
 
@@ -215,7 +216,6 @@ export default function SchedulePage() {
       }
 
       setGames(deduped);
-      setLoading(false);
 
       // jump to the month containing today, or earliest game if outside range
       if (list.length) {
@@ -229,7 +229,12 @@ export default function SchedulePage() {
           const d = new Date(maxT); setCursor({ y: d.getFullYear(), m: d.getMonth() });
         }
       }
-    })();
+    })()
+      .catch(error => {
+        console.error("Failed to load schedule", error);
+        setGames([]);
+      })
+      .finally(() => setLoading(false));
   }, [season, leagueId]);
 
   // Reset team if league changes
