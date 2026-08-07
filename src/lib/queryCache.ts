@@ -34,11 +34,11 @@ function isStable(key: string): boolean {
 
 function sessionGet(key: string): any | null {
   try {
-    const raw = sessionStorage.getItem(`qr:${key}`);
+    const raw = sessionStorage.getItem(PREFIX + key);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || Date.now() - parsed.ts > SESSION_TTL) {
-      sessionStorage.removeItem(`qr:${key}`);
+      sessionStorage.removeItem(PREFIX + key);
       return null;
     }
     return parsed.data;
@@ -50,15 +50,15 @@ function sessionSet(key: string, data: any): void {
     const serialized = JSON.stringify({ data, ts: Date.now() });
     // Skip if payload is too large (>1MB) to avoid quota errors
     if (serialized.length > 1_000_000) return;
-    sessionStorage.setItem(`qr:${key}`, serialized);
+    sessionStorage.setItem(PREFIX + key, serialized);
   } catch {
     // Quota exceeded — evict oldest entries and try once more
     try {
-      const keys = Object.keys(sessionStorage).filter(k => k.startsWith("qr:"));
+      const keys = Object.keys(sessionStorage).filter(k => k.startsWith(PREFIX));
       if (keys.length > 0) {
         // Remove oldest half
         keys.slice(0, Math.ceil(keys.length / 2)).forEach(k => sessionStorage.removeItem(k));
-        sessionStorage.setItem(`qr:${key}`, JSON.stringify({ data, ts: Date.now() }));
+        sessionStorage.setItem(PREFIX + key, JSON.stringify({ data, ts: Date.now() }));
       }
     } catch { /* give up gracefully */ }
   }
@@ -119,11 +119,11 @@ export async function cachedQuery<T>(
 export function invalidateCache(key?: string): void {
   if (key) {
     MEM_CACHE.delete(key);
-    try { sessionStorage.removeItem(`qr:${key}`); } catch {}
+    try { sessionStorage.removeItem(PREFIX + key); } catch {}
   } else {
     MEM_CACHE.clear();
     try {
-      Object.keys(sessionStorage).filter(k => k.startsWith("qr:")).forEach(k => sessionStorage.removeItem(k));
+      Object.keys(sessionStorage).filter(k => k.startsWith(PREFIX)).forEach(k => sessionStorage.removeItem(k));
     } catch {}
   }
 }
