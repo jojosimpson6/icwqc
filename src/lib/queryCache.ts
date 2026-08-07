@@ -8,7 +8,7 @@
  */
 
 // Bump when cached payloads may be stale/corrupt (e.g. after a pagination fix)
-const CACHE_VERSION = "v2";
+const CACHE_VERSION = "v3";
 const PREFIX = `qr:${CACHE_VERSION}:`;
 
 const MEM_CACHE = new Map<string, { data: any; ts: number; ttl: number }>();
@@ -26,7 +26,7 @@ try {
 
 
 // Keys whose data rarely changes — give them a longer memory TTL
-const STABLE_PREFIXES = ["fetchAll2:players:", "fetchAll2:leagues:", "fetchAll2:teams:", "fetchAll2:nations:"];
+const STABLE_PREFIXES = ["fetchAll3:players:", "fetchAll3:leagues:", "fetchAll3:teams:", "fetchAll3:nations:"];
 
 function isStable(key: string): boolean {
   return STABLE_PREFIXES.some(p => key.startsWith(p));
