@@ -7,11 +7,23 @@
  * - Never caches errors or empty arrays from failed fetches
  */
 
+// Bump when cached payloads may be stale/corrupt (e.g. after a pagination fix)
+const CACHE_VERSION = "v2";
+const PREFIX = `qr:${CACHE_VERSION}:`;
+
 const MEM_CACHE = new Map<string, { data: any; ts: number; ttl: number }>();
 const IN_FLIGHT = new Map<string, Promise<any>>();
 const SESSION_TTL = 5 * 60 * 1000;   // 5 min sessionStorage
 const DEFAULT_TTL = 2 * 60 * 1000;   // 2 min memory (most data)
 const STABLE_TTL  = 10 * 60 * 1000;  // 10 min memory (leagues, players list, teams)
+
+// Drop caches written by older versions of the app
+try {
+  Object.keys(sessionStorage)
+    .filter(k => k.startsWith("qr:") && !k.startsWith(PREFIX))
+    .forEach(k => sessionStorage.removeItem(k));
+} catch { /* ignore */ }
+
 
 // Keys whose data rarely changes — give them a longer memory TTL
 const STABLE_PREFIXES = ["fetchAll2:players:", "fetchAll2:leagues:", "fetchAll2:teams:", "fetchAll2:nations:"];
@@ -22,11 +34,11 @@ function isStable(key: string): boolean {
 
 function sessionGet(key: string): any | null {
   try {
-    const raw = sessionStorage.getItem(`qr:${key}`);
+    const raw = sessionStorage.getItem(PREFIX + key);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || Date.now() - parsed.ts > SESSION_TTL) {
-      sessionStorage.removeItem(`qr:${key}`);
+      sessionStorage.removeItem(PREFIX + key);
       return null;
     }
     return parsed.data;
@@ -38,15 +50,15 @@ function sessionSet(key: string, data: any): void {
     const serialized = JSON.stringify({ data, ts: Date.now() });
     // Skip if payload is too large (>1MB) to avoid quota errors
     if (serialized.length > 1_000_000) return;
-    sessionStorage.setItem(`qr:${key}`, serialized);
+    sessionStorage.setItem(PREFIX + key, serialized);
   } catch {
     // Quota exceeded — evict oldest entries and try once more
     try {
-      const keys = Object.keys(sessionStorage).filter(k => k.startsWith("qr:"));
+      const keys = Object.keys(sessionStorage).filter(k => k.startsWith(PREFIX));
       if (keys.length > 0) {
         // Remove oldest half
         keys.slice(0, Math.ceil(keys.length / 2)).forEach(k => sessionStorage.removeItem(k));
-        sessionStorage.setItem(`qr:${key}`, JSON.stringify({ data, ts: Date.now() }));
+        sessionStorage.setItem(PREFIX + key, JSON.stringify({ data, ts: Date.now() }));
       }
     } catch { /* give up gracefully */ }
   }
@@ -107,11 +119,11 @@ export async function cachedQuery<T>(
 export function invalidateCache(key?: string): void {
   if (key) {
     MEM_CACHE.delete(key);
-    try { sessionStorage.removeItem(`qr:${key}`); } catch {}
+    try { sessionStorage.removeItem(PREFIX + key); } catch {}
   } else {
     MEM_CACHE.clear();
     try {
-      Object.keys(sessionStorage).filter(k => k.startsWith("qr:")).forEach(k => sessionStorage.removeItem(k));
+      Object.keys(sessionStorage).filter(k => k.startsWith(PREFIX)).forEach(k => sessionStorage.removeItem(k));
     } catch {}
   }
 }
