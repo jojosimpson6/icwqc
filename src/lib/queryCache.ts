@@ -7,11 +7,23 @@
  * - Never caches errors or empty arrays from failed fetches
  */
 
+// Bump when cached payloads may be stale/corrupt (e.g. after a pagination fix)
+const CACHE_VERSION = "v2";
+const PREFIX = `qr:${CACHE_VERSION}:`;
+
 const MEM_CACHE = new Map<string, { data: any; ts: number; ttl: number }>();
 const IN_FLIGHT = new Map<string, Promise<any>>();
 const SESSION_TTL = 5 * 60 * 1000;   // 5 min sessionStorage
 const DEFAULT_TTL = 2 * 60 * 1000;   // 2 min memory (most data)
 const STABLE_TTL  = 10 * 60 * 1000;  // 10 min memory (leagues, players list, teams)
+
+// Drop caches written by older versions of the app
+try {
+  Object.keys(sessionStorage)
+    .filter(k => k.startsWith("qr:") && !k.startsWith(PREFIX))
+    .forEach(k => sessionStorage.removeItem(k));
+} catch { /* ignore */ }
+
 
 // Keys whose data rarely changes — give them a longer memory TTL
 const STABLE_PREFIXES = ["fetchAll2:players:", "fetchAll2:leagues:", "fetchAll2:teams:", "fetchAll2:nations:"];
