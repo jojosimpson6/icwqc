@@ -136,17 +136,21 @@ export default function SchedulePage() {
       const [pastRows, futRows, mdRows] = await Promise.all([
         fetchAllRows<any>("results", {
           select: '"MatchID","SeasonID","LeagueID","WeekID","HomeTeamID","AwayTeamID","HomeTeamScore","AwayTeamScore"',
+          order: { column: "MatchID", ascending: true },
           filters: [{ method: "eq", args: ["SeasonID", season] }, ...leagueFilter],
         }),
         fetchAllRows<any>("scheduled_matches", {
           select: '"MatchID","SeasonID","LeagueID","WeekID","HomeTeamID","AwayTeamID","Matchday","Status"',
+          order: { column: "MatchID", ascending: true },
           filters: [{ method: "eq", args: ["SeasonID", season] }, ...leagueFilter],
         }).catch(() => []),
         fetchAllRows<any>("matchdays", {
           select: '"SeasonID","LeagueID","MatchdayWeek","Matchday"',
+          order: { column: "MatchdayID", ascending: true },
           filters: [{ method: "eq", args: ["SeasonID", season] }, ...leagueFilter],
         }),
       ]);
+
 
 
       // Build week->date map
