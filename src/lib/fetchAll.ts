@@ -18,11 +18,12 @@ export async function fetchAllRows<T = any>(
     select?: string;
     order?: { column: string; ascending?: boolean };
     filters?: Array<{ method: string; args: any[] }>;
+    cache?: boolean;
   }
 ): Promise<T[]> {
   const cacheKey = `fetchAll3:${table}:${JSON.stringify(query || {})}`;
 
-  return cachedQuery<T[]>(cacheKey, async () => {
+  const fetchRows = async (): Promise<T[]> => {
     const allData: T[] = [];
     let from = 0;
 
@@ -64,5 +65,9 @@ export async function fetchAllRows<T = any>(
     }
 
     return allData;
-  });
+  };
+
+  // Frequently changing or user-visible queries can opt out so a valid empty
+  // response never survives a hard refresh in sessionStorage.
+  return query?.cache === false ? fetchRows() : cachedQuery<T[]>(cacheKey, fetchRows);
 }

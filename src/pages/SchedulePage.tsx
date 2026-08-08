@@ -139,16 +139,19 @@ export default function SchedulePage() {
           select: '"MatchID","SeasonID","LeagueID","WeekID","HomeTeamID","AwayTeamID","HomeTeamScore","AwayTeamScore"',
           order: { column: "MatchID", ascending: true },
           filters: [{ method: "eq", args: ["SeasonID", season] }, ...leagueFilter],
+          cache: false,
         }),
         fetchAllRows<any>("scheduled_matches", {
           select: '"MatchID","SeasonID","LeagueID","WeekID","HomeTeamID","AwayTeamID","Matchday","Status"',
           order: { column: "MatchID", ascending: true },
           filters: [{ method: "eq", args: ["SeasonID", season] }, ...leagueFilter],
+          cache: false,
         }).catch(() => []),
         fetchAllRows<any>("matchdays", {
           select: '"SeasonID","LeagueID","MatchdayWeek","Matchday"',
           order: { column: "MatchdayID", ascending: true },
           filters: [{ method: "eq", args: ["SeasonID", season] }, ...leagueFilter],
+          cache: false,
         }),
       ]);
 
