@@ -90,6 +90,7 @@ export default function SchedulePage() {
   const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
 
   // Calendar focus month
   const today = currentDate;
@@ -241,7 +242,7 @@ export default function SchedulePage() {
         setLoadError("The schedule could not be loaded. Please retry.");
       })
       .finally(() => setLoading(false));
-  }, [season, leagueId]);
+  }, [season, leagueId, retryCount]);
 
   // Reset team if league changes
   useEffect(() => { setTeamId("all"); }, [leagueId]);
@@ -359,7 +360,7 @@ export default function SchedulePage() {
           {loadError && (
             <button
               type="button"
-              onClick={() => setSeason(current => current == null ? current : Number(current))}
+              onClick={() => setRetryCount(count => count + 1)}
               className="ml-auto text-xs font-semibold text-destructive underline underline-offset-2"
             >
               {loadError}
