@@ -89,6 +89,7 @@ export default function SchedulePage() {
 
   const [games, setGames] = useState<Game[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Calendar focus month
   const today = currentDate;
@@ -128,6 +129,7 @@ export default function SchedulePage() {
   useEffect(() => {
     if (!season) return;
     setLoading(true);
+    setLoadError(null);
     setSelectedDay(null);
     (async () => {
       const leagueFilter = leagueId !== "all"
@@ -146,7 +148,7 @@ export default function SchedulePage() {
           order: { column: "MatchID", ascending: true },
           filters: [{ method: "eq", args: ["SeasonID", season] }, ...leagueFilter],
           cache: false,
-        }).catch(() => []),
+        }),
         fetchAllRows<any>("matchdays", {
           select: '"SeasonID","LeagueID","MatchdayWeek","Matchday"',
           order: { column: "MatchdayID", ascending: true },
@@ -236,6 +238,7 @@ export default function SchedulePage() {
       .catch(error => {
         console.error("Failed to load schedule", error);
         setGames([]);
+        setLoadError("The schedule could not be loaded. Please retry.");
       })
       .finally(() => setLoading(false));
   }, [season, leagueId]);
@@ -353,6 +356,15 @@ export default function SchedulePage() {
           </div>
 
           {loading && <div className="ml-auto text-xs text-muted-foreground font-mono">Loading…</div>}
+          {loadError && (
+            <button
+              type="button"
+              onClick={() => setSeason(current => current == null ? current : Number(current))}
+              className="ml-auto text-xs font-semibold text-destructive underline underline-offset-2"
+            >
+              {loadError}
+            </button>
+          )}
         </div>
 
         {/* Calendar header */}

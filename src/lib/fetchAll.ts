@@ -2,6 +2,11 @@ import { supabase } from "@/integrations/supabase/client";
 import { cachedQuery } from "@/lib/queryCache";
 
 const PAGE_SIZE = 1000;
+const PAGE_RETRIES = 2;
+
+async function wait(ms: number): Promise<void> {
+  await new Promise(resolve => setTimeout(resolve, ms));
+}
 
 /**
  * Fetch all rows from a Supabase table or view, bypassing the 1000-row limit.
@@ -50,11 +55,18 @@ export async function fetchAllRows<T = any>(
       }
 
 
-      const { data, error } = await q.range(from, from + PAGE_SIZE - 1);
+      let data: unknown[] | null = null;
+      let lastError: { message: string } | null = null;
+      for (let attempt = 0; attempt <= PAGE_RETRIES; attempt++) {
+        const response = await q.range(from, from + PAGE_SIZE - 1);
+        data = response.data;
+        lastError = response.error;
+        if (!lastError) break;
+        if (attempt < PAGE_RETRIES) await wait(400 * 2 ** attempt);
+      }
 
-      if (error) {
-        // Throw so cachedQuery's retry logic can handle it
-        throw new Error(`fetchAllRows "${table}": ${error.message}`);
+      if (lastError) {
+        throw new Error(`fetchAllRows "${table}" at offset ${from}: ${lastError.message}`);
       }
 
       const page = (data || []) as T[];
