@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
-import { getLeagueTierLabel, groupTotyByPosition, isTeamStyleAward } from "@/lib/helpers";
+import { getLeagueTierLabel, groupTotyByPosition, isTeamStyleAward, isMatchReleased } from "@/lib/helpers";
 import { useSortableTable } from "@/hooks/useSortableTable";
 import { fetchAllRows } from "@/lib/fetchAll";
 
@@ -120,7 +120,7 @@ export default function LeaguePage() {
     Promise.all([
       supabase.from("leagues").select("*").eq("LeagueID", lid).single(),
       fetchAllRows("teams", { select: "*", filters: [{ method: "eq", args: ["LeagueID", lid] }], order: { column: "FullName", ascending: true } }),
-      fetchAllRows<StandingRow>("standings", { select: "*", filters: [{ method: "eq", args: ["LeagueID", lid] }], order: { column: "totalpoints", ascending: false } }),
+      fetchAllRows<StandingRow>("standings", { select: "*", filters: [{ method: "eq", args: ["LeagueID", lid] }], order: { column: "totalpoints", ascending: false }, cache: false }),
       fetchAllRows("awards", { select: "*", filters: [{ method: "eq", args: ["leagueid", lid] }], order: { column: "seasonid", ascending: false } }),
       fetchAllRows("players", { select: "PlayerID, PlayerName, Position" }),
       fetchAllRows("teams", { select: "TeamID, FullName" }),
@@ -167,17 +167,18 @@ export default function LeaguePage() {
       // For any non-domestic, fetch match results
       if (!isDomestic) {
         fetchAllRows<MatchResult>("results", {
-          select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID,SeasonID,LeagueID,IsNeutralSite",
+          select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID,SeasonID,LeagueID,IsNeutralSite,SnitchCaughtTime",
           filters: [{ method: "eq", args: ["LeagueID", lid] }],
           order: { column: "MatchID", ascending: true },
+          cache: false,
         }).then(results => {
-          // Never surface a match as "played" before its actual scheduled date —
+          // Never surface a match as "played" before its result is actually released —
           // this dataset has final scores pre-populated for future fixtures, so
-          // without this filter future results/stats would leak through.
-          const todayStr = ymdLocal(new Date());
+          // without this filter future results/stats would leak through. A result is
+          // released the day after the match (later still for long matches).
           const playedOnly = results.filter(r => {
             const d = mdm.get(`${r.SeasonID}|${r.LeagueID}|${r.WeekID}`);
-            return !d || d <= todayStr;
+            return !d || isMatchReleased(d, (r as any).SnitchCaughtTime);
           });
           setMatchResults(playedOnly);
           const seasons = [...new Set(playedOnly.map(r => r.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number)) as number[];
