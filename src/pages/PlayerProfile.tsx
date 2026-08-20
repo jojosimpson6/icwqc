@@ -5,7 +5,7 @@ import { FavoriteButton } from "@/components/FavoriteButton";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
-import { formatHeight, calculateAge, formatDate, getNationFlag, isTeamStyleAward } from "@/lib/helpers";
+import { formatHeight, calculateAge, formatDate, getNationFlag, isTeamStyleAward, isMatchReleased } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { cachedQuery } from "@/lib/queryCache";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -103,6 +103,7 @@ interface MatchLogEntry {
   stat: string;
   date: string | null;
   leagueName: string;
+  position: string | null;
 }
 
 const leagueAbbr: Record<string, string> = {
@@ -294,6 +295,7 @@ export default function PlayerProfile() {
           select: "MatchID,SeasonID,LeagueID,WeekID,SnitchCaughtTime,SnitchCaughtBy,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,HomeKeeperID,AwayKeeperID,HomeSeekerID,AwaySeekerID,HomeChaser1ID,HomeChaser1Goals,HomeChaser2ID,HomeChaser2Goals,HomeChaser3ID,HomeChaser3Goals,AwayChaser1ID,AwayChaser1Goals,AwayChaser2ID,AwayChaser2Goals,AwayChaser3ID,AwayChaser3Goals,IsNeutralSite,HomeBeater1ID,HomeBeater2ID,AwayBeater1ID,AwayBeater2ID,HomeKeeperSaves,AwayKeeperSaves,HomeChaser1ShotAtt,HomeChaser1ShotScored,HomeChaser2ShotAtt,HomeChaser2ShotScored,HomeChaser3ShotAtt,HomeChaser3ShotScored,AwayChaser1ShotAtt,AwayChaser1ShotScored,AwayChaser2ShotAtt,AwayChaser2ShotScored,AwayChaser3ShotAtt,AwayChaser3ShotScored,HomeBeater1BludgersHit,HomeBeater2BludgersHit,AwayBeater1BludgersHit,AwayBeater2BludgersHit",
           filters: [{ method: "or", args: [allOrFilters.join(",")] }],
           order: { column: "MatchID", ascending: false },
+          cache: false,
         }),
         cachedQuery("leagues:all", async () => await supabase.from("leagues").select("LeagueID,LeagueName")),
         fetchAllRows("teams", { select: "TeamID, FullName" }),
@@ -322,6 +324,12 @@ export default function PlayerProfile() {
         seenMatchIds.add(matchId);
         const sid = r.SeasonID as number;
         const lid = r.LeagueID as number;
+        const weekId0 = r.WeekID as number;
+        const matchDateStr = mdMap.get(`${sid}|${lid}|${weekId0}`) || null;
+        // Never surface a match here before its result is actually released — an
+        // admin-preview session bypasses the release-date RLS policy on `results`
+        // by design, so re-check client-side too (see SchedulePage/ScoreTicker).
+        if (!isMatchReleased(matchDateStr, r.SnitchCaughtTime as number | null)) return;
         const lname = leagueNameMap2.get(lid) || String(lid);
         const homePlayerIds = [r.HomeChaser1ID, r.HomeChaser2ID, r.HomeChaser3ID, r.HomeKeeperID, r.HomeSeekerID, r.HomeBeater1ID, r.HomeBeater2ID];
         const isHome = homePlayerIds.includes(pid2);
@@ -385,14 +393,14 @@ export default function PlayerProfile() {
           beaterShotsAllowedAgg.set(aggKey, entry);
         }
 
-        const weekId = r.WeekID as number;
-        const dateStr = mdMap.get(`${sid}|${lid}|${weekId}`) || null;
+        const dateStr = matchDateStr;
         logEntries.push({
           MatchID: matchId, SeasonID: sid,
           opponentName: teamMap.get(oppId) || String(oppId),
           isHome, isNeutral, teamScore, oppScore, stat,
           date: dateStr,
           leagueName: lname,
+          position: matchPos,
         });
       });
 
@@ -1137,8 +1145,19 @@ export default function PlayerProfile() {
   };
   const mlSortInd = (key: string) => matchLogSortKey === key ? (matchLogSortDir === "asc" ? " ↑" : " ↓") : "";
 
-  // Determine stat column header for match log (multi-position: show generic)
+  // Determine stat column header for match log (multi-position: show generic;
+  // per-row cells also get a short label below since a player can appear at
+  // different positions across matches even when one position dominates their career)
   const matchStatHeader = positionsPlayed.length > 1 ? "Stat" : isChaser ? "Goals" : isKeeper ? "Saves" : isSeeker ? "GSC" : isBeater ? "BH/TF" : "Stat";
+  const statLabelFor = (position: string | null): string => {
+    switch (position) {
+      case "Chaser": return "goals";
+      case "Keeper": return "saves";
+      case "Seeker": return "GSC";
+      case "Beater": return "BH";
+      default: return "";
+    }
+  };
 
   return (
     <div className="min-h-screen bg-background flex flex-col">
@@ -1928,7 +1947,12 @@ export default function PlayerProfile() {
                               <td className={`${tdClass} text-center font-bold text-xs ${won ? "text-green-600 dark:text-green-400" : "text-destructive"}`}>
                                 {won ? "W" : "L"}
                               </td>
-                              <td className={`${tdClass} text-right font-mono`}>{m.stat}</td>
+                              <td className={`${tdClass} text-right font-mono`}>
+                                {m.stat}
+                                {m.position && (
+                                  <span className="ml-1 text-[10px] text-muted-foreground font-sans">{statLabelFor(m.position)}</span>
+                                )}
+                              </td>
                             </tr>
                           );
                         })}
