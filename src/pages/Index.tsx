@@ -57,9 +57,9 @@ const Index = () => {
             </div>
 
             <div className="space-y-6">
-              <OnThisDay />
-              <PlayerSpotlight />
               <HomeStandings />
+              <PlayerSpotlight />
+              <OnThisDay />
             </div>
           </div>
         </div>

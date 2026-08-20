@@ -51,6 +51,7 @@ export function HomeStandings() {
       select: "*",
       filters: [{ method: "eq", args: ["LeagueID", lid] }],
       order: { column: "totalpoints", ascending: false },
+      cache: false, // standings change as soon as a match is released — don't serve a stale snapshot
     });
     setStandings(data);
     const seasons = [...new Set(data.map(s => s.SeasonID).filter(Boolean))].sort((a, b) => (b || 0) - (a || 0)) as number[];

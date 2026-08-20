@@ -33,6 +33,36 @@ export function parseLocalDate(dateStr: string): Date {
 }
 
 /**
+ * Mirrors the database's `match_release_date` function: a match's result becomes
+ * public the day AFTER it's played, plus one extra day for every 720 minutes
+ * (12 hours) of snitch-catch time — so unusually long matches that run past
+ * midnight (or well beyond) don't leak a same-day/next-day score before it's
+ * really final. Keep this in sync with supabase/migrations if that function changes.
+ */
+export function matchReleaseDate(matchday: string, snitchCaughtTime: number | null): Date {
+  const d = parseLocalDate(matchday);
+  const extraDays = 1 + Math.floor((snitchCaughtTime ?? 0) / 720);
+  d.setDate(d.getDate() + extraDays);
+  return d;
+}
+
+/**
+ * Whether a match's result/statistics should be visible yet. Mirrors
+ * `match_release_date` — see above. `results` rows are also protected by a
+ * matching RLS policy in the database, but the frontend re-checks this
+ * independently wherever it aggregates or lists matches client-side (e.g. the
+ * schedule calendar, the score ticker) so an admin-preview session — which
+ * intentionally bypasses that RLS policy to allow reviewing draft results —
+ * never leaks an unreleased score into a page a regular visitor would also see.
+ */
+export function isMatchReleased(matchday: string | null | undefined, snitchCaughtTime: number | null, now: Date = new Date()): boolean {
+  if (!matchday) return false;
+  const release = matchReleaseDate(matchday, snitchCaughtTime);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return release.getTime() <= today.getTime();
+}
+
+/**
  * Given a hex or named CSS color, return true if it's "light" (luminance > 0.5).
  * Used for choosing readable text on colored backgrounds.
  */

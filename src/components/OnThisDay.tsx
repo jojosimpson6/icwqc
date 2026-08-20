@@ -87,7 +87,14 @@ export function OnThisDay() {
             ],
           });
 
-          const relevant = results.filter(r => keys.has(`${r.SeasonID}|${r.LeagueID}|${r.WeekID}`) && r.HomeTeamScore != null && r.AwayTeamScore != null);
+          const relevantAll = results.filter(r => keys.has(`${r.SeasonID}|${r.LeagueID}|${r.WeekID}`) && r.HomeTeamScore != null && r.AwayTeamScore != null);
+          // Defensive de-dupe by MatchID — the same match should never be listed twice.
+          const seenMatchIds = new Set<number>();
+          const relevant = relevantAll.filter(r => {
+            if (seenMatchIds.has(r.MatchID)) return false;
+            seenMatchIds.add(r.MatchID);
+            return true;
+          });
 
           // "Significant" ranking so this scales even if a hundred matches happen to
           // share today's calendar date across many seasons/leagues: flagship
@@ -119,24 +126,42 @@ export function OnThisDay() {
             .slice(0, 4);
         }
 
-        // Players / managers born on this calendar day (any year).
-        const bdays: BirthdayPerson[] = [];
+        // Players / managers born on this calendar day (any year). Some people are in
+        // both tables (a former player who's now a manager, etc.) — de-dupe those by
+        // name + date of birth so the same person's birthday isn't listed twice.
+        const bdayMap = new Map<string, BirthdayPerson>();
+        const bdayKey = (name: string, dob: string) => `${name.trim().toLowerCase()}|${dob}`;
         players.forEach(p => {
           if (!p.DOB) return;
           const d = new Date(p.DOB);
           if (isNaN(d.getTime()) || d.getMonth() + 1 !== month || d.getDate() !== day) return;
           const nation = p.NationalityID ? nationMap.get(p.NationalityID) : undefined;
-          bdays.push({ id: p.PlayerID, name: p.PlayerName, birthYear: d.getFullYear(), kind: "player", nationFlag: nation ? getNationFlag(nation) : undefined });
+          bdayMap.set(bdayKey(p.PlayerName, p.DOB), {
+            id: p.PlayerID,
+            name: p.PlayerName,
+            birthYear: d.getFullYear(),
+            kind: "player",
+            nationFlag: nation ? getNationFlag(nation) : undefined,
+          });
         });
         managers.forEach(m => {
           if (!m.DOB) return;
           const d = new Date(m.DOB);
           if (isNaN(d.getTime()) || d.getMonth() + 1 !== month || d.getDate() !== day) return;
+          const fullName = `${m.FirstName} ${m.LastName}`;
+          const key = bdayKey(fullName, m.DOB);
+          if (bdayMap.has(key)) return; // already counted as a player's birthday — same person
           const nation = m.NationalityID ? nationMap.get(m.NationalityID) : undefined;
-          bdays.push({ id: m.ManagerID, name: `${m.FirstName} ${m.LastName}`, birthYear: d.getFullYear(), kind: "manager", nationFlag: nation ? getNationFlag(nation) : undefined });
+          bdayMap.set(key, {
+            id: m.ManagerID,
+            name: fullName,
+            birthYear: d.getFullYear(),
+            kind: "manager",
+            nationFlag: nation ? getNationFlag(nation) : undefined,
+          });
         });
         // Oldest to youngest — a stable, meaningful order rather than a random shuffle.
-        bdays.sort((a, b) => a.birthYear - b.birthYear);
+        const bdays = [...bdayMap.values()].sort((a, b) => a.birthYear - b.birthYear);
 
         setMatches(matchList);
         setBirthdays(bdays.slice(0, 5));

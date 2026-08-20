@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { useAuth } from "@/hooks/useAuth";
 import { Star } from "lucide-react";
+import { isMatchReleased } from "@/lib/helpers";
 
 interface GameScore {
   MatchID: number;
@@ -45,8 +46,11 @@ export function ScoreTicker() {
         .order("Matchday", { ascending: false })
         .limit(12);
 
+      // Popular leagues first (ascending LeagueID), matching the "latest scores" order below.
+      const inProgSorted = [...(inProg || [])].sort((a: any, b: any) => (a.LeagueID ?? 0) - (b.LeagueID ?? 0));
+
       setPending(
-        (inProg || []).map((r: any) => ({
+        inProgSorted.map((r: any) => ({
           MatchID: r.MatchID,
           HomeTeamID: r.HomeTeamID,
           AwayTeamID: r.AwayTeamID,
@@ -89,6 +93,10 @@ export function ScoreTicker() {
         for (const { data: results } of resultSets) {
           if (results) {
             results.forEach((r: any) => {
+              // Defense-in-depth: an admin-preview session bypasses the release-date
+              // RLS policy on `results` by design, so re-check here too — the ticker
+              // should never surface a score before it's actually released.
+              if (!isMatchReleased(date, r.SnitchCaughtTime)) return;
               allScores.push({
                 MatchID: r.MatchID,
                 HomeTeamID: r.HomeTeamID,
@@ -106,6 +114,8 @@ export function ScoreTicker() {
         }
 
         if (allScores.length > 0) {
+          // Popular leagues first — ascending LeagueID (e.g. BIQL/NQA before EARL).
+          allScores.sort((a, b) => (a.LeagueID ?? 0) - (b.LeagueID ?? 0));
           setScores(allScores);
           return;
         }

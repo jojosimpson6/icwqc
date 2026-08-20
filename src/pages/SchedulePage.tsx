@@ -12,6 +12,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { isMatchReleased } from "@/lib/helpers";
 
 interface League { LeagueID: number; LeagueName: string | null; LeagueTier: number | null; }
 interface Team   { TeamID: number; FullName: string | null; Nickname: string | null; }
@@ -139,7 +140,7 @@ export default function SchedulePage() {
 
       const [pastRows, futRows, mdRows] = await Promise.all([
         fetchAllRows<any>("results", {
-          select: '"MatchID","SeasonID","LeagueID","WeekID","HomeTeamID","AwayTeamID","HomeTeamScore","AwayTeamScore"',
+          select: '"MatchID","SeasonID","LeagueID","WeekID","HomeTeamID","AwayTeamID","HomeTeamScore","AwayTeamScore","SnitchCaughtTime"',
           order: { column: "MatchID", ascending: true },
           filters: [{ method: "eq", args: ["SeasonID", season] }, ...leagueFilter],
           cache: false,
@@ -166,9 +167,17 @@ export default function SchedulePage() {
 
       const list: Game[] = [];
 
+      // A row appearing in `results` does NOT by itself mean it's safe to show as
+      // played — an admin-preview session bypasses the DB's release-date RLS policy
+      // (by design, so admins can review draft results), which would otherwise leak
+      // future/unreleased scores here. Re-check the release date client-side too, so
+      // the calendar never shows a score before match_release_date has passed.
+      const playedIds = new Set<number>();
       (pastRows || []).forEach((r: any) => {
         const d = dateMap.get(`${r.LeagueID}|${r.WeekID}`);
         if (!d) return;
+        if (!isMatchReleased(d, r.SnitchCaughtTime)) return; // not released yet — represented via scheduled_matches instead
+        if (r.HomeTeamScore == null || r.AwayTeamScore == null) return;
         list.push({
           MatchID: r.MatchID,
           SeasonID: r.SeasonID,
@@ -181,11 +190,8 @@ export default function SchedulePage() {
           AwayScore: r.AwayTeamScore,
           played: true,
         });
+        if (r.MatchID != null) playedIds.add(r.MatchID);
       });
-
-      // Track MatchIDs already present in results so scheduled_matches doesn't duplicate them
-      const playedIds = new Set<number>();
-      (pastRows || []).forEach((r: any) => { if (r.MatchID != null) playedIds.add(r.MatchID); });
 
       (futRows || []).forEach((r: any) => {
         if (r.MatchID != null && playedIds.has(r.MatchID)) return;
