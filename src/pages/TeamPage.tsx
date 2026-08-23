@@ -6,7 +6,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
 import { useSortableTable } from "@/hooks/useSortableTable";
-import { getContrastText, formatHeight, getNationFlag, isLightColor } from "@/lib/helpers";
+import { getContrastText, formatHeight, getNationFlag, isLightColor, isMatchReleased } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { seasonLabel, ordinal, computeStageReached, QUAL_PARENT_MAP } from "@/lib/competitionStage";
@@ -153,8 +153,22 @@ export default function TeamPage() {
           select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SnitchCaughtTime,LeagueID,SeasonID,WeekID,IsNeutralSite",
           filters: [{ method: "or", args: [`HomeTeamID.eq.${teamData.TeamID},AwayTeamID.eq.${teamData.TeamID}`] }],
           order: { column: "MatchID", ascending: false },
+          cache: false,
         }).then((rData) => {
-            if (rData) setMatchResults(rData as MatchResult[]);
+            if (!rData) return;
+            // Never surface a match here before its result is actually released — an
+            // admin-preview session bypasses the release-date RLS policy on `results`
+            // by design, so re-check client-side too (see SchedulePage/ScoreTicker).
+            const mdmLocal = new Map<string, string>();
+            (mdData || []).forEach((md: any) => {
+              if (md.SeasonID && md.LeagueID && md.MatchdayWeek != null && md.Matchday) {
+                mdmLocal.set(`${md.SeasonID}|${md.LeagueID}|${md.MatchdayWeek}`, md.Matchday);
+              }
+            });
+            const released = (rData as MatchResult[]).filter(r =>
+              isMatchReleased(mdmLocal.get(`${r.SeasonID}|${r.LeagueID}|${r.WeekID}`), r.SnitchCaughtTime)
+            );
+            setMatchResults(released);
           });
 
         // Captaincy history
