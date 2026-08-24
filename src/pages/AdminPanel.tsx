@@ -3,6 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
+import { newsItemSchema, siteContentSchema, firstError } from "@/lib/adminValidation";
+
 
 interface NewsItem {
   id: string;
@@ -134,14 +136,12 @@ export default function AdminPanel() {
   }
 
   async function saveNews() {
-    if (!newNews.title || !newNews.body) return;
-    const { error } = await supabase.from("news_items").insert({
-      title: newNews.title,
-      body: newNews.body,
-      published_date: newNews.published_date,
-      author: newNews.author || null,
-      pinned: newNews.pinned,
-    });
+    const parsed = newsItemSchema.safeParse(newNews);
+    const validationError = firstError(parsed);
+    if (validationError || !parsed.success) { setNewsMsg(validationError ?? "Invalid input"); return; }
+    const { title, body, published_date, author, pinned } = parsed.data;
+    const { error } = await supabase.from("news_items").insert({ title, body, published_date, author, pinned });
+
     if (error) { setNewsMsg("Error: " + error.message); return; }
     setNewNews({ title: "", body: "", published_date: new Date().toISOString().split("T")[0], author: "", pinned: false });
     setNewsMsg("News item added!");
@@ -151,13 +151,10 @@ export default function AdminPanel() {
 
   async function updateNews() {
     if (!editingNews) return;
-    const { error } = await supabase.from("news_items").update({
-      title: editingNews.title,
-      body: editingNews.body,
-      published_date: editingNews.published_date,
-      author: editingNews.author || null,
-      pinned: editingNews.pinned,
-    }).eq("id", editingNews.id);
+    const parsed = newsItemSchema.safeParse({ ...editingNews, author: editingNews.author ?? "" });
+    const validationError = firstError(parsed);
+    if (validationError || !parsed.success) { setNewsMsg(validationError ?? "Invalid input"); return; }
+    const { error } = await supabase.from("news_items").update(parsed.data).eq("id", editingNews.id);
     if (error) { setNewsMsg("Error: " + error.message); return; }
     setEditingNews(null);
     setNewsMsg("Updated!");
@@ -179,16 +176,17 @@ export default function AdminPanel() {
 
   async function updateContent() {
     if (!editingContent) return;
-    const { error } = await supabase.from("site_content").update({
-      title: editingContent.title,
-      content: editingContent.content,
-    }).eq("id", editingContent.id);
+    const parsed = siteContentSchema.safeParse({ title: editingContent.title ?? "", content: editingContent.content });
+    const validationError = firstError(parsed);
+    if (validationError || !parsed.success) { setContentMsg(validationError ?? "Invalid input"); return; }
+    const { error } = await supabase.from("site_content").update(parsed.data).eq("id", editingContent.id);
     if (error) { setContentMsg("Error: " + error.message); return; }
     setEditingContent(null);
     setContentMsg("Content updated!");
     fetchContent();
     setTimeout(() => setContentMsg(""), 3000);
   }
+
 
   const inputClass = "w-full border border-border rounded px-3 py-2 text-sm bg-background text-foreground font-sans focus:outline-none focus:ring-2 focus:ring-primary";
   const labelClass = "block text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-1 font-sans";
