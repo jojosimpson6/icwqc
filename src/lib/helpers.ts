@@ -63,6 +63,33 @@ export function isMatchReleased(matchday: string | null | undefined, snitchCaugh
 }
 
 /**
+ * Whether an entire domestic (round-robin) season's fixtures have concluded
+ * and been released, so it's safe to call a "current leader" the actual
+ * champion. Uses the last scheduled matchday for that league+season plus a
+ * few days' buffer, so a long final-week match still has time to be released
+ * before the season is treated as decided. Needs the full matchdays list for
+ * this league+season — with no schedule data for it, we can't safely say the
+ * season is over, so this returns false rather than guessing.
+ */
+export function isSeasonComplete(
+  seasonId: number,
+  leagueId: number,
+  matchdays: { SeasonID: number; LeagueID: number; Matchday: string }[],
+  now: Date = new Date()
+): boolean {
+  let lastMatchday: string | null = null;
+  for (const m of matchdays) {
+    if (m.SeasonID !== seasonId || m.LeagueID !== leagueId) continue;
+    if (!lastMatchday || m.Matchday > lastMatchday) lastMatchday = m.Matchday;
+  }
+  if (!lastMatchday) return false;
+  const last = parseLocalDate(lastMatchday);
+  last.setDate(last.getDate() + 3); // buffer for release delay on the final week's matches
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  return last.getTime() <= today.getTime();
+}
+
+/**
  * Given a hex or named CSS color, return true if it's "light" (luminance > 0.5).
  * Used for choosing readable text on colored backgrounds.
  */

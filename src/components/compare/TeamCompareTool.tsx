@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { cachedQuery } from "@/lib/queryCache";
-import { getContrastText } from "@/lib/helpers";
+import { getContrastText, isMatchReleased } from "@/lib/helpers";
 import { useSortableTable } from "@/hooks/useSortableTable";
 import { TeamSearchBox, TeamOption } from "./TeamSearchBox";
 import {
@@ -54,7 +54,7 @@ function emptyTeamSlot(): TeamSlot {
   return { id: newTeamSlotId(), ...RESET_TEAM_FIELDS };
 }
 
-const RESULT_SELECT_FIELDS = "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,LeagueID,SeasonID,WeekID,IsNeutralSite";
+const RESULT_SELECT_FIELDS = "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,LeagueID,SeasonID,WeekID,IsNeutralSite,SnitchCaughtTime";
 const STANDINGS_SELECT_FIELDS = "FullName,SeasonID,LeagueID,totalpoints,totalgsc,totalgamesplayed,GoalsFor,GoalsAgainst";
 
 function applyTeamDefaultScope(results: ResultRow[], standings: StandingsRow[]): Pick<TeamSlot, "mode" | "seasonId" | "rangeFrom" | "rangeTo" | "competition"> {
@@ -156,6 +156,7 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
   const [leagueNameById, setLeagueNameById] = useState<Map<number, string>>(new Map());
   const [leagueIdByName, setLeagueIdByName] = useState<Map<string, number>>(new Map());
   const [matchDayCompositeMap, setMatchDayCompositeMap] = useState<Map<string, string>>(new Map());
+  const matchdaysPromiseRef = useRef<Promise<Map<string, string>> | null>(null);
 
   const [h2h, setH2h] = useState<ResultRow[] | null>(null);
   const [h2hLoading, setH2hLoading] = useState(false);
@@ -175,7 +176,7 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
       setLeagueNameById(byId);
       setLeagueIdByName(byName);
     });
-    fetchAllRows<any>("matchdays", { select: "MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek" }).then(mdData => {
+    matchdaysPromiseRef.current = fetchAllRows<any>("matchdays", { select: "MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek" }).then(mdData => {
       const mdComposite = new Map<string, string>();
       (mdData || []).forEach((md: any) => {
         if (md.SeasonID && md.LeagueID && md.MatchdayWeek != null && md.Matchday) {
@@ -183,21 +184,32 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
         }
       });
       setMatchDayCompositeMap(mdComposite);
+      return mdComposite;
     });
   }, []);
 
   async function loadTeamData(slotId: string, team: TeamOption) {
-    const [results, standings] = await Promise.all([
+    // Never surface a match before its result is actually released — an
+    // admin-preview session bypasses the release-date RLS policy on `results`
+    // by design, so re-check client-side too (see SchedulePage/ScoreTicker).
+    // Wait for the matchdays lookup so this can't race and under-filter.
+    const mdComposite = matchdaysPromiseRef.current ? await matchdaysPromiseRef.current : new Map<string, string>();
+    const [resultsRaw, standings] = await Promise.all([
       fetchAllRows<ResultRow>("results", {
         select: RESULT_SELECT_FIELDS,
         filters: [{ method: "or", args: [`HomeTeamID.eq.${team.TeamID},AwayTeamID.eq.${team.TeamID}`] }],
         order: { column: "MatchID", ascending: true },
+        cache: false,
       }),
       fetchAllRows<StandingsRow>("standings", {
         select: STANDINGS_SELECT_FIELDS,
         filters: [{ method: "eq", args: ["FullName", team.FullName] }],
+        cache: false,
       }),
     ]);
+    const results = resultsRaw.filter(r =>
+      isMatchReleased(mdComposite.get(`${r.SeasonID}|${r.LeagueID}|${r.WeekID}`), r.SnitchCaughtTime)
+    );
     setSlots(prev => prev.map(s => (s.id === slotId ? { ...s, results, standings, loading: false, ...applyTeamDefaultScope(results, standings) } : s)));
   }
 
@@ -248,9 +260,15 @@ export function TeamCompareTool({ initialTeamIds, onTeamSelected }: TeamCompareT
       select: RESULT_SELECT_FIELDS,
       filters: [{ method: "or", args: [`and(HomeTeamID.eq.${a.TeamID},AwayTeamID.eq.${b.TeamID}),and(HomeTeamID.eq.${b.TeamID},AwayTeamID.eq.${a.TeamID})`] }],
       order: { column: "MatchID", ascending: false },
-    }).then(rows => {
+      cache: false,
+    }).then(async (rows) => {
       if (cancelled) return;
-      setH2h(rows);
+      const mdComposite = matchdaysPromiseRef.current ? await matchdaysPromiseRef.current : new Map<string, string>();
+      if (cancelled) return;
+      const released = rows.filter(r =>
+        isMatchReleased(mdComposite.get(`${r.SeasonID}|${r.LeagueID}|${r.WeekID}`), r.SnitchCaughtTime)
+      );
+      setH2h(released);
       setH2hLoading(false);
     });
     return () => { cancelled = true; };

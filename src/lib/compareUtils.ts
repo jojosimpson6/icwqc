@@ -263,6 +263,7 @@ export interface ResultRow {
   SeasonID: number | null;
   WeekID: number | null;
   IsNeutralSite: number | null;
+  SnitchCaughtTime: number | null;
 }
 
 export interface TeamRecordTotals {
