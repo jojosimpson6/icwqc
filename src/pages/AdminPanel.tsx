@@ -139,7 +139,9 @@ export default function AdminPanel() {
     const parsed = newsItemSchema.safeParse(newNews);
     const validationError = firstError(parsed);
     if (validationError || !parsed.success) { setNewsMsg(validationError ?? "Invalid input"); return; }
-    const { error } = await supabase.from("news_items").insert(parsed.data);
+    const { title, body, published_date, author, pinned } = parsed.data;
+    const { error } = await supabase.from("news_items").insert({ title, body, published_date, author, pinned });
+
     if (error) { setNewsMsg("Error: " + error.message); return; }
     setNewNews({ title: "", body: "", published_date: new Date().toISOString().split("T")[0], author: "", pinned: false });
     setNewsMsg("News item added!");
