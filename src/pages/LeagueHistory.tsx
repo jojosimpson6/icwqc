@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
-import { getLeagueTierLabel, groupTotyByPosition, isTeamStyleAward } from "@/lib/helpers";
+import { getLeagueTierLabel, groupTotyByPosition, isTeamStyleAward, isSeasonComplete, isMatchReleased } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
 
 interface League {
@@ -119,11 +119,11 @@ export default function LeagueHistory() {
       cup
         ? fetchAllRows("teams", { select:"TeamID,FullName" })
         : fetchAllRows("teams", { select:"TeamID,FullName", filters:[{method:"eq",args:["LeagueID",lid]}] }),
-      cup ? Promise.resolve([]) : fetchAllRows("standings", { select:"*", filters:[{method:"eq",args:["LeagueID",lid]}], order:{column:"totalpoints",ascending:false} }),
+      cup ? Promise.resolve([]) : fetchAllRows("standings", { select:"*", filters:[{method:"eq",args:["LeagueID",lid]}], order:{column:"totalpoints",ascending:false}, cache: false }),
       fetchAllRows("awards", { select:"*", filters:[{method:"eq",args:["leagueid",lid]}], order:{column:"seasonid",ascending:true} }),
       fetchAllRows("players", { select:"PlayerID,PlayerName,Position" }),
-      cup ? fetchAllRows("results", { select:"MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID,SeasonID", filters:[{method:"eq",args:["LeagueID",lid]}], order:{column:"WeekID",ascending:true} }) : Promise.resolve([]),
-      cup ? fetchAllRows("matchdays", { select:"Matchday,MatchdayWeek,SeasonID,LeagueID", filters:[{method:"eq",args:["LeagueID",lid]}] }) : Promise.resolve([]),
+      cup ? fetchAllRows("results", { select:"MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID,SeasonID,SnitchCaughtTime", filters:[{method:"eq",args:["LeagueID",lid]}], order:{column:"WeekID",ascending:true}, cache: false }) : Promise.resolve([]),
+      fetchAllRows("matchdays", { select:"Matchday,MatchdayWeek,SeasonID,LeagueID", filters:[{method:"eq",args:["LeagueID",lid]}] }),
     ]).then(async ([{data:leagueData}, teamData, standingsData, awardsData, playerData, resultsData, matchdaysData]) => {
       if (leagueData) setLeague(leagueData);
 
@@ -166,20 +166,35 @@ export default function LeagueHistory() {
         const summaries: SeasonSummary[] = [];
         bySeason.forEach((rows, sid) => {
           const sorted = rows.sort((a:any,b:any) => (b.totalpoints||0)-(a.totalpoints||0));
+          // Don't crown a champion/runner-up off a mid-season snapshot — only once
+          // every fixture for that league+season has actually concluded and released.
+          const seasonDone = isSeasonComplete(sid, lid, (matchdaysData as any[]) || []);
           summaries.push({
             seasonId: sid,
-            champion: sorted[0]?.FullName??null,
-            runnerUp: sorted[1]?.FullName??null,
-            third: sorted[2]?.FullName??null,
+            champion: seasonDone ? (sorted[0]?.FullName ?? null) : null,
+            runnerUp: seasonDone ? (sorted[1]?.FullName ?? null) : null,
+            third: seasonDone ? (sorted[2]?.FullName ?? null) : null,
             teams: sorted.map((r:any) => ({name:r.TeamFullName||"",pts:r.totalpoints||0,gp:r.totalgamesplayed||0,gf:r.GoalsFor||0,ga:r.GoalsAgainst||0,gsc:r.totalgsc||0})),
           });
         });
         setSeasons(summaries.sort((a,b)=>b.seasonId-a.seasonId));
 
       } else if (cup && Array.isArray(resultsData) && resultsData.length > 0) {
+        // Never surface a cup match before its result is actually released — an
+        // admin-preview session bypasses the release-date RLS policy on `results`
+        // by design, so re-check client-side too (see SchedulePage/ScoreTicker).
+        const mdComposite = new Map<string, string>();
+        (matchdaysData as any[]).forEach((md: any) => {
+          if (md.SeasonID && md.LeagueID && md.MatchdayWeek != null && md.Matchday) {
+            mdComposite.set(`${md.SeasonID}|${md.LeagueID}|${md.MatchdayWeek}`, md.Matchday);
+          }
+        });
+        const releasedResults = (resultsData as any[]).filter(r =>
+          isMatchReleased(mdComposite.get(`${r.SeasonID}|${lid}|${r.WeekID}`), r.SnitchCaughtTime)
+        );
         // Group by season
         const bySeason = new Map<number,any[]>();
-        (resultsData as any[]).forEach(r => {
+        releasedResults.forEach(r => {
           if (r.SeasonID==null) return;
           if (!bySeason.has(r.SeasonID)) bySeason.set(r.SeasonID,[]);
           bySeason.get(r.SeasonID)!.push(r);
@@ -238,7 +253,9 @@ export default function LeagueHistory() {
           // Rank by wins, tiebreaker = goal difference.
           if (lid === 17) {
             const finalWeeks = [6, 7, 8].filter(w => weekGroups.has(w));
-            if (!finalWeeks.length) return;
+            // The Americas Cup final is a 3-week round-robin (weeks 6-8) — don't
+            // rank/crown anyone until all three weeks have actually been played.
+            if (finalWeeks.length < 3) return;
             const stats = new Map<number,{w:number;gf:number;ga:number}>();
             const bump = (id:number) => { if (!stats.has(id)) stats.set(id,{w:0,gf:0,ga:0}); return stats.get(id)!; };
             finalWeeks.forEach(fw => {

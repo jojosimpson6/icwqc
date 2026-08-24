@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
-import { getNationFlag, formatHeight, calculateAge } from "@/lib/helpers";
+import { getNationFlag, formatHeight, calculateAge, isMatchReleased } from "@/lib/helpers";
 import { useSortableTable } from "@/hooks/useSortableTable";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { computeStageReached, QUAL_PARENT_MAP, TournamentMatch } from "@/lib/competitionStage";
@@ -297,11 +297,29 @@ export default function NationPage() {
         });
 
         // Fetch intl results for this national team specifically
-        fetchAllRows("results", {
-          select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,WeekID,SnitchCaughtTime,IsNeutralSite,HomeChaser1ID,HomeChaser2ID,HomeChaser3ID,HomeKeeperID,HomeSeekerID,HomeBeater1ID,HomeBeater2ID,AwayChaser1ID,AwayChaser2ID,AwayChaser3ID,AwayKeeperID,AwaySeekerID,AwayBeater1ID,AwayBeater2ID",
-          filters: [{ method: "or", args: [`HomeTeamID.eq.${natTeam.TeamID},AwayTeamID.eq.${natTeam.TeamID}`] }],
-          order: { column: "MatchID", ascending: false },
-        }).then(async (rData) => {
+        Promise.all([
+          fetchAllRows("results", {
+            select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,SeasonID,LeagueID,WeekID,SnitchCaughtTime,IsNeutralSite,HomeChaser1ID,HomeChaser2ID,HomeChaser3ID,HomeKeeperID,HomeSeekerID,HomeBeater1ID,HomeBeater2ID,AwayChaser1ID,AwayChaser2ID,AwayChaser3ID,AwayKeeperID,AwaySeekerID,AwayBeater1ID,AwayBeater2ID",
+            filters: [{ method: "or", args: [`HomeTeamID.eq.${natTeam.TeamID},AwayTeamID.eq.${natTeam.TeamID}`] }],
+            order: { column: "MatchID", ascending: false },
+            cache: false,
+          }),
+          fetchAllRows<{ SeasonID: number; LeagueID: number; MatchdayWeek: number; Matchday: string }>("matchdays", {
+            select: "SeasonID, LeagueID, MatchdayWeek, Matchday",
+          }),
+        ]).then(async ([rDataRaw, mdRows]) => {
+          // Never surface a match here before its result is actually released — an
+          // admin-preview session bypasses the release-date RLS policy on `results`
+          // by design, so re-check client-side too (see SchedulePage/ScoreTicker).
+          const mdComposite = new Map<string, string>();
+          (mdRows || []).forEach(md => {
+            if (md.SeasonID && md.LeagueID && md.MatchdayWeek != null && md.Matchday) {
+              mdComposite.set(`${md.SeasonID}|${md.LeagueID}|${md.MatchdayWeek}`, md.Matchday);
+            }
+          });
+          const rData = (rDataRaw || []).filter((r: any) =>
+            isMatchReleased(mdComposite.get(`${r.SeasonID}|${r.LeagueID}|${r.WeekID}`), r.SnitchCaughtTime)
+          );
           if (rData) {
             setIntlResults(rData as IntlResult[]);
             // Get most recent match and extract 7 players

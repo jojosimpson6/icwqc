@@ -6,7 +6,7 @@ import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
 import { useSortableTable } from "@/hooks/useSortableTable";
-import { getContrastText, formatHeight, getNationFlag, isLightColor, isMatchReleased } from "@/lib/helpers";
+import { getContrastText, formatHeight, getNationFlag, isLightColor, isMatchReleased, isSeasonComplete } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { seasonLabel, ordinal, computeStageReached, QUAL_PARENT_MAP } from "@/lib/competitionStage";
@@ -264,7 +264,7 @@ export default function TeamPage() {
 
       // Build register from stats (works even without standings for cups/CL)
       if (statsData && statsData.length > 0) {
-        buildSeasonRegister(teamName, (standData || []) as StandingRow[], statsData as StatLine[], teamData?.TeamID ?? null);
+        buildSeasonRegister(teamName, (standData || []) as StandingRow[], statsData as StatLine[], teamData?.TeamID ?? null, (mdData || []) as any[]);
       }
     }).catch(err => {
       console.error("Failed to load team:", err);
@@ -272,7 +272,7 @@ export default function TeamPage() {
     });
   }, [name]);
 
-  async function buildSeasonRegister(teamName: string, standings: StandingRow[], stats: StatLine[], teamId: number | null) {
+  async function buildSeasonRegister(teamName: string, standings: StandingRow[], stats: StatLine[], teamId: number | null, matchdaysForRegister: { SeasonID: number; LeagueID: number; Matchday: string }[]) {
     const seasonLeaguePairs = new Map<string, { seasonId: number; leagueName: string }>();
     (stats || []).forEach(s => {
       if (s.SeasonID && s.LeagueName) {
@@ -347,7 +347,9 @@ export default function TeamPage() {
         .sort((a, b) => b.totalpoints - a.totalpoints);
       const idx = seasonStandings.findIndex(s => s.FullName === teamName);
       const position = idx >= 0 ? idx + 1 : null;
-      const isChampion = idx === 0;
+      // Don't crown a champion off a mid-season snapshot — only once every
+      // fixture for that league+season has actually concluded and released.
+      const isChampion = idx === 0 && isSeasonComplete(seasonId, leagueId, matchdaysForRegister);
       registerRows.push({
         SeasonID: seasonId, LeagueName: leagueN, LeagueTier: tier, LeagueID: leagueId,
         position, isChampion,

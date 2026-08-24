@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
-import { getNationFlag, formatDate, getLeagueTierLabel } from "@/lib/helpers";
+import { getNationFlag, formatDate, getLeagueTierLabel, isSeasonComplete, isMatchReleased } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { seasonLabel, ordinal, computeStageReached, QUAL_PARENT_MAP, TournamentMatch } from "@/lib/competitionStage";
 import { ProfileSkeleton } from "@/components/StateMessage";
@@ -113,13 +113,22 @@ export default function ManagerProfile() {
           return;
         }
 
-        const [teams, leagues] = await Promise.all([
+        const [teams, leagues, matchdaysAll] = await Promise.all([
           fetchAllRows<TeamInfo>("teams", {
             select: "TeamID, FullName, LeagueID, logo_url, PrimaryColor",
             filters: [{ method: "in", args: ["TeamID", teamIds] }],
           }),
           fetchAllRows<LeagueInfo>("leagues", { select: "LeagueID, LeagueName, LeagueTier" }),
+          fetchAllRows<{ SeasonID: number; LeagueID: number; MatchdayWeek: number; Matchday: string }>("matchdays", {
+            select: "SeasonID, LeagueID, MatchdayWeek, Matchday",
+          }),
         ]);
+        const mdComposite = new Map<string, string>();
+        matchdaysAll.forEach(md => {
+          if (md.SeasonID && md.LeagueID && md.MatchdayWeek != null && md.Matchday) {
+            mdComposite.set(`${md.SeasonID}|${md.LeagueID}|${md.MatchdayWeek}`, md.Matchday);
+          }
+        });
 
         const tm = new Map<number, TeamInfo>();
         teams.forEach(t => tm.set(t.TeamID, t));
@@ -187,6 +196,7 @@ export default function ManagerProfile() {
                         { method: "eq", args: ["LeagueID", leagueId] },
                       ],
                       order: { column: "totalpoints", ascending: false },
+                      cache: false,
                     }
                   )
                 )
@@ -205,7 +215,7 @@ export default function ManagerProfile() {
                   isDomestic: true,
                   position: idx >= 0 ? idx + 1 : null,
                   totalpoints: own?.totalpoints ?? null,
-                  isChampion: idx === 0,
+                  isChampion: idx === 0 && isSeasonComplete(seasonId, leagueId, matchdaysAll),
                   stageReached: null,
                   gamesPlayed: own?.totalgamesplayed || 0,
                   goalsFor: own?.GoalsFor || 0,
@@ -218,21 +228,23 @@ export default function ManagerProfile() {
               const [ownResultsBySeason, allResultsBySeason] = await Promise.all([
                 Promise.all(seasons.map(seasonId =>
                   fetchAllRows<any>("results", {
-                    select: "HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID",
+                    select: "HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID,SnitchCaughtTime",
                     filters: [
                       { method: "eq", args: ["LeagueID", leagueId] },
                       { method: "eq", args: ["SeasonID", seasonId] },
                       { method: "or", args: [`HomeTeamID.eq.${teamId},AwayTeamID.eq.${teamId}`] },
                     ],
+                    cache: false,
                   })
                 )),
                 Promise.all(seasons.map(seasonId =>
                   fetchAllRows<any>("results", {
-                    select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID",
+                    select: "MatchID,HomeTeamID,AwayTeamID,HomeTeamScore,AwayTeamScore,WeekID,SnitchCaughtTime",
                     filters: [
                       { method: "eq", args: ["LeagueID", leagueId] },
                       { method: "eq", args: ["SeasonID", seasonId] },
                     ],
+                    cache: false,
                   })
                 )),
               ]);
@@ -253,15 +265,22 @@ export default function ManagerProfile() {
               }
 
               seasons.forEach((seasonId, i) => {
-                const ownResults = ownResultsBySeason[i] || [];
-                const allMatches: TournamentMatch[] = (allResultsBySeason[i] || []).map((r: any) => ({
-                  matchId: r.MatchID || 0,
-                  homeId: r.HomeTeamID || 0,
-                  awayId: r.AwayTeamID || 0,
-                  homeScore: r.HomeTeamScore || 0,
-                  awayScore: r.AwayTeamScore || 0,
-                  weekId: r.WeekID || 0,
-                }));
+                // Never surface a cup/CL match before its result is actually released —
+                // an admin-preview session bypasses the release-date RLS policy on
+                // `results` by design, so re-check client-side too.
+                const ownResults = (ownResultsBySeason[i] || []).filter((r: any) =>
+                  isMatchReleased(mdComposite.get(`${seasonId}|${leagueId}|${r.WeekID}`), r.SnitchCaughtTime)
+                );
+                const allMatches: TournamentMatch[] = (allResultsBySeason[i] || [])
+                  .filter((r: any) => isMatchReleased(mdComposite.get(`${seasonId}|${leagueId}|${r.WeekID}`), r.SnitchCaughtTime))
+                  .map((r: any) => ({
+                    matchId: r.MatchID || 0,
+                    homeId: r.HomeTeamID || 0,
+                    awayId: r.AwayTeamID || 0,
+                    homeScore: r.HomeTeamScore || 0,
+                    awayScore: r.AwayTeamScore || 0,
+                    weekId: r.WeekID || 0,
+                  }));
 
                 let gp = 0, gf = 0, ga = 0;
                 ownResults.forEach((r: any) => {
