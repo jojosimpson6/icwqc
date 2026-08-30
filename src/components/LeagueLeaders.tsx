@@ -43,8 +43,12 @@ export function LeagueLeaders() {
   // Load metadata: latest season and leagues — small targeted queries
   useEffect(() => {
     (async () => {
+      // Seasons come from matchdays that have already happened (not the full
+      // pre-populated fixture schedule, which reaches years into the future) —
+      // otherwise this picks a season with no player_season_stats rows yet.
+      const today = new Date().toISOString().split("T")[0];
       const [{ data: mdData }, { data: leagueData }] = await Promise.all([
-        supabase.from("matchdays").select("SeasonID").order("SeasonID", { ascending: false }).limit(200),
+        supabase.from("matchdays").select("SeasonID").lte("Matchday", today).order("SeasonID", { ascending: false }).limit(200),
         supabase.from("leagues").select("LeagueID, LeagueName").order("LeagueTier").order("LeagueName"),
       ]);
       if (leagueData) setLeagues(leagueData as LeagueOption[]);

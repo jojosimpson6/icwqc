@@ -136,7 +136,11 @@ export default function TeamPage() {
       fetchAllRows("standings", { select: "*", filters: [{ method: "eq", args: ["FullName", teamName] }], order: { column: "SeasonID", ascending: false } }),
       fetchAllRows("players", { select: "PlayerID, PlayerName, DOB, NationalityID, Height, Weight, Handedness" }),
       fetchAllRows("teams", { select: "TeamID, FullName" }),
-      fetchAllRows("matchdays", { select: "MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek" }),
+      // Team history only ever needs matchdays that have actually happened —
+      // `matchdays` now also carries the full future fixture schedule (for
+      // the Schedule page), which would otherwise bloat this fetch with years
+      // of irrelevant future rows across every league.
+      fetchAllRows("matchdays", { select: "MatchdayID, Matchday, SeasonID, LeagueID, MatchdayWeek", filters: [{ method: "lte", args: ["Matchday", new Date().toISOString().split("T")[0]] }] }),
       fetchAllRows("nations", { select: "NationID, Nation, ValidToDt", order: { column: "ValidToDt", ascending: false } }),
     ]).then(([{ data: teamData }, statsData, standData, playerData, allTeamsData, mdData, nationData]) => {
       if (teamData) {
@@ -264,7 +268,8 @@ export default function TeamPage() {
 
       // Build register from stats (works even without standings for cups/CL)
       if (statsData && statsData.length > 0) {
-        buildSeasonRegister(teamName, (standData || []) as StandingRow[], statsData as StatLine[], teamData?.TeamID ?? null, (mdData || []) as any[]);
+        buildSeasonRegister(teamName, (standData || []) as StandingRow[], statsData as StatLine[], teamData?.TeamID ?? null, (mdData || []) as any[])
+          .catch(err => console.error("Failed to build season register:", err));
       }
     }).catch(err => {
       console.error("Failed to load team:", err);

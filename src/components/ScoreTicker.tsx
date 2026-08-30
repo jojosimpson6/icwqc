@@ -65,9 +65,15 @@ export function ScoreTicker() {
         })),
       );
 
-      // Get recent matchdays ordered by date descending
+      // Get recent matchdays ordered by date descending. `matchdays` now
+      // exposes the full pre-populated schedule (including fixtures years in
+      // the future, for the Schedule page), so this must explicitly stop at
+      // today or the "latest" matchday would just be a future scheduled date
+      // with no released results, and the ticker would never find anything.
+      const today = new Date().toISOString().split("T")[0];
       const matchdays = await fetchAllRows("matchdays", {
         select: "Matchday, MatchdayWeek, SeasonID, LeagueID",
+        filters: [{ method: "lte", args: ["Matchday", today] }],
         order: { column: "Matchday", ascending: false },
       });
 
