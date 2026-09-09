@@ -5,7 +5,7 @@ import { FavoriteButton } from "@/components/FavoriteButton";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
-import { formatHeight, calculateAge, formatDate, getNationFlag, isTeamStyleAward, isMatchReleased, isSeasonComplete } from "@/lib/helpers";
+import { formatHeight, calculateAge, formatDate, getNationFlag, isTeamStyleAward, isMatchReleased, isSeasonComplete, getContrastText, isLightColor } from "@/lib/helpers";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { cachedQuery } from "@/lib/queryCache";
 import { ChevronDown, ChevronRight } from "lucide-react";
@@ -61,6 +61,15 @@ interface StatLine {
   TurnoversForced: number | null;
   TeammatesProtected: number | null;
   BludgerShotsFaced: number | null;
+}
+
+interface AdvancedStatLine {
+  PlayerID: number; TeamID: number | null; SeasonID: number | null; LeagueID: number | null;
+  Position: string | null; MinPlayed: number | null;
+  scoring_rate_plus: number | null; shot_accuracy_plus: number | null; chaser_rating_plus: number | null;
+  save_pct_plus: number | null; keeper_passing_plus: number | null; goaltending_rating_plus: number | null;
+  offense_rate_plus: number | null; defense_rate_plus: number | null; protection_rate_plus: number | null; beater_impact_plus: number | null;
+  catch_efficiency_plus: number | null; catch_frequency_plus: number | null; seeker_rating_plus: number | null;
 }
 
 interface LeagueLeaderEntry {
@@ -139,6 +148,40 @@ function seasonLabel(id: number | null): string {
   return `${id - 1}–${String(id).slice(-2)}`;
 }
 
+// Column definitions for each position's league/rate-adjusted advanced stats.
+// 100 = league average for that position in that league-season; see the
+// player_advanced_stats view for methodology.
+const ADV_STAT_COLUMNS: Record<string, { key: keyof AdvancedStatLine; label: string; title: string }[]> = {
+  Chaser: [
+    { key: "scoring_rate_plus", label: "Scoring+", title: "Goals per minute, vs. league average for chasers this season" },
+    { key: "shot_accuracy_plus", label: "Accuracy+", title: "Shot accuracy, vs. league average for chasers this season" },
+    { key: "chaser_rating_plus", label: "Chaser Rtg+", title: "Combined scoring + accuracy rating (OPS+-style average)" },
+  ],
+  Keeper: [
+    { key: "save_pct_plus", label: "Save%+", title: "Save percentage, vs. league average for keepers this season" },
+    { key: "keeper_passing_plus", label: "Distrib.+", title: "Distribution (pass completion), vs. league average for keepers" },
+    { key: "goaltending_rating_plus", label: "Keeper Rtg+", title: "Combined save% (70%) + distribution (30%) rating" },
+  ],
+  Beater: [
+    { key: "offense_rate_plus", label: "Offense+", title: "Bludgers hit per minute, vs. league average for beaters" },
+    { key: "defense_rate_plus", label: "Defense+", title: "Turnovers forced per minute, vs. league average for beaters" },
+    { key: "protection_rate_plus", label: "Protect+", title: "Teammates protected per minute, vs. league average for beaters" },
+    { key: "beater_impact_plus", label: "Beater Rtg+", title: "Combined offense + defense + protection rating" },
+  ],
+  Seeker: [
+    { key: "catch_efficiency_plus", label: "Catch Eff+", title: "Snitch catches per catch attempt, vs. league average for seekers" },
+    { key: "catch_frequency_plus", label: "Catch Freq+", title: "Snitch catches per minute, vs. league average for seekers" },
+    { key: "seeker_rating_plus", label: "Seeker Rtg+", title: "Combined efficiency (65%) + frequency (35%) rating" },
+  ],
+};
+
+function advValueClass(v: number | null): string {
+  if (v == null) return "text-muted-foreground";
+  if (v >= 120) return "text-green-600 dark:text-green-400 font-semibold";
+  if (v <= 80) return "text-destructive";
+  return "text-foreground";
+}
+
 function ageAtSeason(dob: string | null, seasonId: number | null): string {
   if (!dob || !seasonId) return "—";
   // Age as of Sep 1 of the season's START year (seasonId is end year, so start = seasonId - 1)
@@ -199,6 +242,13 @@ export default function PlayerProfile() {
   // highlighted the same way as every other stat — keyed by `${SeasonID}|${LeagueName}`.
   const [leagueCatchBest, setLeagueCatchBest] = useState<Map<string, number>>(new Map());
   const [leagueShotsAllowedBest, setLeagueShotsAllowedBest] = useState<Map<string, number>>(new Map());
+  // Jersey numbers worn, grouped by (team, number) into contiguous-ish season
+  // spans — displayed like Baseball-Reference's uniform-number history.
+  const [numbersWorn, setNumbersWorn] = useState<{
+    teamId: number; teamName: string; primaryColor: string | null; secondaryColor: string | null;
+    number: number; seasons: number[];
+  }[]>([]);
+  const [advancedStats, setAdvancedStats] = useState<AdvancedStatLine[]>([]);
   useEffect(() => {
     if (!id) return;
     const pid = parseInt(id);
@@ -227,6 +277,50 @@ export default function PlayerProfile() {
     }).then((rows: any) => {
       setCaptainSeasons(new Set((rows || []).filter((r: any) => r.TeamID && r.SeasonID).map((r: any) => `${r.TeamID}|${r.SeasonID}`)));
     });
+
+    // Jersey numbers worn, per team per season — grouped into spans of
+    // consecutive seasons wearing the same number for the same team.
+    fetchAllRows<{ TeamID: number; SeasonID: number; Number: number }>("player_numbers", {
+      select: "TeamID, SeasonID, Number",
+      filters: [{ method: "eq", args: ["PlayerID", pid] }],
+    }).then(async (rows) => {
+      if (!rows || rows.length === 0) { setNumbersWorn([]); return; }
+      const teamIds = [...new Set(rows.map(r => r.TeamID))];
+      const { data: teamRows } = await supabase.from("teams")
+        .select('"TeamID","FullName","PrimaryColor","SecondaryColor"').in("TeamID", teamIds);
+      const teamInfo = new Map((teamRows || []).map((t: any) => [t.TeamID, t]));
+
+      // Group consecutive seasons with the same (TeamID, Number) into one span
+      const sorted = [...rows].sort((a, b) => a.SeasonID - b.SeasonID);
+      const spans: { teamId: number; number: number; seasons: number[] }[] = [];
+      sorted.forEach(r => {
+        const last = spans[spans.length - 1];
+        if (last && last.teamId === r.TeamID && last.number === r.Number && r.SeasonID === last.seasons[last.seasons.length - 1] + 1) {
+          last.seasons.push(r.SeasonID);
+        } else {
+          spans.push({ teamId: r.TeamID, number: r.Number, seasons: [r.SeasonID] });
+        }
+      });
+
+      setNumbersWorn(spans.map(s => {
+        const t = teamInfo.get(s.teamId);
+        return {
+          teamId: s.teamId,
+          teamName: t?.FullName || `Team #${s.teamId}`,
+          primaryColor: t?.PrimaryColor || null,
+          secondaryColor: t?.SecondaryColor || null,
+          number: s.number,
+          seasons: s.seasons,
+        };
+      }));
+    });
+
+    // League/position-adjusted advanced ("+") stats — see player_advanced_stats
+    // view for the OPS+-style methodology.
+    fetchAllRows<AdvancedStatLine>("player_advanced_stats", {
+      select: "*",
+      filters: [{ method: "eq", args: ["PlayerID", pid] }],
+    }).then((rows) => setAdvancedStats(rows || []));
 
     // Did this player go on to manage?
     supabase.from("managers").select("ManagerID").eq("FormerPlayerID", pid).limit(1).then(({ data }) => {
@@ -1264,6 +1358,104 @@ export default function PlayerProfile() {
             </div>
           </div>
         </div>
+
+        {numbersWorn.length > 0 && (
+          <div className="mb-6 border border-border rounded overflow-hidden">
+            <div className="bg-table-header px-3 py-2">
+              <h3 className="font-display text-sm font-bold text-table-header-foreground">Numbers Worn</h3>
+            </div>
+            <div className="bg-card p-4 flex flex-wrap gap-4">
+              {numbersWorn.map((n, i) => {
+                const bg = n.primaryColor || "#374151";
+                const textColor = getContrastText(bg);
+                const ring = n.secondaryColor && n.secondaryColor.toLowerCase() !== bg.toLowerCase() ? n.secondaryColor : (isLightColor(bg) ? "#1a1a1a" : "#ffffff");
+                const years = n.seasons.length === 1 ? seasonLabel(n.seasons[0]) : `${seasonLabel(n.seasons[0])} – ${seasonLabel(n.seasons[n.seasons.length - 1])}`;
+                return (
+                  <Link
+                    key={`${n.teamId}-${n.number}-${i}`}
+                    to={`/team/${encodeURIComponent(n.teamName)}`}
+                    className="flex flex-col items-center gap-1.5 group"
+                  >
+                    <div
+                      className="w-14 h-14 rounded-full flex items-center justify-center font-display text-2xl font-bold border-2 shadow-sm group-hover:scale-105 transition-transform"
+                      style={{ backgroundColor: bg, color: textColor, borderColor: ring }}
+                      title={`#${n.number} — ${n.teamName} (${years})`}
+                    >
+                      {n.number}
+                    </div>
+                    <span className="text-[11px] font-sans text-muted-foreground text-center leading-tight group-hover:text-accent max-w-[6.5rem]">
+                      {n.teamName}
+                    </span>
+                    <span className="text-[10px] font-mono text-muted-foreground">{years}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {advancedStats.length > 0 && (
+          <div className="mb-6 border border-border rounded overflow-hidden">
+            <div className="bg-table-header px-3 py-2">
+              <h3 className="font-display text-sm font-bold text-table-header-foreground">Advanced Stats (League &amp; Position Adjusted)</h3>
+              <p className="text-[11px] text-table-header-foreground/70 font-sans mt-0.5">100 = league average for that position and season. Requires a minimum of ~60 minutes played.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm font-sans">
+                <thead>
+                  <tr className="bg-secondary">
+                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
+                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</th>
+                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Comp</th>
+                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pos</th>
+                    {positionsPlayed.length > 1 ? (
+                      <>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Component 1+</th>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Component 2+</th>
+                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Combined+</th>
+                      </>
+                    ) : (
+                      (ADV_STAT_COLUMNS[positionsPlayed[0]] || []).map(c => (
+                        <th key={c.key} title={c.title} className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground cursor-help">{c.label}</th>
+                      ))
+                    )}
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...advancedStats].sort((a, b) => (b.SeasonID ?? 0) - (a.SeasonID ?? 0)).map((a, i) => {
+                    const matchingStat = stats.find(s => s.SeasonID === a.SeasonID && s.TeamID === a.TeamID && s.LeagueID === a.LeagueID);
+                    const cols = ADV_STAT_COLUMNS[a.Position || ""] || [];
+                    const combinedCol = cols[cols.length - 1];
+                    const componentCols = cols.slice(0, -1);
+                    return (
+                      <tr key={`${a.SeasonID}-${a.TeamID}-${a.LeagueID}-${i}`} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
+                        <td className="px-3 py-1.5 font-mono">{seasonLabel(a.SeasonID)}</td>
+                        <td className="px-3 py-1.5">
+                          {matchingStat?.TeamFullName ? (
+                            <Link to={`/team/${encodeURIComponent(matchingStat.TeamFullName)}`} className="text-accent hover:underline">{matchingStat.TeamFullName}</Link>
+                          ) : "—"}
+                        </td>
+                        <td className="px-3 py-1.5 text-muted-foreground">{abbrevLeague(matchingStat?.LeagueName ?? null)}</td>
+                        <td className="px-3 py-1.5 text-muted-foreground">{a.Position}</td>
+                        {positionsPlayed.length > 1 ? (
+                          <>
+                            <td className={`px-3 py-1.5 text-right font-mono ${advValueClass(componentCols[0] ? (a[componentCols[0].key] as number | null) : null)}`}>{componentCols[0] ? (a[componentCols[0].key] ?? "—") : "—"}</td>
+                            <td className={`px-3 py-1.5 text-right font-mono ${advValueClass(componentCols[1] ? (a[componentCols[1].key] as number | null) : null)}`}>{componentCols[1] ? (a[componentCols[1].key] ?? "—") : "—"}</td>
+                            <td className={`px-3 py-1.5 text-right font-mono ${advValueClass(combinedCol ? (a[combinedCol.key] as number | null) : null)}`}>{combinedCol ? (a[combinedCol.key] ?? "—") : "—"}</td>
+                          </>
+                        ) : (
+                          cols.map(c => (
+                            <td key={c.key} className={`px-3 py-1.5 text-right font-mono ${advValueClass(a[c.key] as number | null)}`}>{a[c.key] ?? "—"}</td>
+                          ))
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
 
         <div className="space-y-6">
           {/* Season-by-season stats */}

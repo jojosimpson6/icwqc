@@ -32,6 +32,8 @@ import { ErrorBoundary } from "./components/ErrorBoundary";
 import AuthPage from "./pages/AuthPage";
 import AccountPage from "./pages/AccountPage";
 import FantasyPage from "./pages/FantasyPage";
+import FantasyLeaguePage from "./pages/FantasyLeaguePage";
+import WeeklyFantasyPage from "./pages/WeeklyFantasyPage";
 import { AuthProvider } from "./hooks/useAuth";
 
 const queryClient = new QueryClient();
@@ -48,6 +50,8 @@ const App = () => (
           <Route path="/auth" element={<AuthPage />} />
           <Route path="/account" element={<AccountPage />} />
           <Route path="/fantasy" element={<FantasyPage />} />
+          <Route path="/fantasy/weekly" element={<WeeklyFantasyPage />} />
+          <Route path="/fantasy/:id" element={<FantasyLeaguePage />} />
           <Route path="/player/:id" element={<ErrorBoundary><PlayerProfile /></ErrorBoundary>} />
           <Route path="/players" element={<PlayersIndex />} />
           <Route path="/league/:id" element={<LeaguePage />} />

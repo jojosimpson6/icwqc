@@ -16,8 +16,15 @@ interface FLeague {
   invite_code: string;
   max_teams: number;
   roster_size: number;
+  status: "forming" | "drafting" | "active" | "complete";
 }
 interface FTeam { id: string; fantasy_league_id: string; user_id: string; name: string; }
+
+// Fantasy seasons always track the current quidditch season — no picker needed.
+function currentSeasonId(): number {
+  const now = new Date();
+  return now.getMonth() >= 7 ? now.getFullYear() + 1 : now.getFullYear();
+}
 
 export default function FantasyPage() {
   const { user, profile, loading } = useAuth();
@@ -29,7 +36,6 @@ export default function FantasyPage() {
   const [error, setError] = useState("");
 
   const [newName, setNewName] = useState("");
-  const [newSeason, setNewSeason] = useState<number>(new Date().getFullYear());
   const [newPublic, setNewPublic] = useState(true);
   const [joinCode, setJoinCode] = useState("");
 
@@ -40,7 +46,7 @@ export default function FantasyPage() {
   const load = useCallback(async () => {
     if (!user) return;
     const [{ data: ls }, { data: ts }] = await Promise.all([
-      supabase.from("fantasy_leagues").select("id, name, owner_id, season_id, is_public, invite_code, max_teams, roster_size").order("created_at", { ascending: false }),
+      supabase.from("fantasy_leagues").select("id, name, owner_id, season_id, is_public, invite_code, max_teams, roster_size, status").order("created_at", { ascending: false }),
       supabase.from("fantasy_teams").select("id, fantasy_league_id, user_id, name").eq("user_id", user.id),
     ]);
     setLeagues((ls || []) as FLeague[]);
@@ -56,7 +62,7 @@ export default function FantasyPage() {
     setBusy(true); setError("");
     const { data, error: err } = await supabase
       .from("fantasy_leagues")
-      .insert({ name: newName.trim().slice(0, 80), owner_id: user.id, season_id: newSeason, is_public: newPublic })
+      .insert({ name: newName.trim().slice(0, 80), owner_id: user.id, season_id: currentSeasonId(), is_public: newPublic })
       .select("id")
       .single();
     if (err || !data) { setError(err?.message || "Could not create league"); setBusy(false); return; }
@@ -71,7 +77,7 @@ export default function FantasyPage() {
     });
     setNewName("");
     setBusy(false);
-    await load();
+    navigate(`/fantasy/${data.id}`);
   };
 
   const joinLeague = async () => {
@@ -91,6 +97,7 @@ export default function FantasyPage() {
     if (err) setError(err.message);
     setJoinCode("");
     setBusy(false);
+    if (!err) navigate(`/fantasy/${lg.id}`);
     await load();
   };
 
@@ -110,8 +117,11 @@ export default function FantasyPage() {
       <SiteHeader />
       <main className="flex-1 container py-6 pb-20 md:pb-6">
         <h1 className="font-display text-3xl font-bold mb-1">Fantasy Quidditch</h1>
-        <p className="text-sm text-muted-foreground font-sans mb-5">
-          Create a league, invite friends, and build a roster. Scoring settings are seeded with a default rule set you can tune later.
+        <p className="text-sm text-muted-foreground font-sans mb-1">
+          Create a league, invite friends, and draft a roster for the {seasonLabel(currentSeasonId())} season.
+        </p>
+        <p className="text-sm font-sans mb-5">
+          Looking for something quicker? Try the <Link to="/fantasy/weekly" className="text-accent hover:underline font-semibold">sitewide Weekly Fantasy</Link> game — pick 7 players and a captain every week.
         </p>
 
         {error && (
@@ -125,18 +135,10 @@ export default function FantasyPage() {
             </div>
             <div className="bg-card p-4 space-y-3">
               <input value={newName} onChange={e => setNewName(e.target.value)} placeholder="League name" maxLength={80} className={`${inputCls} w-full`} />
-              <div className="flex items-center gap-3">
-                <input
-                  type="number"
-                  value={newSeason}
-                  onChange={e => setNewSeason(Number(e.target.value))}
-                  className={`${inputCls} w-28`}
-                />
-                <label className="flex items-center gap-2 text-sm font-sans">
-                  <input type="checkbox" checked={newPublic} onChange={e => setNewPublic(e.target.checked)} />
-                  Public league
-                </label>
-              </div>
+              <label className="flex items-center gap-2 text-sm font-sans">
+                <input type="checkbox" checked={newPublic} onChange={e => setNewPublic(e.target.checked)} />
+                Public league (joinable by invite code)
+              </label>
               <button
                 onClick={createLeague}
                 disabled={busy || !newName.trim()}
@@ -176,18 +178,19 @@ export default function FantasyPage() {
               <tbody>
                 {leagues.map(l => {
                   const joined = myLeagueIds.has(l.id) || l.owner_id === user.id;
+                  const statusLabel = { forming: "Forming", drafting: "Drafting", active: "In Season", complete: "Complete" }[l.status];
                   return (
                     <tr key={l.id} className="border-b border-border/60 last:border-0">
                       <td className="px-4 py-2">
-                        <div className="font-semibold">{l.name}</div>
+                        <Link to={`/fantasy/${l.id}`} className="font-semibold text-accent hover:underline">{l.name}</Link>
                         <div className="text-xs text-muted-foreground">
-                          {l.season_id ? seasonLabel(l.season_id) : "No season"} · {l.is_public ? "Public" : "Private"} · roster {l.roster_size}
+                          {seasonLabel(l.season_id ?? currentSeasonId())} · {l.is_public ? "Public" : "Private"} · {statusLabel} · roster {l.roster_size}
                         </div>
                       </td>
                       <td className="px-4 py-2 font-mono text-xs text-muted-foreground whitespace-nowrap">{l.invite_code}</td>
                       <td className="px-4 py-2 text-right whitespace-nowrap">
                         {joined ? (
-                          <span className="text-xs font-semibold text-accent mr-3">Joined</span>
+                          <Link to={`/fantasy/${l.id}`} className="text-xs font-semibold text-accent mr-3 hover:underline">Open →</Link>
                         ) : null}
                         {myLeagueIds.has(l.id) && l.owner_id !== user.id && (
                           <button onClick={() => leaveLeague(l.id)} className="text-xs border border-border rounded px-2 py-1 hover:bg-muted">Leave</button>
@@ -216,7 +219,7 @@ export default function FantasyPage() {
         </section>
 
         <p className="text-xs text-muted-foreground font-sans mt-4">
-          Rosters, drafting and weekly scoring build on this framework. Manage favorites from your{" "}
+          Once your league fills up, its creator can start the draft from the league page. Manage favorites from your{" "}
           <Link to="/account" className="text-accent hover:underline">account page</Link>.
         </p>
       </main>

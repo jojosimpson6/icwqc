@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { SiteFooter } from "@/components/SiteFooter";
 import { newsItemSchema, siteContentSchema, firstError } from "@/lib/adminValidation";
+import { RostersAdmin } from "@/components/admin/RostersAdmin";
 
 
 interface NewsItem {
@@ -79,7 +80,7 @@ export default function AdminPanel() {
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [activeTab, setActiveTab] = useState<"news" | "content">("news");
+  const [activeTab, setActiveTab] = useState<"news" | "content" | "rosters">("news");
 
   // News state
   const [newsItems, setNewsItems] = useState<NewsItem[]>([]);
@@ -245,7 +246,15 @@ export default function AdminPanel() {
           >
             Site Content
           </button>
+          <button
+            onClick={() => setActiveTab("rosters")}
+            className={`px-4 py-2 text-sm font-sans font-medium border-b-2 -mb-px transition-colors ${activeTab === "rosters" ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+          >
+            Captains & Managers
+          </button>
         </div>
+
+        {activeTab === "rosters" && <RostersAdmin />}
 
         {activeTab === "news" && (
           <div className="space-y-6">

@@ -16,6 +16,7 @@ interface EloPoint {
 
 interface TeamCurrentElo {
   name: string;
+  teamId: number | null;
   rating: number;
   leagueId: number | null;
   leagueName: string;
@@ -33,6 +34,10 @@ export default function EloPage() {
   const [leagues, setLeagues] = useState<{ LeagueID: number; LeagueName: string; LeagueTier: number | null }[]>([]);
   const [teamLeagueMap, setTeamLeagueMap] = useState<Map<string, { id: number; name: string }>>( new Map());
   const [selectedLeague, setSelectedLeague] = useState<number | null>(null);
+  // Club and international teams aren't comparable on the same Elo scale
+  // (different roster depth, match frequency, competition structure), so
+  // they're kept in separate scopes rather than one merged ranking.
+  const [scope, setScope] = useState<"club" | "intl">("club");
   const [sortKey, setSortKey] = useState<"rating" | "name" | "change" | "gp">("rating");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(true);
@@ -102,11 +107,19 @@ export default function EloPage() {
       const latest = sorted[sorted.length - 1];
       const prev = sorted.length >= 2 ? sorted[sorted.length - 2].elo_rating : latest.elo_rating;
       const lgInfo = teamLeagueMap.get(name);
+      const teamId = teamLinkMap.get(name) ?? null;
+
+      // TeamID > 999 identifies national/international sides (same convention
+      // used on the Teams index page) — keep them out of the club rankings.
+      const isNational = (teamId ?? 0) > 999;
+      if (scope === "club" && isNational) return;
+      if (scope === "intl" && !isNational) return;
 
       if (selectedLeague !== null && lgInfo?.id !== selectedLeague) return;
 
       result.push({
         name,
+        teamId,
         rating: latest.elo_rating,
         leagueId: lgInfo?.id ?? null,
         leagueName: lgInfo?.name ?? "",
@@ -116,7 +129,7 @@ export default function EloPage() {
       });
     });
     return result;
-  }, [eloData, teamLeagueMap, selectedLeague]);
+  }, [eloData, teamLeagueMap, teamLinkMap, selectedLeague, scope]);
 
   const sortedElos = useMemo(() => {
     return [...currentElos].sort((a, b) => {
@@ -157,9 +170,26 @@ export default function EloPage() {
           </p>
         </div>
 
+        {/* Club vs International scope — these use different Elo scales and
+            shouldn't be ranked against each other */}
+        <div className="flex items-center gap-2 mb-4">
+          <button
+            onClick={() => { setScope("club"); setSelectedLeague(null); }}
+            className={`px-4 py-1.5 rounded text-sm font-sans font-medium border ${scope === "club" ? "bg-primary text-primary-foreground border-primary" : "bg-card text-muted-foreground border-border hover:bg-secondary"}`}
+          >
+            Club Teams
+          </button>
+          <button
+            onClick={() => { setScope("intl"); setSelectedLeague(null); }}
+            className={`px-4 py-1.5 rounded text-sm font-sans font-medium border ${scope === "intl" ? "bg-primary text-primary-foreground border-primary" : "bg-card text-muted-foreground border-border hover:bg-secondary"}`}
+          >
+            International Teams
+          </button>
+        </div>
+
         {/* Chart */}
         <div className="mb-6">
-          <EloChart />
+          <EloChart scope={scope} />
         </div>
 
         {/* League filter + table */}
@@ -170,17 +200,10 @@ export default function EloPage() {
             onChange={e => setSelectedLeague(e.target.value ? parseInt(e.target.value) : null)}
             className="text-sm bg-popover text-popover-foreground border border-border rounded px-3 py-1.5 font-sans"
           >
-            <option value="">All Leagues</option>
-            {domLeagues.length > 0 && (
-              <optgroup label="Domestic">
-                {domLeagues.map(l => <option key={l.LeagueID} value={l.LeagueID}>{l.LeagueName}</option>)}
-              </optgroup>
-            )}
-            {intlLeagues.length > 0 && (
-              <optgroup label="International">
-                {intlLeagues.map(l => <option key={l.LeagueID} value={l.LeagueID}>{l.LeagueName}</option>)}
-              </optgroup>
-            )}
+            <option value="">{scope === "club" ? "All Domestic Leagues" : "All International Competitions"}</option>
+            {(scope === "club" ? domLeagues : intlLeagues).map(l => (
+              <option key={l.LeagueID} value={l.LeagueID}>{l.LeagueName}</option>
+            ))}
           </select>
           <span className="text-xs text-muted-foreground font-sans">{sortedElos.length} teams</span>
         </div>

@@ -22,8 +22,8 @@ export const DEFAULT_SCORING_RULES: ScoringRule[] = [
   { key: "match_played", label: "Match played", points: 2 },
 ];
 
-/** 1994 -> "1994–95" */
+/** Matches the sitewide SeasonID convention used everywhere else (matchdays,
+ * results, etc): the ID is the *end* year, e.g. 2027 -> "2026–27". */
 export function seasonLabel(seasonId: number): string {
-  const next = (seasonId + 1) % 100;
-  return `${seasonId}–${String(next).padStart(2, "0")}`;
+  return `${seasonId - 1}–${String(seasonId).slice(-2)}`;
 }

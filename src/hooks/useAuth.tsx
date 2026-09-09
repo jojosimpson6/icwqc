@@ -110,12 +110,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const updateProfile = useCallback(async (patch: Partial<Omit<Profile, "id">>) => {
     if (!user) return;
-    const { data } = await supabase
+    // Upsert rather than update: if a profile row is ever missing (e.g. an
+    // account created before the profiles table/signup trigger existed —
+    // this happened to the original admin account), a plain UPDATE silently
+    // affects zero rows and nothing is ever saved. Upserting self-heals.
+    const { data, error } = await supabase
       .from("profiles")
-      .update(patch)
-      .eq("id", user.id)
+      .upsert({ id: user.id, ...patch }, { onConflict: "id" })
       .select("id, display_name, avatar_url, favorite_team_id")
       .maybeSingle();
+    if (error) { console.error("Failed to save profile:", error); return; }
     if (data) setProfile(data as Profile);
   }, [user]);
 

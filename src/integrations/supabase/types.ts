@@ -74,6 +74,8 @@ export type Database = {
       fantasy_leagues: {
         Row: {
           created_at: string
+          draft_date: string | null
+          draft_order_mode: string
           id: string
           invite_code: string
           is_public: boolean
@@ -84,10 +86,13 @@ export type Database = {
           season_id: number | null
           settings: Json
           source_league_id: number | null
+          status: string
           updated_at: string
         }
         Insert: {
           created_at?: string
+          draft_date?: string | null
+          draft_order_mode?: string
           id?: string
           invite_code?: string
           is_public?: boolean
@@ -98,10 +103,13 @@ export type Database = {
           season_id?: number | null
           settings?: Json
           source_league_id?: number | null
+          status?: string
           updated_at?: string
         }
         Update: {
           created_at?: string
+          draft_date?: string | null
+          draft_order_mode?: string
           id?: string
           invite_code?: string
           is_public?: boolean
@@ -112,13 +120,162 @@ export type Database = {
           season_id?: number | null
           settings?: Json
           source_league_id?: number | null
+          status?: string
           updated_at?: string
+        }
+        Relationships: []
+      }
+      fantasy_draft_order: {
+        Row: {
+          fantasy_league_id: string
+          fantasy_team_id: string
+          pick_position: number
+        }
+        Insert: {
+          fantasy_league_id: string
+          fantasy_team_id: string
+          pick_position: number
+        }
+        Update: {
+          fantasy_league_id?: string
+          fantasy_team_id?: string
+          pick_position?: number
+        }
+        Relationships: []
+      }
+      fantasy_draft_picks: {
+        Row: {
+          id: string
+          fantasy_league_id: string
+          pick_number: number
+          fantasy_team_id: string
+          player_id: number
+          picked_at: string
+        }
+        Insert: {
+          id?: string
+          fantasy_league_id: string
+          pick_number: number
+          fantasy_team_id: string
+          player_id: number
+          picked_at?: string
+        }
+        Update: {
+          id?: string
+          fantasy_league_id?: string
+          pick_number?: number
+          fantasy_team_id?: string
+          player_id?: number
+          picked_at?: string
+        }
+        Relationships: []
+      }
+      fantasy_matchups: {
+        Row: {
+          id: string
+          fantasy_league_id: string
+          month_index: number
+          period_start: string
+          period_end: string
+          home_fantasy_team_id: string | null
+          away_fantasy_team_id: string | null
+          home_score: number | null
+          away_score: number | null
+        }
+        Insert: {
+          id?: string
+          fantasy_league_id: string
+          month_index: number
+          period_start: string
+          period_end: string
+          home_fantasy_team_id?: string | null
+          away_fantasy_team_id?: string | null
+          home_score?: number | null
+          away_score?: number | null
+        }
+        Update: {
+          id?: string
+          fantasy_league_id?: string
+          month_index?: number
+          period_start?: string
+          period_end?: string
+          home_fantasy_team_id?: string | null
+          away_fantasy_team_id?: string | null
+          home_score?: number | null
+          away_score?: number | null
+        }
+        Relationships: []
+      }
+      weekly_fantasy_picks: {
+        Row: {
+          id: string
+          user_id: string
+          week_start: string
+          player_id: number
+          is_captain: boolean
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          week_start: string
+          player_id: number
+          is_captain?: boolean
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          week_start?: string
+          player_id?: number
+          is_captain?: boolean
+          created_at?: string
+        }
+        Relationships: []
+      }
+      weekly_fantasy_scores: {
+        Row: {
+          user_id: string
+          week_start: string
+          points: number
+        }
+        Insert: {
+          user_id: string
+          week_start: string
+          points?: number
+        }
+        Update: {
+          user_id?: string
+          week_start?: string
+          points?: number
+        }
+        Relationships: []
+      }
+      player_numbers: {
+        Row: {
+          PlayerID: number
+          TeamID: number
+          SeasonID: number
+          Number: number
+        }
+        Insert: {
+          PlayerID: number
+          TeamID: number
+          SeasonID: number
+          Number: number
+        }
+        Update: {
+          PlayerID?: number
+          TeamID?: number
+          SeasonID?: number
+          Number?: number
         }
         Relationships: []
       }
       fantasy_rosters: {
         Row: {
           acquired_at: string
+          fantasy_league_id: string
           fantasy_team_id: string
           id: string
           is_starter: boolean
@@ -127,6 +284,7 @@ export type Database = {
         }
         Insert: {
           acquired_at?: string
+          fantasy_league_id: string
           fantasy_team_id: string
           id?: string
           is_starter?: boolean
@@ -135,6 +293,7 @@ export type Database = {
         }
         Update: {
           acquired_at?: string
+          fantasy_league_id?: string
           fantasy_team_id?: string
           id?: string
           is_starter?: boolean
@@ -963,6 +1122,62 @@ export type Database = {
       }
     }
     Views: {
+      player_advanced_stats: {
+        Row: {
+          PlayerID: number | null
+          TeamID: number | null
+          SeasonID: number | null
+          LeagueID: number | null
+          Position: string | null
+          MinPlayed: number | null
+          scoring_rate_plus: number | null
+          shot_accuracy_plus: number | null
+          chaser_rating_plus: number | null
+          save_pct_plus: number | null
+          keeper_passing_plus: number | null
+          goaltending_rating_plus: number | null
+          offense_rate_plus: number | null
+          defense_rate_plus: number | null
+          protection_rate_plus: number | null
+          beater_impact_plus: number | null
+          catch_efficiency_plus: number | null
+          catch_frequency_plus: number | null
+          seeker_rating_plus: number | null
+        }
+        Relationships: []
+      }
+      match_player_stats: {
+        Row: {
+          MatchID: number | null
+          SeasonID: number | null
+          LeagueID: number | null
+          Matchday: string | null
+          PlayerID: number | null
+          TeamID: number | null
+          OppTeamID: number | null
+          Position: string | null
+          IsHomeSide: boolean | null
+          Goals: number | null
+          ShotAtt: number | null
+          ShotScored: number | null
+          PassAtt: number | null
+          PassComp: number | null
+          KeeperShotsParried: number | null
+          KeeperShotsConceded: number | null
+          KeeperShotsFaced: number | null
+          KeeperPassAtt: number | null
+          KeeperPassComp: number | null
+          SnitchSpotted: number | null
+          CatchAttempts: number | null
+          SnitchCaught: boolean | null
+          BludgersHit: number | null
+          TurnoversForced: number | null
+          TeammatesProtected: number | null
+          BludgerShotsFaced: number | null
+          MinPlayed: number | null
+        }
+        Relationships: []
+      }
       player_season_minutes: {
         Row: {
           FullName: string | null
@@ -1096,6 +1311,17 @@ export type Database = {
     Functions: {
       fantasy_team_league: { Args: { _team: string }; Returns: string }
       fantasy_team_owner: { Args: { _team: string }; Returns: string }
+      start_fantasy_draft: { Args: { p_league_id: string; p_draft_date?: string }; Returns: undefined }
+      make_draft_pick: { Args: { p_league_id: string; p_player_id: number }; Returns: undefined }
+      generate_fantasy_schedule: { Args: { p_league_id: string }; Returns: undefined }
+      compute_fantasy_points: { Args: { p_player_id: number; p_league_id: string; p_start: string; p_end: string }; Returns: number }
+      score_fantasy_matchups: { Args: { p_league_id?: string }; Returns: undefined }
+      weekly_fantasy_week_start: { Args: { p_ts?: string }; Returns: string }
+      is_weekly_fantasy_locked: { Args: { p_week_start: string }; Returns: boolean }
+      compute_weekly_fantasy_points: { Args: { p_player_id: number; p_week_start: string }; Returns: number }
+      score_weekly_fantasy: { Args: Record<PropertyKey, never>; Returns: undefined }
+      pick_player_number: { Args: { p_position: string; p_dob: string | null; p_used: number[]; p_is_starter: boolean }; Returns: number }
+      generate_player_numbers: { Args: Record<PropertyKey, never>; Returns: undefined }
       get_complete_schema: { Args: never; Returns: Json }
       has_role: {
         Args: {

@@ -4,7 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { SiteHeader } from "@/components/SiteHeader";
 import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
-import { getLeagueTierLabel, groupTotyByPosition, isTeamStyleAward, isMatchReleased } from "@/lib/helpers";
+import { getLeagueTierLabel, groupTotyByPosition, isTeamStyleAward, isMatchReleased, isSeasonComplete } from "@/lib/helpers";
 import { useSortableTable } from "@/hooks/useSortableTable";
 import { fetchAllRows } from "@/lib/fetchAll";
 
@@ -98,6 +98,7 @@ export default function LeaguePage() {
   const [matchResults, setMatchResults] = useState<MatchResult[]>([]);
   const [teamMap, setTeamMap] = useState<Map<number, string>>(new Map());
   const [matchDayMap, setMatchDayMap] = useState<Map<string, string>>(new Map());
+  const [matchdaysRaw, setMatchdaysRaw] = useState<{ SeasonID: number; LeagueID: number; Matchday: string }[]>([]);
   const [upcomingFixtures, setUpcomingFixtures] = useState<{ MatchID: number | null; SeasonID: number; LeagueID: number; WeekID: number; HomeTeamID: number | null; AwayTeamID: number | null; Matchday: string; TeamsDetermined: boolean }[]>([]);
   const [awardsOpen, setAwardsOpen] = useState(false);
 
@@ -142,6 +143,7 @@ export default function LeaguePage() {
         }
       });
       setMatchDayMap(mdm);
+      setMatchdaysRaw((mdData || []) as { SeasonID: number; LeagueID: number; Matchday: string }[]);
 
       if (isDomestic && standingsData && teamData) {
         const teamNames = new Set(teamData.map((t: any) => t.FullName));
@@ -196,9 +198,17 @@ export default function LeaguePage() {
     });
   }, [id]);
 
-  // For qualifying comps, load parent-competition teams to detect advancers
+  // For qualifying comps, load parent-competition teams to detect advancers.
+  // The parent competition's fixtures (including team assignments) are
+  // pre-generated for the whole season the moment qualifying begins — long
+  // before qualifying is actually decided — so "appears in the parent
+  // competition's results" can't be trusted on its own. Only treat a team as
+  // advanced once this qualifying group stage itself has actually finished
+  // and its results have been released; otherwise every group would show its
+  // eventual (pre-generated) qualifiers from matchday one.
   useEffect(() => {
     if (!isQualifying || !parentCompId || !selectedSeason) { setAdvancedTeams(new Set()); return; }
+    if (!isSeasonComplete(selectedSeason, lid, matchdaysRaw)) { setAdvancedTeams(new Set()); return; }
     fetchAllRows<any>("results", {
       select: '"HomeTeamID","AwayTeamID","SeasonID"',
       filters: [
@@ -210,7 +220,7 @@ export default function LeaguePage() {
       (rows || []).forEach((r: any) => { if (r.HomeTeamID) s.add(r.HomeTeamID); if (r.AwayTeamID) s.add(r.AwayTeamID); });
       setAdvancedTeams(s);
     }).catch(() => setAdvancedTeams(new Set()));
-  }, [isQualifying, parentCompId, selectedSeason]);
+  }, [isQualifying, parentCompId, selectedSeason, lid, matchdaysRaw]);
 
 
   const seasonStandings = standings.filter(s => s.SeasonID === selectedSeason);
@@ -674,43 +684,6 @@ export default function LeaguePage() {
         <div className={`grid grid-cols-1 gap-6 ${(isIntl || isQualifying || isFriendly) ? "" : "lg:grid-cols-3"}`}>
           <div className={(isIntl || isQualifying || isFriendly) ? "space-y-6" : "lg:col-span-2 space-y-6"}>
 
-            {/* Upcoming fixtures — date always shown; teams hidden until determined (e.g. an earlier knockout round hasn't been played yet) */}
-            {!isDomestic && upcomingFixtures.filter(f => f.SeasonID === selectedSeason).length > 0 && (
-              <div className="border border-border rounded overflow-hidden">
-                <div className="bg-table-header px-3 py-2">
-                  <h3 className="font-display text-sm font-bold text-table-header-foreground">Upcoming Fixtures</h3>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-sm font-sans">
-                    <thead>
-                      <tr className="bg-secondary">
-                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Date</th>
-                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Matchup</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {upcomingFixtures.filter(f => f.SeasonID === selectedSeason).map((f, i) => (
-                        <tr key={f.MatchID ?? i} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
-                          <td className="px-3 py-1.5 font-mono text-muted-foreground">{f.Matchday}</td>
-                          <td className="px-3 py-1.5">
-                            {f.TeamsDetermined && f.HomeTeamID != null && f.AwayTeamID != null ? (
-                              <>
-                                <Link to={`/team/${encodeURIComponent(teamMap.get(f.HomeTeamID) || "")}`} className="text-accent hover:underline">{teamMap.get(f.HomeTeamID) || `Team ${f.HomeTeamID}`}</Link>
-                                {" vs "}
-                                <Link to={`/team/${encodeURIComponent(teamMap.get(f.AwayTeamID) || "")}`} className="text-accent hover:underline">{teamMap.get(f.AwayTeamID) || `Team ${f.AwayTeamID}`}</Link>
-                              </>
-                            ) : (
-                              <span className="italic text-muted-foreground">Match scheduled — teams TBD (pending earlier rounds)</span>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            )}
-
             {/* Domestic league standings */}
             {isDomestic && standings.length > 0 && (
               <div className="border border-border rounded overflow-hidden">
@@ -938,6 +911,44 @@ export default function LeaguePage() {
               </div>
             )}
 
+            {/* Upcoming fixtures — shown after the current tables/brackets, since those
+                reflect what's actually been decided so far; teams stay hidden until
+                determined (e.g. an earlier knockout round hasn't been played yet) */}
+            {!isDomestic && upcomingFixtures.filter(f => f.SeasonID === selectedSeason).length > 0 && (
+              <div className="border border-border rounded overflow-hidden">
+                <div className="bg-table-header px-3 py-2">
+                  <h3 className="font-display text-sm font-bold text-table-header-foreground">Upcoming Fixtures</h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm font-sans">
+                    <thead>
+                      <tr className="bg-secondary">
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Date</th>
+                        <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Matchup</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {upcomingFixtures.filter(f => f.SeasonID === selectedSeason).map((f, i) => (
+                        <tr key={f.MatchID ?? i} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
+                          <td className="px-3 py-1.5 font-mono text-muted-foreground">{f.Matchday}</td>
+                          <td className="px-3 py-1.5">
+                            {f.TeamsDetermined && f.HomeTeamID != null && f.AwayTeamID != null ? (
+                              <>
+                                <Link to={`/team/${encodeURIComponent(teamMap.get(f.HomeTeamID) || "")}`} className="text-accent hover:underline">{teamMap.get(f.HomeTeamID) || `Team ${f.HomeTeamID}`}</Link>
+                                {" vs "}
+                                <Link to={`/team/${encodeURIComponent(teamMap.get(f.AwayTeamID) || "")}`} className="text-accent hover:underline">{teamMap.get(f.AwayTeamID) || `Team ${f.AwayTeamID}`}</Link>
+                              </>
+                            ) : (
+                              <span className="italic text-muted-foreground">Match scheduled — teams TBD (pending earlier rounds)</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
 
             {/* Annual Awards */}
             {awardSeasons.length > 0 && (
