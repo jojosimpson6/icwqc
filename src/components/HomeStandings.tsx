@@ -1,6 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { useSortableTable } from "@/hooks/useSortableTable";
 
@@ -29,19 +28,20 @@ export function HomeStandings() {
   const [selectedLeague, setSelectedLeague] = useState<number>(1);
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   const [availableSeasons, setAvailableSeasons] = useState<number[]>([]);
-  const [loadingStandings, setLoadingStandings] = useState(false);
+  const [loadingStandings, setLoadingStandings] = useState(true);
 
-  // Load league list once
+  // Load league list once — shared cache key with SiteHeader/ScoreTicker/
+  // LeagueLeaders, which all need this same table on the homepage, so only
+  // one of them actually hits the network.
   useEffect(() => {
-    supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier")
-      .order("LeagueTier").order("LeagueName")
-      .then(({ data }) => {
-        if (data) {
-          const domestic = (data as LeagueOption[]).filter(l => l.LeagueTier === 1 || l.LeagueTier === 2);
-          setLeagues(domestic);
-          if (domestic.length > 0) setSelectedLeague(domestic[0].LeagueID);
-        }
-      });
+    fetchAllRows<LeagueOption>("leagues", { select: "*" }).then(data => {
+      if (data) {
+        const domestic = data.filter(l => l.LeagueTier === 1 || l.LeagueTier === 2)
+          .sort((a, b) => (a.LeagueTier ?? 0) - (b.LeagueTier ?? 0) || (a.LeagueName || "").localeCompare(b.LeagueName || ""));
+        setLeagues(domestic);
+        if (domestic.length > 0) setSelectedLeague(domestic[0].LeagueID);
+      }
+    });
   }, []);
 
   // Fetch standings for selected league only — fast, targeted query

@@ -28,10 +28,11 @@ export function ScoreTicker() {
 
   useEffect(() => {
     async function fetchLatestScores() {
-      // Get reference data
-      const [teams, { data: leagues }] = await Promise.all([
+      // Get reference data — leagues uses the same cache key as SiteHeader/
+      // HomeStandings/LeagueLeaders so only one of these actually hits the network.
+      const [teams, leagues] = await Promise.all([
         fetchAllRows("teams", { select: "TeamID, FullName" }),
-        supabase.from("leagues").select("LeagueID, LeagueName"),
+        fetchAllRows<{ LeagueID: number; LeagueName: string | null }>("leagues", { select: "*" }),
       ]);
       const teamMap: Record<number, string> = {};
       (teams || []).forEach((t: any) => { teamMap[t.TeamID] = t.FullName; });

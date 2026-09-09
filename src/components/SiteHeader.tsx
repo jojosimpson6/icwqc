@@ -1,6 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAll";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { useDarkMode } from "@/hooks/useDarkMode";
 import { Moon, Sun, Menu, X, User as UserIcon } from "lucide-react";
@@ -20,8 +20,15 @@ export function SiteHeader() {
   const { user, profile } = useAuth();
 
   useEffect(() => {
-    supabase.from("leagues").select("*").order("LeagueTier").order("LeagueName").then(({ data }) => {
-      if (data) setLeagues(data);
+    // Shared cache key with every other widget/page that needs the leagues
+    // table (SiteHeader mounts on every route, so this used to fire its own
+    // network request on top of whatever the page itself was fetching).
+    fetchAllRows<League>("leagues", { select: "*" }).then(data => {
+      if (data) {
+        setLeagues([...data].sort((a, b) =>
+          (a.LeagueTier ?? 0) - (b.LeagueTier ?? 0) || (a.LeagueName || "").localeCompare(b.LeagueName || "")
+        ));
+      }
     });
   }, []);
 

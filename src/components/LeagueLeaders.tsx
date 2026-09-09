@@ -1,8 +1,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
+import { fetchAllRows } from "@/lib/fetchAll";
 
-type StatCategory = "Goals" | "GoldenSnitchCatches" | "KeeperSaves" | "KeeperShotsFaced" | "BludgersHit" | "TurnoversForced" | "TeammatesProtected" | "GamesPlayed";
+type StatCategory = "Goals" | "GoldenSnitchCatches" | "KeeperSaves" | "KeeperShotsFaced" | "BludgersHit" | "TurnoversForced" | "TeammatesProtected" | "GamesPlayed"
+  | "ChaserRatingPlus" | "GoaltendingRatingPlus" | "BeaterImpactPlus" | "SeekerRatingPlus";
 
 const statLabels: Record<StatCategory, { label: string; position: string | null; col: string }> = {
   Goals:               { label: "Goals",               position: "Chaser", col: "Goals" },
@@ -13,7 +15,14 @@ const statLabels: Record<StatCategory, { label: string; position: string | null;
   TurnoversForced:     { label: "Turnovers Forced",     position: "Beater", col: "TurnoversForced" },
   TeammatesProtected:  { label: "Teammates Protected",  position: "Beater", col: "TeammatesProtected" },
   GamesPlayed:         { label: "Games Played",         position: null,     col: "GamesPlayed" },
+  // Advanced (league/position-adjusted, 100 = average) — sourced from player_advanced_stats
+  ChaserRatingPlus:      { label: "Chaser Rating+ (adj.)",     position: "Chaser", col: "chaser_rating_plus" },
+  GoaltendingRatingPlus: { label: "Keeper Rating+ (adj.)",     position: "Keeper", col: "goaltending_rating_plus" },
+  BeaterImpactPlus:      { label: "Beater Impact+ (adj.)",     position: "Beater", col: "beater_impact_plus" },
+  SeekerRatingPlus:      { label: "Seeker Rating+ (adj.)",     position: "Seeker", col: "seeker_rating_plus" },
 };
+
+const ADVANCED_CATEGORIES = new Set<StatCategory>(["ChaserRatingPlus", "GoaltendingRatingPlus", "BeaterImpactPlus", "SeekerRatingPlus"]);
 
 interface LeaderRow {
   PlayerName: string;
@@ -26,6 +35,7 @@ interface LeaderRow {
 interface LeagueOption {
   LeagueID: number;
   LeagueName: string;
+  LeagueTier?: number | null;
 }
 
 const seasonLabel = (id: number) => `${id - 1}–${String(id).slice(-2)}`;
@@ -47,11 +57,17 @@ export function LeagueLeaders() {
       // pre-populated fixture schedule, which reaches years into the future) —
       // otherwise this picks a season with no player_season_stats rows yet.
       const today = new Date().toISOString().split("T")[0];
-      const [{ data: mdData }, { data: leagueData }] = await Promise.all([
+      const [{ data: mdData }, leagueData] = await Promise.all([
         supabase.from("matchdays").select("SeasonID").lte("Matchday", today).order("SeasonID", { ascending: false }).limit(200),
-        supabase.from("leagues").select("LeagueID, LeagueName").order("LeagueTier").order("LeagueName"),
+        // Shared cache key with SiteHeader/HomeStandings/ScoreTicker — only one
+        // of these actually hits the network on a page where they all render.
+        fetchAllRows<LeagueOption>("leagues", { select: "*" }),
       ]);
-      if (leagueData) setLeagues(leagueData as LeagueOption[]);
+      if (leagueData) {
+        setLeagues([...leagueData].sort((a, b) =>
+          (a.LeagueTier ?? 0) - (b.LeagueTier ?? 0) || (a.LeagueName || "").localeCompare(b.LeagueName || "")
+        ));
+      }
       if (mdData) {
         const seasons = [...new Set(mdData.map((m: any) => m.SeasonID).filter(Boolean))].sort((a, b) => (b as number) - (a as number)) as number[];
         setAvailableSeasons(seasons);
@@ -72,6 +88,51 @@ export function LeagueLeaders() {
 
     const info = statLabels[category];
     const col = info.col;
+
+    if (ADVANCED_CATEGORIES.has(category)) {
+      // These live in player_advanced_stats, which only has IDs (no names) —
+      // fetch the ranked rows, then resolve player/team names separately.
+      let aq = supabase
+        .from("player_advanced_stats")
+        .select(`PlayerID,TeamID,LeagueID,Position,${col}`)
+        .eq("SeasonID", selectedSeason)
+        .eq("Position", info.position)
+        .not(col, "is", null)
+        .order(col, { ascending: false })
+        .limit(50);
+
+      if (selectedLeague !== "all") {
+        const lg = leagues.find(l => l.LeagueName === selectedLeague);
+        if (lg) aq = aq.eq("LeagueID", lg.LeagueID);
+      }
+
+      const { data, error } = await aq;
+      if (error) { console.error("LeagueLeaders advanced fetch error:", error); setLoadingLeaders(false); return; }
+
+      const playerIds = [...new Set((data || []).map((r: any) => r.PlayerID))];
+      const teamIds = [...new Set((data || []).map((r: any) => r.TeamID))];
+      const [{ data: playerRows }, { data: teamRows }] = await Promise.all([
+        supabase.from("players").select("PlayerID, PlayerName").in("PlayerID", playerIds),
+        supabase.from("teams").select("TeamID, FullName").in("TeamID", teamIds),
+      ]);
+      const playerNameMap = new Map((playerRows || []).map((p: any) => [p.PlayerID, p.PlayerName]));
+      const teamNameMap = new Map((teamRows || []).map((t: any) => [t.TeamID, t.FullName]));
+
+      const rows: LeaderRow[] = (data || [])
+        .map((r: any) => ({
+          PlayerName: playerNameMap.get(r.PlayerID) || "",
+          FullName: teamNameMap.get(r.TeamID) || "",
+          Position: r.Position || "",
+          value: r[col] ?? 0,
+          pid: r.PlayerID || null,
+        }))
+        .filter(r => r.value > 0)
+        .slice(0, 10);
+
+      setLeaders(rows);
+      setLoadingLeaders(false);
+      return;
+    }
 
     // Build query: order by the stat column descending, limit 15 (to allow for position filtering)
     let q = supabase
@@ -109,7 +170,7 @@ export function LeagueLeaders() {
 
     setLeaders(rows);
     setLoadingLeaders(false);
-  }, [selectedSeason, selectedLeague, category]);
+  }, [selectedSeason, selectedLeague, category, leagues]);
 
   useEffect(() => {
     fetchLeaders();

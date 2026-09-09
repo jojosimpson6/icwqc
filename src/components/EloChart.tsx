@@ -20,6 +20,7 @@ interface EloNewPoint {
 interface LeagueOption {
   LeagueID: number;
   LeagueName: string;
+  LeagueTier?: number | null;
 }
 
 function parseLocalDate(dateStr: string): Date {
@@ -27,7 +28,7 @@ function parseLocalDate(dateStr: string): Date {
   return new Date(y, m - 1, d);
 }
 
-export function EloChart() {
+export function EloChart({ scope = "club" }: { scope?: "club" | "intl" }) {
   const [chartData, setChartData] = useState<any[]>([]);
   const [teamNames, setTeamNames] = useState<string[]>([]);
   const [selectedTeams, setSelectedTeams] = useState<Set<string>>(new Set());
@@ -54,7 +55,7 @@ export function EloChart() {
 
   useEffect(() => {
     Promise.all([
-      supabase.from("leagues").select("LeagueID, LeagueName").order("LeagueTier").order("LeagueName"),
+      supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier").order("LeagueTier").order("LeagueName"),
       fetchAllRows("elo_history", { select: "TeamID,PostElo,Matchday", order: { column: "Matchday", ascending: true } }),
       supabase.from("teams").select("TeamID, FullName, LeagueID"),
     ]).then(([{ data: leagueData }, eData, { data: teamsData }]) => {
@@ -64,7 +65,7 @@ export function EloChart() {
       const teamIdToName = new Map<number, string>();
       (teamsData || []).forEach((t: any) => {
         if (t.FullName && t.LeagueID) tlm.set(t.FullName, t.LeagueID);
-        if (t.TeamID && t.FullName) teamIdToName.set(t.TeamID, t.FullName);
+        if (t.TeamID && t.FullName) { teamIdToName.set(t.TeamID, t.FullName); }
       });
       setTeamLeagueMap(tlm);
 
@@ -81,16 +82,25 @@ export function EloChart() {
     });
   }, []);
 
+  // Only offer leagues/teams matching the page's club-vs-international scope
+  // (a domestic league's roster is always club, a tier-0 competition's is
+  // always national, so this is a clean split without needing per-team lookups).
+  const scopedLeagues = leagues.filter(l => scope === "club" ? (l.LeagueTier ?? 0) > 0 : (l.LeagueTier ?? 0) === 0);
+
   useEffect(() => {
     if (eloData.length === 0) return;
 
-    let filtered = eloData;
+    const scopedLeagueIds = new Set(scopedLeagues.map(l => l.LeagueID));
+    let filtered = eloData.filter(d => {
+      const lid = teamLeagueMap.get(d.FullName);
+      return lid !== undefined && scopedLeagueIds.has(lid);
+    });
     if (selectedLeague !== null) {
       const leagueTeams = new Set<string>();
       teamLeagueMap.forEach((lid, name) => {
         if (lid === selectedLeague) leagueTeams.add(name);
       });
-      filtered = eloData.filter(d => leagueTeams.has(d.FullName));
+      filtered = filtered.filter(d => leagueTeams.has(d.FullName));
     }
 
     const names = [...new Set(filtered.map(d => d.FullName))].sort();
@@ -139,7 +149,15 @@ export function EloChart() {
     });
 
     setChartData(filled);
-  }, [eloData, selectedLeague, teamLeagueMap, startDate, endDate]);
+  }, [eloData, selectedLeague, teamLeagueMap, startDate, endDate, scope]);
+
+  // Reset the league filter if it no longer matches the active scope
+  useEffect(() => {
+    if (selectedLeague !== null && !scopedLeagues.some(l => l.LeagueID === selectedLeague)) {
+      setSelectedLeague(null);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scope]);
 
   const toggleTeam = (name: string) => {
     setSelectedTeams(prev => {
@@ -174,8 +192,8 @@ export function EloChart() {
             onChange={(e) => setSelectedLeague(e.target.value ? parseInt(e.target.value) : null)}
             className="text-xs bg-popover text-popover-foreground border border-border rounded px-2 py-1 font-sans"
           >
-            <option value="">All Leagues</option>
-            {leagues.map((l) => (
+            <option value="">{scope === "club" ? "All Domestic Leagues" : "All International Competitions"}</option>
+            {scopedLeagues.map((l) => (
               <option key={l.LeagueID} value={l.LeagueID}>{l.LeagueName}</option>
             ))}
           </select>
