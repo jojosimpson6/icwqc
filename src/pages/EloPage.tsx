@@ -7,11 +7,11 @@ import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { SiteFooter } from "@/components/SiteFooter";
 import { EloChart } from "@/components/EloChart";
 
-interface EloPoint {
-  FullName: string;
-  Matchday: string;
-  elo_rating: number;
-  current_game_number: number;
+interface TeamEloSummaryRow {
+  TeamID: number;
+  latest_elo: number;
+  prev_elo: number | null;
+  games_played: number;
 }
 
 interface TeamCurrentElo {
@@ -30,7 +30,8 @@ function seasonLabel(id: number): string {
 }
 
 export default function EloPage() {
-  const [eloData, setEloData] = useState<EloPoint[]>([]);
+  const [eloSummary, setEloSummary] = useState<TeamEloSummaryRow[]>([]);
+  const [teamIdToName, setTeamIdToName] = useState<Map<number, string>>(new Map());
   const [leagues, setLeagues] = useState<{ LeagueID: number; LeagueName: string; LeagueTier: number | null }[]>([]);
   const [teamLeagueMap, setTeamLeagueMap] = useState<Map<string, { id: number; name: string }>>( new Map());
   const [selectedLeague, setSelectedLeague] = useState<number | null>(null);
@@ -41,51 +42,32 @@ export default function EloPage() {
   const [sortKey, setSortKey] = useState<"rating" | "name" | "change" | "gp">("rating");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [loading, setLoading] = useState(true);
-  const [teamLinkMap, setTeamLinkMap] = useState<Map<string, number>>(new Map());
 
   useEffect(() => {
     Promise.all([
       supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier").order("LeagueTier").order("LeagueName"),
-      fetchAllRows("elo_history", { select: "TeamID,PostElo,Matchday,MatchID", order: { column: "Matchday", ascending: true } }),
+      // Only latest/previous rating + total games per team — not the whole
+      // history, which is what made this page slow to load.
+      fetchAllRows<TeamEloSummaryRow>("team_elo_summary", { select: "TeamID,latest_elo,prev_elo,games_played" }),
       supabase.from("teams").select("TeamID, FullName, LeagueID"),
-    ]).then(([{ data: lgData }, eData, { data: teamsData }]) => {
+    ]).then(([{ data: lgData }, summaryData, { data: teamsData }]) => {
       if (lgData) setLeagues(lgData as any[]);
 
       const lgMap = new Map<number, string>();
       const tlm = new Map<string, { id: number; name: string }>();
-      const tlidMap = new Map<string, number>();
-      const teamIdToName = new Map<number, string>();
-      const teamIdToLeagueId = new Map<number, number>();
+      const idToName = new Map<number, string>();
       (lgData || []).forEach((l: any) => lgMap.set(l.LeagueID, l.LeagueName));
       (teamsData || []).forEach((t: any) => {
         if (t.TeamID && t.FullName) {
-          teamIdToName.set(t.TeamID, t.FullName);
+          idToName.set(t.TeamID, t.FullName);
           if (t.LeagueID) {
-            teamIdToLeagueId.set(t.TeamID, t.LeagueID);
             tlm.set(t.FullName, { id: t.LeagueID, name: lgMap.get(t.LeagueID) || "" });
-            tlidMap.set(t.FullName, t.TeamID);
           }
         }
       });
-
-      // Convert elo_history (TeamID-based) to EloPoint (FullName-based)
-      // Track game number per team
-      const teamGameCounts = new Map<number, number>();
-      const elo: EloPoint[] = (eData || [])
-        .filter((d: any) => d.TeamID && d.Matchday && d.PostElo != null)
-        .map((d: any) => {
-          const gn = (teamGameCounts.get(d.TeamID) || 0) + 1;
-          teamGameCounts.set(d.TeamID, gn);
-          return {
-            FullName: teamIdToName.get(d.TeamID) || `Team#${d.TeamID}`,
-            Matchday: d.Matchday,
-            elo_rating: d.PostElo,
-            current_game_number: gn,
-          };
-        });
-      setEloData(elo);
+      setTeamIdToName(idToName);
+      setEloSummary(summaryData || []);
       setTeamLeagueMap(tlm);
-      setTeamLinkMap(tlidMap);
     }).catch(err => {
       console.error("EloPage load error:", err);
     }).finally(() => {
@@ -95,41 +77,34 @@ export default function EloPage() {
 
   // Build current Elo table: latest rating per team
   const currentElos = useMemo((): TeamCurrentElo[] => {
-    const byTeam = new Map<string, EloPoint[]>();
-    eloData.forEach(d => {
-      if (!byTeam.has(d.FullName)) byTeam.set(d.FullName, []);
-      byTeam.get(d.FullName)!.push(d);
-    });
-
     const result: TeamCurrentElo[] = [];
-    byTeam.forEach((points, name) => {
-      const sorted = [...points].sort((a, b) => a.Matchday.localeCompare(b.Matchday));
-      const latest = sorted[sorted.length - 1];
-      const prev = sorted.length >= 2 ? sorted[sorted.length - 2].elo_rating : latest.elo_rating;
+    eloSummary.forEach(row => {
+      const name = teamIdToName.get(row.TeamID);
+      if (!name) return;
       const lgInfo = teamLeagueMap.get(name);
-      const teamId = teamLinkMap.get(name) ?? null;
 
       // TeamID > 999 identifies national/international sides (same convention
       // used on the Teams index page) — keep them out of the club rankings.
-      const isNational = (teamId ?? 0) > 999;
+      const isNational = row.TeamID > 999;
       if (scope === "club" && isNational) return;
       if (scope === "intl" && !isNational) return;
 
       if (selectedLeague !== null && lgInfo?.id !== selectedLeague) return;
 
+      const prev = row.prev_elo ?? row.latest_elo;
       result.push({
         name,
-        teamId,
-        rating: latest.elo_rating,
+        teamId: row.TeamID,
+        rating: row.latest_elo,
         leagueId: lgInfo?.id ?? null,
         leagueName: lgInfo?.name ?? "",
-        gamesPlayed: latest.current_game_number,
+        gamesPlayed: row.games_played,
         prevRating: prev,
-        change: latest.elo_rating - prev,
+        change: row.latest_elo - prev,
       });
     });
     return result;
-  }, [eloData, teamLeagueMap, teamLinkMap, selectedLeague, scope]);
+  }, [eloSummary, teamIdToName, teamLeagueMap, selectedLeague, scope]);
 
   const sortedElos = useMemo(() => {
     return [...currentElos].sort((a, b) => {

@@ -28,6 +28,8 @@ interface CareerRow {
 interface SeasonRow extends Omit<CareerRow, "LatestSeason"> {
   SeasonID: number;
   TeamID?: number | null;
+  LeagueID?: number | null;
+  advPlus?: number | null;
 }
 
 interface LeagueInfo {
@@ -42,13 +44,14 @@ type StatCat =
   "GP" | "G" | "G_GP" | "SH_PCT" | "PASS_PCT_C" | "MIN_G"
   | "GSC" | "GSC_GP" | "MIN_GSC"
   | "KSF" | "KS" | "SV_PCT" | "KS_GP" | "PASS_PCT_K"
-  | "BH" | "BH_GP" | "TF" | "TF_GP" | "TP" | "TP_GP";
+  | "BH" | "BH_GP" | "TF" | "TF_GP" | "TP" | "TP_GP"
+  | "ADJ_C" | "ADJ_K" | "ADJ_B" | "ADJ_S";
 
 type RegType = "career" | "active" | "season" | "progressive" | "yearly" | "yby";
 
 const STATS: {
   key: StatCat; label: string; abbr: string; higher: boolean;
-  minGP?: number; requirePos?: string;
+  minGP?: number; requirePos?: string; yearlyOnly?: boolean;
 }[] = [
   { key: "GP",         label: "Games Played",              abbr: "GP",    higher: true },
   { key: "G",          label: "Goals",                     abbr: "G",     higher: true,  requirePos: "Chaser" },
@@ -56,20 +59,24 @@ const STATS: {
   { key: "SH_PCT",     label: "Shooting %",                abbr: "SH%",   higher: true,  minGP: 10, requirePos: "Chaser" },
   { key: "PASS_PCT_C", label: "Pass % (Chaser)",           abbr: "PASS%", higher: true,  minGP: 10, requirePos: "Chaser" },
   { key: "MIN_G",      label: "Minutes per Goal",          abbr: "MIN/G", higher: false, minGP: 10, requirePos: "Chaser" },
+  { key: "ADJ_C",      label: "Chaser Rating+ (adj.)",     abbr: "RTG+",  higher: true,  requirePos: "Chaser", yearlyOnly: true },
   { key: "GSC",        label: "Snitch Catches",            abbr: "GSC",   higher: true,  requirePos: "Seeker" },
   { key: "GSC_GP",     label: "Snitch Catches per Game",   abbr: "GSC/GP",higher: true,  minGP: 10, requirePos: "Seeker" },
   { key: "MIN_GSC",    label: "Minutes per Snitch",        abbr: "MIN/GSC",higher: false,minGP: 10, requirePos: "Seeker" },
+  { key: "ADJ_S",      label: "Seeker Rating+ (adj.)",     abbr: "RTG+",  higher: true,  requirePos: "Seeker", yearlyOnly: true },
   { key: "KSF",        label: "Shots Faced",               abbr: "SF",    higher: true,  requirePos: "Keeper" },
   { key: "KS",         label: "Saves",                     abbr: "SV",    higher: true,  requirePos: "Keeper" },
   { key: "SV_PCT",     label: "Save %",                    abbr: "SV%",   higher: true,  minGP: 10, requirePos: "Keeper" },
   { key: "KS_GP",      label: "Saves per Game",            abbr: "SV/GP", higher: true,  minGP: 10, requirePos: "Keeper" },
   { key: "PASS_PCT_K", label: "Pass % (Keeper)",           abbr: "KP%",   higher: true,  minGP: 10, requirePos: "Keeper" },
+  { key: "ADJ_K",      label: "Keeper Rating+ (adj.)",     abbr: "RTG+",  higher: true,  requirePos: "Keeper", yearlyOnly: true },
   { key: "BH",         label: "Bludgers Hit",              abbr: "BH",    higher: true,  requirePos: "Beater" },
   { key: "BH_GP",      label: "Bludgers Hit per Game",     abbr: "BH/GP", higher: true,  minGP: 10, requirePos: "Beater" },
   { key: "TF",         label: "Turnovers Forced",          abbr: "TF",    higher: true,  requirePos: "Beater" },
   { key: "TF_GP",      label: "Turnovers Forced / Game",   abbr: "TF/GP", higher: true,  minGP: 10, requirePos: "Beater" },
   { key: "TP",         label: "Teammates Protected",       abbr: "TP",    higher: true,  requirePos: "Beater" },
   { key: "TP_GP",      label: "Teammates Protected / Game",abbr: "TP/GP", higher: true,  minGP: 10, requirePos: "Beater" },
+  { key: "ADJ_B",      label: "Beater Rating+ (adj.)",     abbr: "RTG+",  higher: true,  requirePos: "Beater", yearlyOnly: true },
 ];
 
 const REGS: { key: RegType; label: string }[] = [
@@ -80,6 +87,8 @@ const REGS: { key: RegType; label: string }[] = [
   { key: "yearly",      label: "Yearly League" },
   { key: "yby",         label: "Year-by-Year" },
 ];
+
+const DEFAULT_STAT_FOR_POS: Record<string, StatCat> = { Chaser: "G", Keeper: "KSF", Beater: "BH", Seeker: "GSC" };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -115,6 +124,8 @@ function val(row: any, cat: StatCat): number | null {
     case "TF_GP":    return g > 0 && tf > 0 ? tf / g : null;
     case "TP":       return tp > 0 ? tp : null;
     case "TP_GP":    return g > 0 && tp > 0 ? tp / g : null;
+    case "ADJ_C": case "ADJ_K": case "ADJ_B": case "ADJ_S":
+      return typeof row.advPlus === "number" ? row.advPlus : null;
   }
 }
 
@@ -146,7 +157,7 @@ const AGG_SELECT = [
 // but filtered to just those seasons — still small payload.
 const SEASON_SELECT = [
   "PlayerID", "PlayerName", "Position", "Nation",
-  "TeamID", "TeamFullName", "LeagueName", "SeasonID",
+  "TeamID", "TeamFullName", "LeagueName", "LeagueID", "SeasonID",
   "GamesPlayed", "MinPlayed", "Goals", "GoldenSnitchCatches",
   "KeeperSaves", "KeeperShotsFaced",
   "BludgersHit", "TurnoversForced", "TeammatesProtected",
@@ -211,6 +222,7 @@ function mapSeasonRow(r: any, intlNames: Set<string>): SeasonRow {
     KPassAtt: r.KeeperPassAtt || 0, KPassComp: r.KeeperPassComp || 0,
     isIntl: intlNames.has(r.LeagueName || "") || !isClubTeamId(r.TeamID),
     TeamID: r.TeamID ?? null,
+    LeagueID: r.LeagueID ?? null,
   } as SeasonRow;
 }
 
@@ -231,6 +243,19 @@ export default function LeadersIndex() {
   const [careerRows, setCareerRows]   = useState<CareerRow[]>([]);
   const [seasonRows, setSeasonRows]   = useState<SeasonRow[]>([]);
   const [leagues, setLeagues]         = useState<LeagueInfo[]>([]);
+
+  // League-adjusted "+" stats only make sense within "Yearly League" — if the
+  // register changes away from that while one is selected, fall back to a
+  // sensible plain stat for the same position instead of showing an empty board.
+  useEffect(() => {
+    const info = STATS.find(s => s.key === stat);
+    if (info?.yearlyOnly && register !== "yearly") {
+      setParam("stat", DEFAULT_STAT_FOR_POS[info.requirePos || ""] || "GP");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [register]);
+  const [advPlusLoadedPositions, setAdvPlusLoadedPositions] = useState<Set<string>>(new Set());
+  const [advPlusLoading, setAdvPlusLoading] = useState(false);
   const [intlNames, setIntlNames]     = useState<Set<string>>(new Set());
   const [lgIdByName, setLgIdByName]   = useState<Map<string, number>>(new Map());
   const [careerLoading, setCareerLoading] = useState(true);
@@ -354,7 +379,7 @@ export default function LeadersIndex() {
     if (seasonLoaded || seasonLoading) return;
     setSeasonLoading(true);
     try {
-      const rows = await cachedQuery("leaders:seasons:v2-teamid", async () => {
+      const rows = await cachedQuery("leaders:seasons:v3-leagueid", async () => {
         // Fetch all season rows — but only the columns we need
         // These are already filtered per-season (no aggregation) so each row is small
         const PAGE = 1000;
@@ -389,6 +414,45 @@ export default function LeadersIndex() {
       loadSeasonRows();
     }
   }, [register, loadSeasonRows]);
+
+  // League/position-adjusted "+" ratings are only meaningful within a single
+  // season (100 = that season's league average), so they're only offered
+  // under "Yearly League" — and only fetched the first time one is actually
+  // selected, since player_advanced_stats is as large as player_season_stats
+  // and there's no reason to pay that cost for people who never touch this.
+  const statInfoForLoad = STATS.find(s => s.key === stat);
+  useEffect(() => {
+    if (!statInfoForLoad?.yearlyOnly || register !== "yearly" || !seasonLoaded) return;
+    const reqPos = statInfoForLoad.requirePos || "_any";
+    if (advPlusLoadedPositions.has(reqPos) || advPlusLoading) return;
+    setAdvPlusLoading(true);
+    (async () => {
+      const PAGE = 1000;
+      const all: any[] = [];
+      let from = 0;
+      while (true) {
+        let q = supabase.from("player_advanced_stats").select("PlayerID,TeamID,SeasonID,LeagueID,Position,chaser_rating_plus,goaltending_rating_plus,beater_impact_plus,seeker_rating_plus").range(from, from + PAGE - 1);
+        if (statInfoForLoad.requirePos) q = q.eq("Position", statInfoForLoad.requirePos);
+        const { data, error } = await q;
+        if (error) { console.error("Advanced stats load error:", error); break; }
+        if (!data || data.length === 0) break;
+        all.push(...data);
+        if (data.length < PAGE) break;
+        from += PAGE;
+      }
+      const advMap = new Map<string, number | null>();
+      all.forEach((r: any) => {
+        const combined = r.chaser_rating_plus ?? r.goaltending_rating_plus ?? r.beater_impact_plus ?? r.seeker_rating_plus;
+        advMap.set(`${r.PlayerID}|${r.TeamID}|${r.SeasonID}|${r.LeagueID}`, combined);
+      });
+      setSeasonRows(prev => prev.map(r => {
+        const key = `${r.PlayerID}|${r.TeamID}|${r.SeasonID}|${r.LeagueID}`;
+        return advMap.has(key) ? { ...r, advPlus: advMap.get(key) ?? null } : r;
+      }));
+      setAdvPlusLoadedPositions(prev => new Set(prev).add(reqPos));
+      setAdvPlusLoading(false);
+    })();
+  }, [stat, register, seasonLoaded, advPlusLoadedPositions, advPlusLoading, statInfoForLoad]);
 
   // ── Filtered views ───────────────────────────────────────────────────────────
   const filteredCareer = useMemo(() =>
@@ -686,8 +750,13 @@ export default function LeadersIndex() {
           <label className="text-sm font-sans font-medium text-muted-foreground">Statistic:</label>
           <select value={stat} onChange={e => setParam("stat", e.target.value)}
             className="text-sm bg-popover text-popover-foreground border border-border rounded px-3 py-1.5 font-sans focus:outline-none">
-            {STATS.map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
+            {STATS.filter(s => !s.yearlyOnly || register === "yearly").map(s => <option key={s.key} value={s.key}>{s.label}</option>)}
           </select>
+          {statInfo.yearlyOnly && (
+            <span className="text-xs text-muted-foreground font-sans border border-border rounded px-2 py-1" title="100 = league average for that position and season">
+              League-adjusted · Yearly League only
+            </span>
+          )}
           {statInfo.requirePos && (
             <span className="text-xs text-muted-foreground font-sans border border-border rounded px-2 py-1">
               {statInfo.requirePos}s only

@@ -1122,6 +1122,30 @@ export type Database = {
       }
     }
     Views: {
+      team_elo_summary: {
+        Row: {
+          TeamID: number | null
+          latest_elo: number | null
+          latest_matchday: string | null
+          prev_elo: number | null
+          games_played: number | null
+        }
+        Relationships: []
+      }
+      active_players: {
+        Row: {
+          PlayerID: number | null
+        }
+        Relationships: []
+      }
+      active_players_detail: {
+        Row: {
+          PlayerID: number | null
+          PlayerName: string | null
+          Position: string | null
+        }
+        Relationships: []
+      }
       player_advanced_stats: {
         Row: {
           PlayerID: number | null
@@ -1322,6 +1346,25 @@ export type Database = {
       score_weekly_fantasy: { Args: Record<PropertyKey, never>; Returns: undefined }
       pick_player_number: { Args: { p_position: string; p_dob: string | null; p_used: number[]; p_is_starter: boolean }; Returns: number }
       generate_player_numbers: { Args: Record<PropertyKey, never>; Returns: undefined }
+      recommend_weekly_fantasy_players: {
+        Args: { p_position?: string; p_limit?: number }
+        Returns: {
+          PlayerID: number
+          PlayerName: string
+          Position: string
+          TeamID: number
+          TeamName: string
+          recent_avg_points: number
+          games_sampled: number
+          opponent_team_id: number
+          opponent_name: string
+          next_match_date: string
+          own_elo: number
+          opponent_elo: number
+          matchup_multiplier: number
+          recommendation_score: number
+        }[]
+      }
       get_complete_schema: { Args: never; Returns: Json }
       has_role: {
         Args: {

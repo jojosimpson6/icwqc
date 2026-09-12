@@ -182,6 +182,29 @@ function advValueClass(v: number | null): string {
   return "text-foreground";
 }
 
+/** Small, team-colored jersey-number badge for the "Numbers Worn" line in the
+ * bio header. Team name and years only show on hover (native title tooltip)
+ * — the badge itself just shows the number, styled like Baseball-Reference
+ * but scaled down since it lives inline with the player's demographic info. */
+function NumberCircle({ n }: {
+  n: { teamId: number; teamName: string; primaryColor: string | null; secondaryColor: string | null; number: number; seasons: number[] };
+}) {
+  const bg = n.primaryColor || "#374151";
+  const textColor = getContrastText(bg);
+  const ring = n.secondaryColor && n.secondaryColor.toLowerCase() !== bg.toLowerCase() ? n.secondaryColor : (isLightColor(bg) ? "#1a1a1a" : "#ffffff");
+  const years = n.seasons.length === 1 ? seasonLabel(n.seasons[0]) : `${seasonLabel(n.seasons[0])} – ${seasonLabel(n.seasons[n.seasons.length - 1])}`;
+  return (
+    <Link
+      to={`/team/${encodeURIComponent(n.teamName)}`}
+      title={`#${n.number} — ${n.teamName} (${years})`}
+      className="w-7 h-7 rounded-full flex items-center justify-center font-display text-xs font-bold border shadow-sm hover:scale-110 transition-transform shrink-0"
+      style={{ backgroundColor: bg, color: textColor, borderColor: ring }}
+    >
+      {n.number}
+    </Link>
+  );
+}
+
 function ageAtSeason(dob: string | null, seasonId: number | null): string {
   if (!dob || !seasonId) return "—";
   // Age as of Sep 1 of the season's START year (seasonId is end year, so start = seasonId - 1)
@@ -290,17 +313,35 @@ export default function PlayerProfile() {
         .select('"TeamID","FullName","PrimaryColor","SecondaryColor"').in("TeamID", teamIds);
       const teamInfo = new Map((teamRows || []).map((t: any) => [t.TeamID, t]));
 
-      // Group consecutive seasons with the same (TeamID, Number) into one span
-      const sorted = [...rows].sort((a, b) => a.SeasonID - b.SeasonID);
-      const spans: { teamId: number; number: number; seasons: number[] }[] = [];
-      sorted.forEach(r => {
-        const last = spans[spans.length - 1];
-        if (last && last.teamId === r.TeamID && last.number === r.Number && r.SeasonID === last.seasons[last.seasons.length - 1] + 1) {
-          last.seasons.push(r.SeasonID);
-        } else {
-          spans.push({ teamId: r.TeamID, number: r.Number, seasons: [r.SeasonID] });
-        }
+      // Group into spans of contiguous seasons wearing the same number for
+      // the same team. Grouped per (TeamID, Number) key *first* — a player's
+      // club and international seasons are interleaved by SeasonID (e.g.
+      // club-2010, intl-2010, club-2011, intl-2011...), and merging strictly
+      // by season order across everything at once would fragment a single
+      // continuous club stint every time an international season fell in
+      // between. Keying by team first keeps club and international spans
+      // (and any distinct club team) independent of one another.
+      const byKey = new Map<string, typeof rows>();
+      rows.forEach(r => {
+        const key = `${r.TeamID}|${r.Number}`;
+        if (!byKey.has(key)) byKey.set(key, []);
+        byKey.get(key)!.push(r);
       });
+
+      const spans: { teamId: number; number: number; seasons: number[] }[] = [];
+      byKey.forEach(groupRows => {
+        const sorted = [...groupRows].sort((a, b) => a.SeasonID - b.SeasonID);
+        sorted.forEach(r => {
+          const last = spans[spans.length - 1];
+          if (last && last.teamId === r.TeamID && last.number === r.Number && r.SeasonID === last.seasons[last.seasons.length - 1] + 1) {
+            last.seasons.push(r.SeasonID);
+          } else {
+            spans.push({ teamId: r.TeamID, number: r.Number, seasons: [r.SeasonID] });
+          }
+        });
+      });
+      // Sort spans chronologically (by their first season) for a sensible display order
+      spans.sort((a, b) => a.seasons[0] - b.seasons[0]);
 
       setNumbersWorn(spans.map(s => {
         const t = teamInfo.get(s.teamId);
@@ -1355,107 +1396,29 @@ export default function PlayerProfile() {
                   </div>
                 )}
               </div>
+              {numbersWorn.length > 0 && (
+                <div className="mt-3 text-sm font-sans">
+                  <p className="text-xs text-muted-foreground uppercase tracking-wide mb-1.5">Numbers Worn</p>
+                  <div className="flex flex-wrap items-center gap-4">
+                    {numbersWorn.filter(n => n.teamId <= 999).length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] text-muted-foreground uppercase tracking-wide mr-0.5">Club</span>
+                        {numbersWorn.filter(n => n.teamId <= 999).map((n, i) => <NumberCircle key={`c-${n.teamId}-${n.number}-${i}`} n={n} />)}
+                      </div>
+                    )}
+                    {numbersWorn.filter(n => n.teamId > 999).length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="text-[10px] text-muted-foreground uppercase tracking-wide mr-0.5">Int'l</span>
+                        {numbersWorn.filter(n => n.teamId > 999).map((n, i) => <NumberCircle key={`i-${n.teamId}-${n.number}-${i}`} n={n} />)}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
 
-        {numbersWorn.length > 0 && (
-          <div className="mb-6 border border-border rounded overflow-hidden">
-            <div className="bg-table-header px-3 py-2">
-              <h3 className="font-display text-sm font-bold text-table-header-foreground">Numbers Worn</h3>
-            </div>
-            <div className="bg-card p-4 flex flex-wrap gap-4">
-              {numbersWorn.map((n, i) => {
-                const bg = n.primaryColor || "#374151";
-                const textColor = getContrastText(bg);
-                const ring = n.secondaryColor && n.secondaryColor.toLowerCase() !== bg.toLowerCase() ? n.secondaryColor : (isLightColor(bg) ? "#1a1a1a" : "#ffffff");
-                const years = n.seasons.length === 1 ? seasonLabel(n.seasons[0]) : `${seasonLabel(n.seasons[0])} – ${seasonLabel(n.seasons[n.seasons.length - 1])}`;
-                return (
-                  <Link
-                    key={`${n.teamId}-${n.number}-${i}`}
-                    to={`/team/${encodeURIComponent(n.teamName)}`}
-                    className="flex flex-col items-center gap-1.5 group"
-                  >
-                    <div
-                      className="w-14 h-14 rounded-full flex items-center justify-center font-display text-2xl font-bold border-2 shadow-sm group-hover:scale-105 transition-transform"
-                      style={{ backgroundColor: bg, color: textColor, borderColor: ring }}
-                      title={`#${n.number} — ${n.teamName} (${years})`}
-                    >
-                      {n.number}
-                    </div>
-                    <span className="text-[11px] font-sans text-muted-foreground text-center leading-tight group-hover:text-accent max-w-[6.5rem]">
-                      {n.teamName}
-                    </span>
-                    <span className="text-[10px] font-mono text-muted-foreground">{years}</span>
-                  </Link>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {advancedStats.length > 0 && (
-          <div className="mb-6 border border-border rounded overflow-hidden">
-            <div className="bg-table-header px-3 py-2">
-              <h3 className="font-display text-sm font-bold text-table-header-foreground">Advanced Stats (League &amp; Position Adjusted)</h3>
-              <p className="text-[11px] text-table-header-foreground/70 font-sans mt-0.5">100 = league average for that position and season. Requires a minimum of ~60 minutes played.</p>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm font-sans">
-                <thead>
-                  <tr className="bg-secondary">
-                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Season</th>
-                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Team</th>
-                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Comp</th>
-                    <th className="px-3 py-1.5 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Pos</th>
-                    {positionsPlayed.length > 1 ? (
-                      <>
-                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Component 1+</th>
-                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Component 2+</th>
-                        <th className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Combined+</th>
-                      </>
-                    ) : (
-                      (ADV_STAT_COLUMNS[positionsPlayed[0]] || []).map(c => (
-                        <th key={c.key} title={c.title} className="px-3 py-1.5 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground cursor-help">{c.label}</th>
-                      ))
-                    )}
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...advancedStats].sort((a, b) => (b.SeasonID ?? 0) - (a.SeasonID ?? 0)).map((a, i) => {
-                    const matchingStat = stats.find(s => s.SeasonID === a.SeasonID && s.TeamID === a.TeamID && s.LeagueID === a.LeagueID);
-                    const cols = ADV_STAT_COLUMNS[a.Position || ""] || [];
-                    const combinedCol = cols[cols.length - 1];
-                    const componentCols = cols.slice(0, -1);
-                    return (
-                      <tr key={`${a.SeasonID}-${a.TeamID}-${a.LeagueID}-${i}`} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
-                        <td className="px-3 py-1.5 font-mono">{seasonLabel(a.SeasonID)}</td>
-                        <td className="px-3 py-1.5">
-                          {matchingStat?.TeamFullName ? (
-                            <Link to={`/team/${encodeURIComponent(matchingStat.TeamFullName)}`} className="text-accent hover:underline">{matchingStat.TeamFullName}</Link>
-                          ) : "—"}
-                        </td>
-                        <td className="px-3 py-1.5 text-muted-foreground">{abbrevLeague(matchingStat?.LeagueName ?? null)}</td>
-                        <td className="px-3 py-1.5 text-muted-foreground">{a.Position}</td>
-                        {positionsPlayed.length > 1 ? (
-                          <>
-                            <td className={`px-3 py-1.5 text-right font-mono ${advValueClass(componentCols[0] ? (a[componentCols[0].key] as number | null) : null)}`}>{componentCols[0] ? (a[componentCols[0].key] ?? "—") : "—"}</td>
-                            <td className={`px-3 py-1.5 text-right font-mono ${advValueClass(componentCols[1] ? (a[componentCols[1].key] as number | null) : null)}`}>{componentCols[1] ? (a[componentCols[1].key] ?? "—") : "—"}</td>
-                            <td className={`px-3 py-1.5 text-right font-mono ${advValueClass(combinedCol ? (a[combinedCol.key] as number | null) : null)}`}>{combinedCol ? (a[combinedCol.key] ?? "—") : "—"}</td>
-                          </>
-                        ) : (
-                          cols.map(c => (
-                            <td key={c.key} className={`px-3 py-1.5 text-right font-mono ${advValueClass(a[c.key] as number | null)}`}>{a[c.key] ?? "—"}</td>
-                          ))
-                        )}
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
 
         <div className="space-y-6">
           {/* Season-by-season stats */}
@@ -1520,6 +1483,7 @@ export default function PlayerProfile() {
                     {isBeater && <th className={`${thClass} text-right`}>Min/TP</th>}
                     {isBeater && <th className={`${thClass} text-right`}>SA</th>}
                     {isBeater && <th className={`${thClass} text-right`}>Min/SA</th>}
+                    {(isChaser || isSeeker || isKeeper || isBeater) && <th className={`${thClass} text-right`} title="League & position-adjusted rating — 100 = league average that season">Adj Rtg+</th>}
                   </tr>
                 </thead>
                 <tbody>
@@ -1572,6 +1536,17 @@ export default function PlayerProfile() {
                     const beaterAgg = rowIsBeater && aggKey ? beaterShotsAllowedMap.get(aggKey) : undefined;
                     const shotsAllowedVal = beaterAgg ? beaterAgg.totalShotsAllowed : null;
                     const minPerSAVal = rowIsBeater && (shotsAllowedVal || 0) > 0 && mins > 0 ? mins / (shotsAllowedVal || 1) : null;
+
+                    // League & position-adjusted combined rating for this exact season/team/league/position row
+                    const advRow = advancedStats.find(a =>
+                      a.SeasonID === s.SeasonID && a.TeamID === s.TeamID && a.LeagueID === s.LeagueID && a.Position === s.Position
+                    );
+                    const advCombined = advRow ? (
+                      rowIsChaser ? advRow.chaser_rating_plus :
+                      rowIsKeeper ? advRow.goaltending_rating_plus :
+                      rowIsBeater ? advRow.beater_impact_plus :
+                      rowIsSeeker ? advRow.seeker_rating_plus : null
+                    ) : null;
 
                     // Gold shading = this player individually led the league in THIS
                     // stat that season (checked per-column, not once for the whole row);
@@ -1673,6 +1648,11 @@ export default function PlayerProfile() {
                         {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(!!minPerTPBest, !!minPerTPLead) : "text-muted-foreground"}`}>{rowIsBeater ? (minPerTPVal !== null ? minPerTPVal.toFixed(1) : "—") : "—"}</td>}
                         {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? "" : ""}`} title="Chaser shot attempts allowed by the opposing team while these beaters played">{rowIsBeater ? (shotsAllowedVal ?? "—") : "—"}</td>}
                         {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(!!minPerSABest, !!minPerSALead) : "text-muted-foreground"}`} title="Higher is better here — more minutes elapsing per shot allowed means better defense">{rowIsBeater ? (minPerSAVal !== null ? minPerSAVal.toFixed(1) : "—") : "—"}</td>}
+                        {(isChaser || isSeeker || isKeeper || isBeater) && (
+                          <td className={`px-3 py-1.5 text-right font-mono ${advValueClass(advCombined)}`} title="League & position-adjusted rating — 100 = league average that season">
+                            {advCombined ?? "—"}
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -1705,6 +1685,7 @@ export default function PlayerProfile() {
                         {isBeater && <td className={ct}>{careerTotals.minutes > 0 && careerTotals.teammatesProtected > 0 ? (careerTotals.minutes / careerTotals.teammatesProtected).toFixed(1) : "—"}</td>}
                         {isBeater && <td className={ct}>{careerTotals.shotsAllowed > 0 ? careerTotals.shotsAllowed : "—"}</td>}
                         {isBeater && <td className={ct}>{careerTotals.minutes > 0 && careerTotals.shotsAllowed > 0 ? (careerTotals.minutes / careerTotals.shotsAllowed).toFixed(1) : "—"}</td>}
+                        {(isChaser || isSeeker || isKeeper || isBeater) && <td className={ct} title="Adjusted ratings are season-specific and aren't meaningfully averaged across a career">—</td>}
                       </tr>
                     );
                   })()}
@@ -1718,6 +1699,7 @@ export default function PlayerProfile() {
               {isSeeker && <span>Avg Catch = average minutes to catch, over games caught only</span>}
               {isKeeper && <span>SF = Shots Faced, Sv% = Save%</span>}
               {isBeater && <span>BH = Bludgers Hit, TF = Turnovers Forced, TP = Teammates Protected, SA = Shots Allowed (higher Min/SA = better defense)</span>}
+              <span>Adj Rtg+ = league &amp; position-adjusted rating (100 = league average that season)</span>
             </div>
           </div>
 

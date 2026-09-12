@@ -214,7 +214,7 @@ function DraftRoom({
   useEffect(() => {
     if (query.trim().length < 2) { setResults([]); return; }
     const handle = setTimeout(async () => {
-      let q = supabase.from("players").select('"PlayerID","PlayerName","Position"').ilike("PlayerName", `%${query.trim()}%`).limit(15);
+      let q = supabase.from("active_players_detail").select("PlayerID, PlayerName, Position").ilike("PlayerName", `%${query.trim()}%`).limit(15);
       if (posFilter !== "All") q = q.eq("Position", posFilter);
       const { data } = await q;
       setResults((data || []) as any[]);

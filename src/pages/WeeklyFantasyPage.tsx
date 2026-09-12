@@ -7,6 +7,14 @@ import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { useAuth } from "@/hooks/useAuth";
 
 interface Pick { id: string; player_id: number; is_captain: boolean; }
+interface Recommendation {
+  PlayerID: number; PlayerName: string; Position: string; TeamName: string | null;
+  recent_avg_points: number; games_sampled: number;
+  opponent_name: string | null; next_match_date: string | null;
+  matchup_multiplier: number; recommendation_score: number;
+}
+
+const POSITION_CAPS: Record<string, number> = { Keeper: 1, Beater: 2, Chaser: 3, Seeker: 1 };
 
 function mostRecentSaturday(d: Date): Date {
   const s = new Date(d);
@@ -43,6 +51,9 @@ export default function WeeklyFantasyPage() {
   const [leaderboard, setLeaderboard] = useState<{ user_id: string; display_name: string; total: number }[]>([]);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<{ PlayerID: number; PlayerName: string; Position: string }[]>([]);
+  const [recommendations, setRecommendations] = useState<Recommendation[]>([]);
+  const [recPosFilter, setRecPosFilter] = useState<string>("All");
+  const [loadingRecs, setLoadingRecs] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -97,14 +108,30 @@ export default function WeeklyFantasyPage() {
   useEffect(() => {
     if (query.trim().length < 2) { setResults([]); return; }
     const handle = setTimeout(async () => {
-      const { data } = await supabase.from("players").select('"PlayerID","PlayerName","Position"').ilike("PlayerName", `%${query.trim()}%`).limit(10);
+      const { data } = await supabase.from("active_players_detail").select("PlayerID, PlayerName, Position").ilike("PlayerName", `%${query.trim()}%`).limit(10);
       setResults((data || []) as any[]);
     }, 300);
     return () => clearTimeout(handle);
   }, [query]);
 
-  const addPick = async (playerId: number) => {
+  const loadRecommendations = useCallback(async () => {
+    setLoadingRecs(true);
+    const { data, error: err } = await supabase.rpc("recommend_weekly_fantasy_players", {
+      p_position: recPosFilter === "All" ? undefined : recPosFilter,
+      p_limit: 15,
+    });
+    if (!err) setRecommendations((data || []) as Recommendation[]);
+    setLoadingRecs(false);
+  }, [recPosFilter]);
+
+  useEffect(() => { loadRecommendations(); }, [loadRecommendations]);
+
+  const addPick = async (playerId: number, position: string) => {
     if (!user) return;
+    if ((nextPositionCounts[position] ?? 0) >= (POSITION_CAPS[position] ?? 0)) {
+      setError(`You already have the maximum number of ${position}s (${POSITION_CAPS[position]}) for next week.`);
+      return;
+    }
     setBusy(true); setError("");
     const { error: err } = await supabase.from("weekly_fantasy_picks").insert({ user_id: user.id, week_start: nextWeek, player_id: playerId });
     if (err) setError(err.message);
@@ -124,6 +151,15 @@ export default function WeeklyFantasyPage() {
     setBusy(false);
   };
 
+  const nextPositionCounts = useMemo(() => {
+    const counts: Record<string, number> = { Keeper: 0, Beater: 0, Chaser: 0, Seeker: 0 };
+    nextPicks.forEach(p => {
+      const pos = playerNames.get(p.player_id)?.position;
+      if (pos && counts[pos] !== undefined) counts[pos]++;
+    });
+    return counts;
+  }, [nextPicks, playerNames]);
+
   if (!user) return null;
 
   const nextFull = nextPicks.length >= 7;
@@ -134,7 +170,8 @@ export default function WeeklyFantasyPage() {
       <SiteHeader />
       <main className="flex-1 container py-6 pb-20 md:pb-6 max-w-4xl">
         <h1 className="font-display text-3xl font-bold mb-1">Weekly Fantasy</h1>
-        <p className="text-sm text-muted-foreground font-sans mb-6">
+        <Link to="/fantasy" className="text-sm text-accent hover:underline font-sans">← Fantasy Home</Link>
+        <p className="text-sm text-muted-foreground font-sans mb-6 mt-1">
           Pick 7 players and a captain (2× points) each week. Picks lock Friday night; scoring runs Saturday through the following Friday.
         </p>
 
@@ -167,6 +204,13 @@ export default function WeeklyFantasyPage() {
             <span className="text-xs text-table-header-foreground/80 font-sans">Locks {fridayCutoff.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" })} night</span>
           </div>
           <div className="bg-card p-4 space-y-3">
+            <div className="flex gap-2 flex-wrap text-xs font-sans text-muted-foreground">
+              {(["Keeper", "Beater", "Chaser", "Seeker"] as const).map(pos => (
+                <span key={pos} className={`px-2 py-0.5 rounded border ${(nextPositionCounts[pos] ?? 0) >= POSITION_CAPS[pos] ? "border-accent text-accent font-semibold" : "border-border"}`}>
+                  {pos}s {nextPositionCounts[pos] ?? 0}/{POSITION_CAPS[pos]}
+                </span>
+              ))}
+            </div>
             <ul className="text-sm font-sans space-y-1">
               {nextPicks.map(p => (
                 <li key={p.id} className="flex justify-between items-center">
@@ -184,16 +228,71 @@ export default function WeeklyFantasyPage() {
               <div>
                 <input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search players to add…" className="w-full border border-border rounded px-3 py-2 text-sm bg-background font-sans" />
                 <div className="mt-1 max-h-56 overflow-y-auto divide-y divide-border/60">
-                  {results.filter(r => !nextPicks.some(p => p.player_id === r.PlayerID)).map(r => (
-                    <button key={r.PlayerID} onClick={() => addPick(r.PlayerID)} disabled={busy} className="w-full text-left px-2 py-1.5 text-sm font-sans hover:bg-highlight/30 flex justify-between">
-                      <span>{r.PlayerName}</span>
-                      <span className="text-xs text-muted-foreground">{r.Position}</span>
-                    </button>
-                  ))}
+                  {results.filter(r => !nextPicks.some(p => p.player_id === r.PlayerID)).map(r => {
+                    const capped = (nextPositionCounts[r.Position] ?? 0) >= (POSITION_CAPS[r.Position] ?? 0);
+                    return (
+                      <button key={r.PlayerID} onClick={() => addPick(r.PlayerID, r.Position)} disabled={busy || capped} className="w-full text-left px-2 py-1.5 text-sm font-sans hover:bg-highlight/30 flex justify-between disabled:opacity-40 disabled:cursor-not-allowed">
+                        <span>{r.PlayerName}</span>
+                        <span className="text-xs text-muted-foreground">{r.Position}{capped ? ` (full)` : ""}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             )}
             {nextFull && !nextHasCaptain && <p className="text-xs text-muted-foreground font-sans italic">Don't forget to pick a captain!</p>}
+          </div>
+        </section>
+
+        <section className="border border-border rounded overflow-hidden mb-6">
+          <div className="bg-table-header px-4 py-2 flex justify-between items-center flex-wrap gap-2">
+            <h2 className="font-display text-sm font-bold text-table-header-foreground">Recommended Picks</h2>
+            <div className="flex gap-1 flex-wrap">
+              {["All", "Keeper", "Beater", "Chaser", "Seeker"].map(p => (
+                <button key={p} onClick={() => setRecPosFilter(p)} className={`text-xs px-2 py-0.5 rounded font-sans ${recPosFilter === p ? "bg-accent text-accent-foreground" : "text-table-header-foreground/70 hover:text-table-header-foreground"}`}>
+                  {p}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="bg-card p-4">
+            <p className="text-xs text-muted-foreground font-sans mb-3">
+              Based on recent scoring form (last 5 matches) and upcoming opponent strength, using the same Elo ratings as the rest of the site. Retired players are never included.
+            </p>
+            {loadingRecs ? (
+              <p className="text-sm text-muted-foreground font-sans">Loading…</p>
+            ) : (
+              <div className="divide-y divide-border/60">
+                {recommendations.filter(r => !nextPicks.some(p => p.player_id === r.PlayerID)).map(r => {
+                  const capped = (nextPositionCounts[r.Position] ?? 0) >= (POSITION_CAPS[r.Position] ?? 0);
+                  return (
+                    <div key={r.PlayerID} className="py-2 flex items-center justify-between gap-3 text-sm font-sans">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                          <Link to={`/player/${r.PlayerID}`} className="font-semibold text-accent hover:underline truncate">{r.PlayerName}</Link>
+                          <span className="text-xs text-muted-foreground shrink-0">{r.Position} · {r.TeamName || "—"}</span>
+                        </div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          {r.recent_avg_points.toFixed(1)} pts/match (last {r.games_sampled})
+                          {r.opponent_name && (
+                            <> · next: vs {r.opponent_name} ({r.matchup_multiplier > 1 ? "favored" : r.matchup_multiplier < 1 ? "underdog" : "even"})</>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="font-mono font-semibold text-accent">{r.recommendation_score.toFixed(0)}</span>
+                        {!nextFull && (
+                          <button onClick={() => addPick(r.PlayerID, r.Position)} disabled={busy || capped} className="text-xs border border-border rounded px-2 py-1 hover:bg-secondary disabled:opacity-40 disabled:cursor-not-allowed">
+                            Add
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+                {recommendations.length === 0 && <p className="text-sm text-muted-foreground font-sans italic">No recommendations available right now.</p>}
+              </div>
+            )}
           </div>
         </section>
 

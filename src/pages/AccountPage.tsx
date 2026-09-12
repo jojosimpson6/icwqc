@@ -41,6 +41,11 @@ export default function AccountPage() {
 
   const teamMap = useMemo(() => new Map(teams.map(t => [t.TeamID, t.FullName || `Team #${t.TeamID}`])), [teams]);
   const playerMap = useMemo(() => new Map(players.map(p => [p.PlayerID, p.PlayerName || `Player #${p.PlayerID}`])), [players]);
+  // TeamID > 999 identifies national/international sides (same convention
+  // used sitewide) — club and international teams are inherently different
+  // things and shouldn't be mixed in one flat list.
+  const clubTeams = useMemo(() => teams.filter(t => t.TeamID <= 999), [teams]);
+  const intlTeams = useMemo(() => teams.filter(t => t.TeamID > 999), [teams]);
 
   const favTeams = favorites.filter(f => f.entity_type === "team");
   const favPlayers = favorites.filter(f => f.entity_type === "player");
@@ -99,7 +104,12 @@ export default function AccountPage() {
                   className="w-full border border-border rounded px-3 py-2 text-sm bg-background font-sans"
                 >
                   <option value="">None</option>
-                  {teams.map(t => <option key={t.TeamID} value={t.TeamID}>{t.FullName}</option>)}
+                  <optgroup label="Club Teams">
+                    {clubTeams.map(t => <option key={t.TeamID} value={t.TeamID}>{t.FullName}</option>)}
+                  </optgroup>
+                  <optgroup label="International Teams">
+                    {intlTeams.map(t => <option key={t.TeamID} value={t.TeamID}>{t.FullName}</option>)}
+                  </optgroup>
                 </select>
                 <p className="text-[11px] text-muted-foreground font-sans mt-1">
                   Your primary team is pinned to the front of the latest scores ticker.
