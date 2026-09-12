@@ -1,9 +1,9 @@
 import { Link, useLocation } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { GlobalSearch } from "@/components/GlobalSearch";
 import { useDarkMode } from "@/hooks/useDarkMode";
-import { Moon, Sun, Menu, X, User as UserIcon } from "lucide-react";
+import { Moon, Sun, Menu, X, User as UserIcon, ChevronDown } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 
 interface League {
@@ -15,9 +15,19 @@ interface League {
 export function SiteHeader() {
   const [leagues, setLeagues] = useState<League[]>([]);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
   const { dark, toggle } = useDarkMode();
   const { pathname } = useLocation();
   const { user, profile } = useAuth();
+
+  useEffect(() => {
+    function handleClick(e: MouseEvent) {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) setMoreOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
 
   useEffect(() => {
     // Shared cache key with every other widget/page that needs the leagues
@@ -43,14 +53,18 @@ export function SiteHeader() {
   const navLinks = [
     { to: "/players", label: "Players" },
     { to: "/teams", label: "Teams" },
-    { to: "/managers", label: "Managers" },
     { to: "/schedule", label: "Schedule" },
-    { to: "/leagues", label: "Leagues" },
     { to: "/leaders", label: "Leaders" },
+    { to: "/fantasy", label: "Fantasy" },
+  ];
+  const moreLinks = [
+    { to: "/managers", label: "Managers" },
+    { to: "/leagues", label: "Leagues" },
     { to: "/nations", label: "Nations" },
     { to: "/compare", label: "Compare" },
-    { to: "/elo",     label: "Elo" },
+    { to: "/elo", label: "Elo" },
   ];
+  const allNavLinks = [...navLinks, ...moreLinks];
 
   return (
     <>
@@ -79,6 +93,28 @@ export function SiteHeader() {
                   {label}
                 </Link>
               ))}
+              <div className="relative" ref={moreRef}>
+                <button
+                  onClick={() => setMoreOpen(o => !o)}
+                  className={`flex items-center gap-0.5 opacity-80 hover:opacity-100 transition-opacity ${moreLinks.some(l => pathname.startsWith(l.to)) ? "opacity-100 font-semibold" : ""}`}
+                >
+                  More <ChevronDown size={14} className={`transition-transform ${moreOpen ? "rotate-180" : ""}`} />
+                </button>
+                {moreOpen && (
+                  <div className="absolute right-0 top-full mt-2 bg-popover text-popover-foreground border border-border rounded shadow-lg py-1 min-w-[140px] z-50">
+                    {moreLinks.map(({ to, label }) => (
+                      <Link
+                        key={to}
+                        to={to}
+                        onClick={() => setMoreOpen(false)}
+                        className={`block px-3 py-1.5 text-sm hover:bg-secondary transition-colors ${pathname.startsWith(to) ? "font-semibold text-accent" : ""}`}
+                      >
+                        {label}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </div>
               <GlobalSearch />
               <Link
                 to={user ? "/account" : "/auth"}
@@ -124,7 +160,7 @@ export function SiteHeader() {
         {mobileMenuOpen && (
           <div className="md:hidden bg-primary border-t border-primary-foreground/20 shadow-lg">
             <div className="container py-2 grid grid-cols-3 gap-1">
-              {navLinks.map(({ to, label }) => (
+              {allNavLinks.map(({ to, label }) => (
                 <Link
                   key={to}
                   to={to}
@@ -139,14 +175,6 @@ export function SiteHeader() {
               >
                 {user ? "Account" : "Sign in"}
               </Link>
-              {user && (
-                <Link
-                  to="/fantasy"
-                  className="text-sm font-sans text-primary-foreground py-2 px-2 rounded hover:bg-primary-foreground/10 transition-colors text-center opacity-80"
-                >
-                  Fantasy
-                </Link>
-              )}
             </div>
             {/* League links in mobile menu */}
             <div className="border-t border-primary-foreground/20 px-3 py-2 space-y-1">

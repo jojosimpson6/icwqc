@@ -13,8 +13,7 @@ const COLORS = [
 interface EloNewPoint {
   FullName: string;
   Matchday: string;
-  elo_rating: number;  // mapped from PostElo
-  current_game_number: number;
+  elo_rating: number;
 }
 
 interface LeagueOption {
@@ -36,6 +35,12 @@ export function EloChart({ scope = "club" }: { scope?: "club" | "intl" }) {
   const [selectedLeague, setSelectedLeague] = useState<number | null>(null);
   const [eloData, setEloData] = useState<EloNewPoint[]>([]);
   const [teamLeagueMap, setTeamLeagueMap] = useState<Map<string, number>>(new Map());
+  // The full history can span decades; defaulting to the last ~2 years and
+  // widening on demand (instead of always fetching everything) is what
+  // actually keeps this page fast — a narrower default *label* alone
+  // wouldn't help if the fetch itself still pulled all-time data.
+  const [loadedFrom, setLoadedFrom] = useState<string | null>(null);
+  const [trueMinDate, setTrueMinDate] = useState<string>("");
   const [startDate, setStartDate] = useState<string>("");
   const [endDate, setEndDate] = useState<string>("");
   const [availableDateRange, setAvailableDateRange] = useState<{ min: string; max: string }>({ min: "", max: "" });
@@ -54,11 +59,22 @@ export function EloChart({ scope = "club" }: { scope?: "club" | "intl" }) {
   }, []);
 
   useEffect(() => {
-    Promise.all([
-      supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier").order("LeagueTier").order("LeagueName"),
-      fetchAllRows("elo_history", { select: "TeamID,PostElo,Matchday", order: { column: "Matchday", ascending: true } }),
-      supabase.from("teams").select("TeamID, FullName, LeagueID"),
-    ]).then(([{ data: leagueData }, eData, { data: teamsData }]) => {
+    (async () => {
+      // Find the true earliest date once (cheap: one column, one row) so the
+      // date picker can offer the full range even before it's loaded.
+      const { data: earliestRow } = await supabase.from("elo_history").select("Matchday").order("Matchday", { ascending: true }).limit(1);
+      const trueMin = earliestRow?.[0]?.Matchday || "";
+      setTrueMinDate(trueMin);
+
+      const twoYearsAgo = new Date();
+      twoYearsAgo.setFullYear(twoYearsAgo.getFullYear() - 2);
+      const defaultFrom = trueMin && trueMin > twoYearsAgo.toISOString().slice(0, 10) ? trueMin : twoYearsAgo.toISOString().slice(0, 10);
+
+      const [{ data: leagueData }, eData, { data: teamsData }] = await Promise.all([
+        supabase.from("leagues").select("LeagueID, LeagueName, LeagueTier").order("LeagueTier").order("LeagueName"),
+        fetchAllRows("elo_history", { select: "TeamID,PostElo,Matchday", filters: [{ method: "gte", args: ["Matchday", defaultFrom] }], order: { column: "Matchday", ascending: true } }),
+        supabase.from("teams").select("TeamID, FullName, LeagueID"),
+      ]);
       if (leagueData) setLeagues(leagueData as LeagueOption[]);
 
       const tlm = new Map<string, number>();
@@ -69,18 +85,41 @@ export function EloChart({ scope = "club" }: { scope?: "club" | "intl" }) {
       });
       setTeamLeagueMap(tlm);
 
-      // Convert elo_history rows (TeamID-based) to EloNewPoint (FullName-based)
       const elo: EloNewPoint[] = (eData || [])
         .filter((d: any) => d.TeamID && d.Matchday && d.PostElo != null)
-        .map((d: any, i: number) => ({
+        .map((d: any) => ({
           FullName: teamIdToName.get(d.TeamID) || `Team#${d.TeamID}`,
           Matchday: d.Matchday,
           elo_rating: d.PostElo,
-          current_game_number: i,
         }));
       setEloData(elo);
-    });
+      setLoadedFrom(defaultFrom);
+      setStartDate(defaultFrom);
+    })();
   }, []);
+
+  // If the user picks a start date earlier than what's currently loaded,
+  // widen the fetch instead of silently clipping to the loaded window.
+  useEffect(() => {
+    if (!loadedFrom || !startDate || startDate >= loadedFrom) return;
+    fetchAllRows<{ TeamID: number; PostElo: number; Matchday: string }>("elo_history", {
+      select: "TeamID,PostElo,Matchday",
+      filters: [{ method: "gte", args: ["Matchday", startDate] }, { method: "lt", args: ["Matchday", loadedFrom] }],
+      order: { column: "Matchday", ascending: true },
+    }).then(extra => {
+      if (!extra || extra.length === 0) { setLoadedFrom(startDate); return; }
+      // Need FullName lookups again for the newly-fetched rows
+      supabase.from("teams").select("TeamID, FullName").then(({ data: teamsData }) => {
+        const teamIdToName = new Map<number, string>();
+        (teamsData || []).forEach((t: any) => { if (t.TeamID && t.FullName) teamIdToName.set(t.TeamID, t.FullName); });
+        const newPoints: EloNewPoint[] = extra
+          .filter(d => d.TeamID && d.Matchday && d.PostElo != null)
+          .map(d => ({ FullName: teamIdToName.get(d.TeamID) || `Team#${d.TeamID}`, Matchday: d.Matchday, elo_rating: d.PostElo }));
+        setEloData(prev => [...newPoints, ...prev]);
+        setLoadedFrom(startDate);
+      });
+    });
+  }, [startDate, loadedFrom]);
 
   // Only offer leagues/teams matching the page's club-vs-international scope
   // (a domestic league's roster is always club, a tier-0 competition's is
@@ -118,10 +157,11 @@ export function EloChart({ scope = "club" }: { scope?: "club" | "intl" }) {
     const sorted = [...gameMap.entries()].sort((a, b) => a[0].localeCompare(b[0]));
 
     if (sorted.length > 0) {
-      const minD = sorted[0][0];
       const maxD = sorted[sorted.length - 1][0];
-      setAvailableDateRange({ min: minD, max: maxD });
-      if (!startDate) setStartDate(minD);
+      // min comes from the true full-history bound (fetched separately),
+      // not just whatever's currently loaded, so the picker always shows
+      // the real earliest option even before that range is fetched.
+      setAvailableDateRange({ min: trueMinDate || sorted[0][0], max: maxD });
       if (!endDate) setEndDate(maxD);
     }
 
@@ -149,7 +189,7 @@ export function EloChart({ scope = "club" }: { scope?: "club" | "intl" }) {
     });
 
     setChartData(filled);
-  }, [eloData, selectedLeague, teamLeagueMap, startDate, endDate, scope]);
+  }, [eloData, selectedLeague, teamLeagueMap, startDate, endDate, scope, trueMinDate]);
 
   // Reset the league filter if it no longer matches the active scope
   useEffect(() => {
