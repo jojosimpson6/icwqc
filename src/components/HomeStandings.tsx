@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { Link } from "react-router-dom";
 import { fetchAllRows } from "@/lib/fetchAll";
 import { useSortableTable } from "@/hooks/useSortableTable";
@@ -25,7 +25,7 @@ const seasonLabel = (id: number) => `${id - 1}–${String(id).slice(-2)}`;
 export function HomeStandings() {
   const [standings, setStandings] = useState<StandingRow[]>([]);
   const [leagues, setLeagues] = useState<LeagueOption[]>([]);
-  const [selectedLeague, setSelectedLeague] = useState<number>(1);
+  const [selectedLeague, setSelectedLeague] = useState<number | null>(null);
   const [selectedSeason, setSelectedSeason] = useState<number | null>(null);
   const [availableSeasons, setAvailableSeasons] = useState<number[]>([]);
   const [loadingStandings, setLoadingStandings] = useState(true);
@@ -44,8 +44,14 @@ export function HomeStandings() {
     });
   }, []);
 
-  // Fetch standings for selected league only — fast, targeted query
+  // Fetch standings for selected league only — fast, targeted query.
+  // Guards against out-of-order responses: if the league changes again while
+  // a request for the previous one is still in flight, that stale response
+  // must never overwrite what's now selected (this caused the standings
+  // widget to occasionally show one league's table under another's label).
+  const loadSeqRef = useRef(0);
   const loadStandings = useCallback(async (lid: number) => {
+    const seq = ++loadSeqRef.current;
     setLoadingStandings(true);
     const data = await fetchAllRows<StandingRow>("standings", {
       select: "*",
@@ -53,6 +59,7 @@ export function HomeStandings() {
       order: { column: "totalpoints", ascending: false },
       cache: false, // standings change as soon as a match is released — don't serve a stale snapshot
     });
+    if (seq !== loadSeqRef.current) return; // a newer request has since started — discard this one
     setStandings(data);
     const seasons = [...new Set(data.map(s => s.SeasonID).filter(Boolean))].sort((a, b) => (b || 0) - (a || 0)) as number[];
     setAvailableSeasons(seasons);

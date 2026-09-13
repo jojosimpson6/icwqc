@@ -7,6 +7,12 @@ import { MobileBottomNav } from "@/components/MobileBottomNav";
 import { useAuth } from "@/hooks/useAuth";
 
 interface Pick { id: string; player_id: number; is_captain: boolean; }
+interface Breakdown {
+  points: number; matches: number; teamName: string | null; oppNames: string[];
+  goals: number; shotAtt: number; passComp: number; passIncomp: number;
+  saves: number; conceded: number; catches: number; spotted: number; catchAtt: number;
+  bludgers: number; turnovers: number; protects: number;
+}
 interface Recommendation {
   PlayerID: number; PlayerName: string; Position: string; TeamName: string | null;
   recent_avg_points: number; games_sampled: number;
@@ -48,6 +54,7 @@ export default function WeeklyFantasyPage() {
   const [nextPicks, setNextPicks] = useState<Pick[]>([]);
   const [playerNames, setPlayerNames] = useState<Map<number, { name: string; position: string }>>(new Map());
   const [currentScore, setCurrentScore] = useState<number | null>(null);
+  const [currentBreakdown, setCurrentBreakdown] = useState<Map<number, Breakdown>>(new Map());
   const [leaderboard, setLeaderboard] = useState<{ user_id: string; display_name: string; total: number }[]>([]);
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<{ PlayerID: number; PlayerName: string; Position: string }[]>([]);
@@ -77,14 +84,62 @@ export default function WeeklyFantasyPage() {
       setPlayerNames(new Map((pdata || []).map((p: any) => [p.PlayerID, { name: p.PlayerName, position: p.Position }])));
     }
 
-    // Live/partial score for the in-progress week
+    // Live/partial score + per-player breakdown for the in-progress week —
+    // computed from the same match_player_stats rows the scoring function
+    // uses, so the breakdown always matches the point total exactly.
     if (cur && cur.length > 0) {
-      const totals = await Promise.all(cur.map(async (p: any) => {
-        const { data } = await supabase.rpc("compute_weekly_fantasy_points", { p_player_id: p.player_id, p_week_start: currentWeek });
-        return (data || 0) * (p.is_captain ? 2 : 1);
-      }));
-      setCurrentScore(totals.reduce((a, b) => a + b, 0));
+      const playerIds = cur.map((p: any) => p.player_id);
+      const weekEnd = fmt(addDays(new Date(currentWeek + "T00:00:00"), 6));
+      const { data: matchRows } = await supabase
+        .from("match_player_stats")
+        .select('"PlayerID","TeamID","OppTeamID","Goals","ShotAtt","PassAtt","PassComp","KeeperShotsParried","KeeperShotsConceded","SnitchCaught","SnitchSpotted","CatchAttempts","BludgersHit","TurnoversForced","TeammatesProtected"')
+        .in("PlayerID", playerIds)
+        .gte("Matchday", currentWeek)
+        .lte("Matchday", weekEnd);
+
+      const teamIds = [...new Set((matchRows || []).flatMap((r: any) => [r.TeamID, r.OppTeamID]).filter(Boolean))];
+      const { data: teamRows } = teamIds.length > 0
+        ? await supabase.from("teams").select("TeamID, FullName").in("TeamID", teamIds)
+        : { data: [] as any[] };
+      const teamNameMap = new Map((teamRows || []).map((t: any) => [t.TeamID, t.FullName]));
+
+      const breakdown = new Map<number, Breakdown>();
+      (matchRows || []).forEach((r: any) => {
+        const b = breakdown.get(r.PlayerID) || {
+          points: 0, matches: 0, teamName: teamNameMap.get(r.TeamID) || null, oppNames: [],
+          goals: 0, shotAtt: 0, passComp: 0, passIncomp: 0, saves: 0, conceded: 0,
+          catches: 0, spotted: 0, catchAtt: 0, bludgers: 0, turnovers: 0, protects: 0,
+        };
+        b.matches += 1;
+        if (r.OppTeamID) b.oppNames.push(teamNameMap.get(r.OppTeamID) || `Team #${r.OppTeamID}`);
+        b.goals += r.Goals || 0;
+        b.shotAtt += r.ShotAtt || 0;
+        b.passComp += r.PassComp || 0;
+        b.passIncomp += (r.PassAtt || 0) - (r.PassComp || 0);
+        b.saves += r.KeeperShotsParried || 0;
+        b.conceded += r.KeeperShotsConceded || 0;
+        b.catches += r.SnitchCaught ? 1 : 0;
+        b.spotted += r.SnitchSpotted || 0;
+        b.catchAtt += r.CatchAttempts || 0;
+        b.bludgers += r.BludgersHit || 0;
+        b.turnovers += r.TurnoversForced || 0;
+        b.protects += r.TeammatesProtected || 0;
+        breakdown.set(r.PlayerID, b);
+      });
+      breakdown.forEach(b => {
+        b.points = 2 * b.matches + b.goals * 10 + b.shotAtt * 1 + b.passComp * 1 - b.passIncomp * 1
+          + b.saves * 4 - b.conceded * 2 + b.catches * 30 + b.spotted * 3 + b.catchAtt * 1
+          + b.bludgers * 3 + b.turnovers * 4 + b.protects * 2;
+      });
+      setCurrentBreakdown(breakdown);
+      const total = cur.reduce((sum: number, p: any) => {
+        const b = breakdown.get(p.player_id);
+        const pts = b ? b.points : 0;
+        return sum + pts * (p.is_captain ? 2 : 1);
+      }, 0);
+      setCurrentScore(total);
     } else {
+      setCurrentBreakdown(new Map());
       setCurrentScore(null);
     }
 
@@ -182,18 +237,66 @@ export default function WeeklyFantasyPage() {
             <h2 className="font-display text-sm font-bold text-table-header-foreground">This Week ({displayDate(currentWeek)} – {displayDate(fmt(addDays(new Date(currentWeek + "T00:00:00"), 6)))})</h2>
             {currentScore != null && <span className="text-table-header-foreground font-mono text-sm">{currentScore.toFixed(0)} pts (live)</span>}
           </div>
-          <div className="bg-card p-4">
+          <div className="bg-card p-0">
             {currentPicks.length === 0 ? (
-              <p className="text-sm text-muted-foreground font-sans italic">No picks were locked in for this week.</p>
+              <p className="text-sm text-muted-foreground font-sans italic p-4">No picks were locked in for this week.</p>
             ) : (
-              <ul className="text-sm font-sans space-y-1">
-                {currentPicks.map(p => (
-                  <li key={p.id} className="flex justify-between">
-                    <span>{playerNames.get(p.player_id)?.name || p.player_id} {p.is_captain && <span className="text-xs text-accent font-bold ml-1">(C)</span>}</span>
-                    <span className="text-xs text-muted-foreground">{playerNames.get(p.player_id)?.position}</span>
-                  </li>
-                ))}
-              </ul>
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm font-sans">
+                  <thead>
+                    <tr className="bg-secondary text-xs uppercase text-muted-foreground">
+                      <th className="px-3 py-1.5 text-left">Player</th>
+                      <th className="px-3 py-1.5 text-left">Pos</th>
+                      <th className="px-3 py-1.5 text-left">Opponent(s)</th>
+                      <th className="px-3 py-1.5 text-right">Key Stats</th>
+                      <th className="px-3 py-1.5 text-right">Pts</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {currentPicks.map((p, i) => {
+                      const b = currentBreakdown.get(p.player_id);
+                      const pos = playerNames.get(p.player_id)?.position;
+                      const statBits: string[] = [];
+                      if (b) {
+                        if (b.goals) statBits.push(`${b.goals} G`);
+                        if (b.catches) statBits.push(`${b.catches} catch`);
+                        if (b.saves) statBits.push(`${b.saves} SV`);
+                        if (b.conceded) statBits.push(`${b.conceded} conc`);
+                        if (b.bludgers) statBits.push(`${b.bludgers} BH`);
+                        if (b.turnovers) statBits.push(`${b.turnovers} TF`);
+                        if (b.protects) statBits.push(`${b.protects} TP`);
+                        if (b.spotted) statBits.push(`${b.spotted} spot`);
+                      }
+                      const rawPts = b?.points ?? 0;
+                      const finalPts = rawPts * (p.is_captain ? 2 : 1);
+                      return (
+                        <tr key={p.id} className={`border-t border-border ${i % 2 === 1 ? "bg-table-stripe" : "bg-card"}`}>
+                          <td className="px-3 py-2">
+                            <Link to={`/player/${p.player_id}`} className="font-semibold text-accent hover:underline">{playerNames.get(p.player_id)?.name || p.player_id}</Link>
+                            {p.is_captain && <span className="text-xs text-accent font-bold ml-1" title="Captain — points doubled">(C)</span>}
+                          </td>
+                          <td className="px-3 py-2 text-xs text-muted-foreground">{pos}</td>
+                          <td className="px-3 py-2 text-xs text-muted-foreground">
+                            {!b || b.matches === 0 ? <span className="italic">no match yet</span> : b.oppNames.join(", ") || "—"}
+                          </td>
+                          <td className="px-3 py-2 text-right text-xs text-muted-foreground">{statBits.length > 0 ? statBits.join(", ") : (b && b.matches > 0 ? "—" : "")}</td>
+                          <td className="px-3 py-2 text-right font-mono font-semibold">
+                            {b && b.matches > 0 ? (
+                              p.is_captain ? <span title={`${rawPts.toFixed(0)} × 2 (captain)`}>{finalPts.toFixed(0)}</span> : finalPts.toFixed(0)
+                            ) : "—"}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot>
+                    <tr className="border-t-2 border-border font-semibold">
+                      <td colSpan={4} className="px-3 py-2 text-right">Total</td>
+                      <td className="px-3 py-2 text-right font-mono">{currentScore != null ? currentScore.toFixed(0) : "—"}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
             )}
           </div>
         </section>

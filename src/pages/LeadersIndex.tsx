@@ -30,6 +30,9 @@ interface SeasonRow extends Omit<CareerRow, "LatestSeason"> {
   TeamID?: number | null;
   LeagueID?: number | null;
   advPlus?: number | null;
+  advC1?: number | null;
+  advC2?: number | null;
+  advC3?: number | null;
 }
 
 interface LeagueInfo {
@@ -45,7 +48,9 @@ type StatCat =
   | "GSC" | "GSC_GP" | "MIN_GSC"
   | "KSF" | "KS" | "SV_PCT" | "KS_GP" | "PASS_PCT_K"
   | "BH" | "BH_GP" | "TF" | "TF_GP" | "TP" | "TP_GP"
-  | "ADJ_C" | "ADJ_K" | "ADJ_B" | "ADJ_S";
+  | "ADJ_C" | "ADJ_K" | "ADJ_B" | "ADJ_S"
+  | "ADJ_C_SCORE" | "ADJ_C_ACC" | "ADJ_K_SV" | "ADJ_K_DIST"
+  | "ADJ_B_OFF" | "ADJ_B_DEF" | "ADJ_B_PROT" | "ADJ_S_EFF" | "ADJ_S_FREQ";
 
 type RegType = "career" | "active" | "season" | "progressive" | "yearly" | "yby";
 
@@ -60,16 +65,22 @@ const STATS: {
   { key: "PASS_PCT_C", label: "Pass % (Chaser)",           abbr: "PASS%", higher: true,  minGP: 10, requirePos: "Chaser" },
   { key: "MIN_G",      label: "Minutes per Goal",          abbr: "MIN/G", higher: false, minGP: 10, requirePos: "Chaser" },
   { key: "ADJ_C",      label: "Chaser Rating+ (adj.)",     abbr: "RTG+",  higher: true,  requirePos: "Chaser", yearlyOnly: true },
+  { key: "ADJ_C_SCORE",label: "Scoring+ (adj.)",           abbr: "SCR+",  higher: true,  requirePos: "Chaser", yearlyOnly: true },
+  { key: "ADJ_C_ACC",  label: "Accuracy+ (adj.)",          abbr: "ACC+",  higher: true,  requirePos: "Chaser", yearlyOnly: true },
   { key: "GSC",        label: "Snitch Catches",            abbr: "GSC",   higher: true,  requirePos: "Seeker" },
   { key: "GSC_GP",     label: "Snitch Catches per Game",   abbr: "GSC/GP",higher: true,  minGP: 10, requirePos: "Seeker" },
   { key: "MIN_GSC",    label: "Minutes per Snitch",        abbr: "MIN/GSC",higher: false,minGP: 10, requirePos: "Seeker" },
   { key: "ADJ_S",      label: "Seeker Rating+ (adj.)",     abbr: "RTG+",  higher: true,  requirePos: "Seeker", yearlyOnly: true },
+  { key: "ADJ_S_EFF",  label: "Catch Efficiency+ (adj.)",  abbr: "EFF+",  higher: true,  requirePos: "Seeker", yearlyOnly: true },
+  { key: "ADJ_S_FREQ", label: "Catch Frequency+ (adj.)",   abbr: "FRQ+",  higher: true,  requirePos: "Seeker", yearlyOnly: true },
   { key: "KSF",        label: "Shots Faced",               abbr: "SF",    higher: true,  requirePos: "Keeper" },
   { key: "KS",         label: "Saves",                     abbr: "SV",    higher: true,  requirePos: "Keeper" },
   { key: "SV_PCT",     label: "Save %",                    abbr: "SV%",   higher: true,  minGP: 10, requirePos: "Keeper" },
   { key: "KS_GP",      label: "Saves per Game",            abbr: "SV/GP", higher: true,  minGP: 10, requirePos: "Keeper" },
   { key: "PASS_PCT_K", label: "Pass % (Keeper)",           abbr: "KP%",   higher: true,  minGP: 10, requirePos: "Keeper" },
   { key: "ADJ_K",      label: "Keeper Rating+ (adj.)",     abbr: "RTG+",  higher: true,  requirePos: "Keeper", yearlyOnly: true },
+  { key: "ADJ_K_SV",   label: "Save%+ (adj.)",             abbr: "SV%+",  higher: true,  requirePos: "Keeper", yearlyOnly: true },
+  { key: "ADJ_K_DIST", label: "Distribution+ (adj.)",      abbr: "DST+",  higher: true,  requirePos: "Keeper", yearlyOnly: true },
   { key: "BH",         label: "Bludgers Hit",              abbr: "BH",    higher: true,  requirePos: "Beater" },
   { key: "BH_GP",      label: "Bludgers Hit per Game",     abbr: "BH/GP", higher: true,  minGP: 10, requirePos: "Beater" },
   { key: "TF",         label: "Turnovers Forced",          abbr: "TF",    higher: true,  requirePos: "Beater" },
@@ -77,6 +88,9 @@ const STATS: {
   { key: "TP",         label: "Teammates Protected",       abbr: "TP",    higher: true,  requirePos: "Beater" },
   { key: "TP_GP",      label: "Teammates Protected / Game",abbr: "TP/GP", higher: true,  minGP: 10, requirePos: "Beater" },
   { key: "ADJ_B",      label: "Beater Rating+ (adj.)",     abbr: "RTG+",  higher: true,  requirePos: "Beater", yearlyOnly: true },
+  { key: "ADJ_B_OFF",  label: "Offense+ (adj.)",           abbr: "OFF+",  higher: true,  requirePos: "Beater", yearlyOnly: true },
+  { key: "ADJ_B_DEF",  label: "Defense+ (adj.)",           abbr: "DEF+",  higher: true,  requirePos: "Beater", yearlyOnly: true },
+  { key: "ADJ_B_PROT", label: "Protection+ (adj.)",        abbr: "PRT+",  higher: true,  requirePos: "Beater", yearlyOnly: true },
 ];
 
 const REGS: { key: RegType; label: string }[] = [
@@ -126,6 +140,12 @@ function val(row: any, cat: StatCat): number | null {
     case "TP_GP":    return g > 0 && tp > 0 ? tp / g : null;
     case "ADJ_C": case "ADJ_K": case "ADJ_B": case "ADJ_S":
       return typeof row.advPlus === "number" ? row.advPlus : null;
+    case "ADJ_C_SCORE": case "ADJ_K_SV": case "ADJ_B_OFF": case "ADJ_S_EFF":
+      return typeof row.advC1 === "number" ? row.advC1 : null;
+    case "ADJ_C_ACC": case "ADJ_K_DIST": case "ADJ_B_DEF": case "ADJ_S_FREQ":
+      return typeof row.advC2 === "number" ? row.advC2 : null;
+    case "ADJ_B_PROT":
+      return typeof row.advC3 === "number" ? row.advC3 : null;
   }
 }
 
@@ -431,7 +451,9 @@ export default function LeadersIndex() {
       const all: any[] = [];
       let from = 0;
       while (true) {
-        let q = supabase.from("player_advanced_stats").select("PlayerID,TeamID,SeasonID,LeagueID,Position,chaser_rating_plus,goaltending_rating_plus,beater_impact_plus,seeker_rating_plus").range(from, from + PAGE - 1);
+        let q = supabase.from("player_advanced_stats")
+          .select("PlayerID,TeamID,SeasonID,LeagueID,Position,scoring_rate_plus,shot_accuracy_plus,chaser_rating_plus,save_pct_plus,keeper_passing_plus,goaltending_rating_plus,offense_rate_plus,defense_rate_plus,protection_rate_plus,beater_impact_plus,catch_efficiency_plus,catch_frequency_plus,seeker_rating_plus")
+          .range(from, from + PAGE - 1);
         if (statInfoForLoad.requirePos) q = q.eq("Position", statInfoForLoad.requirePos);
         const { data, error } = await q;
         if (error) { console.error("Advanced stats load error:", error); break; }
@@ -440,14 +462,18 @@ export default function LeadersIndex() {
         if (data.length < PAGE) break;
         from += PAGE;
       }
-      const advMap = new Map<string, number | null>();
+      const advMap = new Map<string, { combined: number | null; c1: number | null; c2: number | null; c3: number | null }>();
       all.forEach((r: any) => {
-        const combined = r.chaser_rating_plus ?? r.goaltending_rating_plus ?? r.beater_impact_plus ?? r.seeker_rating_plus;
-        advMap.set(`${r.PlayerID}|${r.TeamID}|${r.SeasonID}|${r.LeagueID}`, combined);
+        const combined = r.chaser_rating_plus ?? r.goaltending_rating_plus ?? r.beater_impact_plus ?? r.seeker_rating_plus ?? null;
+        const c1 = r.scoring_rate_plus ?? r.save_pct_plus ?? r.offense_rate_plus ?? r.catch_efficiency_plus ?? null;
+        const c2 = r.shot_accuracy_plus ?? r.keeper_passing_plus ?? r.defense_rate_plus ?? r.catch_frequency_plus ?? null;
+        const c3 = r.protection_rate_plus ?? null;
+        advMap.set(`${r.PlayerID}|${r.TeamID}|${r.SeasonID}|${r.LeagueID}`, { combined, c1, c2, c3 });
       });
       setSeasonRows(prev => prev.map(r => {
         const key = `${r.PlayerID}|${r.TeamID}|${r.SeasonID}|${r.LeagueID}`;
-        return advMap.has(key) ? { ...r, advPlus: advMap.get(key) ?? null } : r;
+        const m = advMap.get(key);
+        return m ? { ...r, advPlus: m.combined, advC1: m.c1, advC2: m.c2, advC3: m.c3 } : r;
       }));
       setAdvPlusLoadedPositions(prev => new Set(prev).add(reqPos));
       setAdvPlusLoading(false);

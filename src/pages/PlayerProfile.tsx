@@ -187,12 +187,14 @@ function advValueClass(v: number | null): string {
  * — the badge itself just shows the number, styled like Baseball-Reference
  * but scaled down since it lives inline with the player's demographic info. */
 function NumberCircle({ n }: {
-  n: { teamId: number; teamName: string; primaryColor: string | null; secondaryColor: string | null; number: number; seasons: number[] };
+  n: { teamId: number; teamName: string; primaryColor: string | null; secondaryColor: string | null; number: number; minSeason: number; maxSeason: number };
 }) {
   const bg = n.primaryColor || "#374151";
   const textColor = getContrastText(bg);
   const ring = n.secondaryColor && n.secondaryColor.toLowerCase() !== bg.toLowerCase() ? n.secondaryColor : (isLightColor(bg) ? "#1a1a1a" : "#ffffff");
-  const years = n.seasons.length === 1 ? seasonLabel(n.seasons[0]) : `${seasonLabel(n.seasons[0])} – ${seasonLabel(n.seasons[n.seasons.length - 1])}`;
+  // Plain calendar-year range (e.g. "1997-2001"), not each season's own
+  // hyphenated label strung together (e.g. not "1997-98 – 2000-01").
+  const years = `${n.minSeason - 1}-${n.maxSeason}`;
   return (
     <Link
       to={`/team/${encodeURIComponent(n.teamName)}`}
@@ -269,7 +271,7 @@ export default function PlayerProfile() {
   // spans — displayed like Baseball-Reference's uniform-number history.
   const [numbersWorn, setNumbersWorn] = useState<{
     teamId: number; teamName: string; primaryColor: string | null; secondaryColor: string | null;
-    number: number; seasons: number[];
+    number: number; minSeason: number; maxSeason: number;
   }[]>([]);
   const [advancedStats, setAdvancedStats] = useState<AdvancedStatLine[]>([]);
   useEffect(() => {
@@ -313,35 +315,50 @@ export default function PlayerProfile() {
         .select('"TeamID","FullName","PrimaryColor","SecondaryColor"').in("TeamID", teamIds);
       const teamInfo = new Map((teamRows || []).map((t: any) => [t.TeamID, t]));
 
-      // Group into spans of contiguous seasons wearing the same number for
-      // the same team. Grouped per (TeamID, Number) key *first* — a player's
-      // club and international seasons are interleaved by SeasonID (e.g.
-      // club-2010, intl-2010, club-2011, intl-2011...), and merging strictly
-      // by season order across everything at once would fragment a single
-      // continuous club stint every time an international season fell in
-      // between. Keying by team first keeps club and international spans
-      // (and any distinct club team) independent of one another.
-      const byKey = new Map<string, typeof rows>();
-      rows.forEach(r => {
-        const key = `${r.TeamID}|${r.Number}`;
+      // Group into one badge per meaningful "stint" wearing a given number.
+      //
+      // Club and international are handled differently on purpose:
+      //  - International sides don't compete every year (e.g. a biennial
+      //    cup), so a gap in seasons is normal and doesn't mean anything —
+      //    all appearances for the same (team, number) collapse into one
+      //    badge regardless of gaps.
+      //  - Club stints should only split when the player was actually on a
+      //    *different* club in between (e.g. Team A -> Team B -> Team A
+      //    wearing the same number both times at A should be two badges).
+      //    An incidental gap season at the same club (e.g. missed a season
+      //    through injury) should NOT split the badge on its own.
+      const intlRows = rows.filter(r => r.TeamID > 999);
+      const clubRows = [...rows.filter(r => r.TeamID <= 999)].sort((a, b) => a.SeasonID - b.SeasonID);
+
+      // Assign a "stint id" to each club row that only increments when the
+      // team actually changes, so a same-team gap doesn't start a new stint
+      // but a different team in between does.
+      let stintCounter = 0;
+      let prevTeam: number | null = null;
+      const clubRowsWithStint = clubRows.map(r => {
+        if (prevTeam !== null && r.TeamID !== prevTeam) stintCounter++;
+        prevTeam = r.TeamID;
+        return { ...r, stint: stintCounter };
+      });
+
+      const spans: { teamId: number; number: number; minSeason: number; maxSeason: number }[] = [];
+      const byKey = new Map<string, { TeamID: number; Number: number; SeasonID: number }[]>();
+      clubRowsWithStint.forEach(r => {
+        const key = `club|${r.TeamID}|${r.Number}|${r.stint}`;
         if (!byKey.has(key)) byKey.set(key, []);
         byKey.get(key)!.push(r);
       });
-
-      const spans: { teamId: number; number: number; seasons: number[] }[] = [];
+      intlRows.forEach(r => {
+        const key = `intl|${r.TeamID}|${r.Number}`;
+        if (!byKey.has(key)) byKey.set(key, []);
+        byKey.get(key)!.push(r);
+      });
       byKey.forEach(groupRows => {
-        const sorted = [...groupRows].sort((a, b) => a.SeasonID - b.SeasonID);
-        sorted.forEach(r => {
-          const last = spans[spans.length - 1];
-          if (last && last.teamId === r.TeamID && last.number === r.Number && r.SeasonID === last.seasons[last.seasons.length - 1] + 1) {
-            last.seasons.push(r.SeasonID);
-          } else {
-            spans.push({ teamId: r.TeamID, number: r.Number, seasons: [r.SeasonID] });
-          }
-        });
+        const seasons = groupRows.map(r => r.SeasonID);
+        spans.push({ teamId: groupRows[0].TeamID, number: groupRows[0].Number, minSeason: Math.min(...seasons), maxSeason: Math.max(...seasons) });
       });
       // Sort spans chronologically (by their first season) for a sensible display order
-      spans.sort((a, b) => a.seasons[0] - b.seasons[0]);
+      spans.sort((a, b) => a.minSeason - b.minSeason);
 
       setNumbersWorn(spans.map(s => {
         const t = teamInfo.get(s.teamId);
@@ -351,7 +368,8 @@ export default function PlayerProfile() {
           primaryColor: t?.PrimaryColor || null,
           secondaryColor: t?.SecondaryColor || null,
           number: s.number,
-          seasons: s.seasons,
+          minSeason: s.minSeason,
+          maxSeason: s.maxSeason,
         };
       }));
     });
@@ -1483,6 +1501,15 @@ export default function PlayerProfile() {
                     {isBeater && <th className={`${thClass} text-right`}>Min/TP</th>}
                     {isBeater && <th className={`${thClass} text-right`}>SA</th>}
                     {isBeater && <th className={`${thClass} text-right`}>Min/SA</th>}
+                    {isChaser && <th className={`${thClass} text-right`} title="Goals per minute, vs. league average for chasers that season">Scoring+</th>}
+                    {isChaser && <th className={`${thClass} text-right`} title="Shot accuracy, vs. league average for chasers that season">Accuracy+</th>}
+                    {isKeeper && <th className={`${thClass} text-right`} title="Save percentage, vs. league average for keepers that season">Save%+</th>}
+                    {isKeeper && <th className={`${thClass} text-right`} title="Pass completion, vs. league average for keepers that season">Distrib+</th>}
+                    {isBeater && <th className={`${thClass} text-right`} title="Bludgers hit per minute, vs. league average for beaters that season">Offense+</th>}
+                    {isBeater && <th className={`${thClass} text-right`} title="Turnovers forced per minute, vs. league average for beaters that season">Defense+</th>}
+                    {isBeater && <th className={`${thClass} text-right`} title="Teammates protected per minute, vs. league average for beaters that season">Protect+</th>}
+                    {isSeeker && <th className={`${thClass} text-right`} title="Catches per attempt, vs. league average for seekers that season">CatchEff+</th>}
+                    {isSeeker && <th className={`${thClass} text-right`} title="Catches per minute, vs. league average for seekers that season">CatchFreq+</th>}
                     {(isChaser || isSeeker || isKeeper || isBeater) && <th className={`${thClass} text-right`} title="League & position-adjusted rating — 100 = league average that season">Adj Rtg+</th>}
                   </tr>
                 </thead>
@@ -1648,6 +1675,15 @@ export default function PlayerProfile() {
                         {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(!!minPerTPBest, !!minPerTPLead) : "text-muted-foreground"}`}>{rowIsBeater ? (minPerTPVal !== null ? minPerTPVal.toFixed(1) : "—") : "—"}</td>}
                         {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? "" : ""}`} title="Chaser shot attempts allowed by the opposing team while these beaters played">{rowIsBeater ? (shotsAllowedVal ?? "—") : "—"}</td>}
                         {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${rowIsBeater ? cc(!!minPerSABest, !!minPerSALead) : "text-muted-foreground"}`} title="Higher is better here — more minutes elapsing per shot allowed means better defense">{rowIsBeater ? (minPerSAVal !== null ? minPerSAVal.toFixed(1) : "—") : "—"}</td>}
+                        {isChaser && <td className={`px-3 py-1.5 text-right font-mono ${advValueClass(rowIsChaser ? advRow?.scoring_rate_plus ?? null : null)}`}>{rowIsChaser ? (advRow?.scoring_rate_plus ?? "—") : "—"}</td>}
+                        {isChaser && <td className={`px-3 py-1.5 text-right font-mono ${advValueClass(rowIsChaser ? advRow?.shot_accuracy_plus ?? null : null)}`}>{rowIsChaser ? (advRow?.shot_accuracy_plus ?? "—") : "—"}</td>}
+                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${advValueClass(rowIsKeeper ? advRow?.save_pct_plus ?? null : null)}`}>{rowIsKeeper ? (advRow?.save_pct_plus ?? "—") : "—"}</td>}
+                        {isKeeper && <td className={`px-3 py-1.5 text-right font-mono ${advValueClass(rowIsKeeper ? advRow?.keeper_passing_plus ?? null : null)}`}>{rowIsKeeper ? (advRow?.keeper_passing_plus ?? "—") : "—"}</td>}
+                        {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${advValueClass(rowIsBeater ? advRow?.offense_rate_plus ?? null : null)}`}>{rowIsBeater ? (advRow?.offense_rate_plus ?? "—") : "—"}</td>}
+                        {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${advValueClass(rowIsBeater ? advRow?.defense_rate_plus ?? null : null)}`}>{rowIsBeater ? (advRow?.defense_rate_plus ?? "—") : "—"}</td>}
+                        {isBeater && <td className={`px-3 py-1.5 text-right font-mono ${advValueClass(rowIsBeater ? advRow?.protection_rate_plus ?? null : null)}`}>{rowIsBeater ? (advRow?.protection_rate_plus ?? "—") : "—"}</td>}
+                        {isSeeker && <td className={`px-3 py-1.5 text-right font-mono ${advValueClass(rowIsSeeker ? advRow?.catch_efficiency_plus ?? null : null)}`}>{rowIsSeeker ? (advRow?.catch_efficiency_plus ?? "—") : "—"}</td>}
+                        {isSeeker && <td className={`px-3 py-1.5 text-right font-mono ${advValueClass(rowIsSeeker ? advRow?.catch_frequency_plus ?? null : null)}`}>{rowIsSeeker ? (advRow?.catch_frequency_plus ?? "—") : "—"}</td>}
                         {(isChaser || isSeeker || isKeeper || isBeater) && (
                           <td className={`px-3 py-1.5 text-right font-mono ${advValueClass(advCombined)}`} title="League & position-adjusted rating — 100 = league average that season">
                             {advCombined ?? "—"}
@@ -1685,6 +1721,15 @@ export default function PlayerProfile() {
                         {isBeater && <td className={ct}>{careerTotals.minutes > 0 && careerTotals.teammatesProtected > 0 ? (careerTotals.minutes / careerTotals.teammatesProtected).toFixed(1) : "—"}</td>}
                         {isBeater && <td className={ct}>{careerTotals.shotsAllowed > 0 ? careerTotals.shotsAllowed : "—"}</td>}
                         {isBeater && <td className={ct}>{careerTotals.minutes > 0 && careerTotals.shotsAllowed > 0 ? (careerTotals.minutes / careerTotals.shotsAllowed).toFixed(1) : "—"}</td>}
+                        {isChaser && <td className={ct}>—</td>}
+                        {isChaser && <td className={ct}>—</td>}
+                        {isKeeper && <td className={ct}>—</td>}
+                        {isKeeper && <td className={ct}>—</td>}
+                        {isBeater && <td className={ct}>—</td>}
+                        {isBeater && <td className={ct}>—</td>}
+                        {isBeater && <td className={ct}>—</td>}
+                        {isSeeker && <td className={ct}>—</td>}
+                        {isSeeker && <td className={ct}>—</td>}
                         {(isChaser || isSeeker || isKeeper || isBeater) && <td className={ct} title="Adjusted ratings are season-specific and aren't meaningfully averaged across a career">—</td>}
                       </tr>
                     );

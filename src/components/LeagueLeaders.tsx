@@ -104,6 +104,14 @@ export function LeagueLeaders() {
       if (selectedLeague !== "all") {
         const lg = leagues.find(l => l.LeagueName === selectedLeague);
         if (lg) aq = aq.eq("LeagueID", lg.LeagueID);
+      } else {
+        // League-adjusted "+" stats compare a player against their own
+        // league's average — mixing in international competitions (far
+        // fewer games, very different scoring environments) produces
+        // misleading numbers, so "All Leagues" here means all *domestic*
+        // leagues specifically, not literally everything.
+        const domesticIds = leagues.filter(l => (l.LeagueTier ?? 0) > 0).map(l => l.LeagueID);
+        if (domesticIds.length > 0) aq = aq.in("LeagueID", domesticIds);
       }
 
       const { data, error } = await aq;

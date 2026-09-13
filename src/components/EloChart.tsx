@@ -311,6 +311,11 @@ export function EloChart({ scope = "club" }: { scope?: "club" | "intl" }) {
                 if (!label) return label;
                 return parseLocalDate(String(label)).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
               }}
+              // Recharts renders tooltip rows in the order the <Line>s were
+              // declared (alphabetical, since that's how the legend/lines
+              // list is built) — sort by the actual Elo value at this point
+              // instead, highest first, so the tooltip reads like a ranking.
+              itemSorter={(item) => -(typeof item.value === "number" ? item.value : 0)}
             />
             {visibleTeams.map((name) => (
               <Line

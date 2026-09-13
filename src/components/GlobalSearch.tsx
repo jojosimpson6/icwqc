@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
-import { fetchAllRows } from "@/lib/fetchAll";
 import { Search } from "lucide-react";
 
 interface SearchResult {
@@ -15,95 +14,73 @@ interface SearchResult {
 export function GlobalSearch() {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<SearchResult[]>([]);
+  const [searching, setSearching] = useState(false);
   const [open, setOpen] = useState(false);
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const containerRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
 
-  const [players, setPlayers] = useState<{ PlayerID: number; PlayerName: string; seasons: string; isActive: boolean }[]>([]);
-  const [teams, setTeams] = useState<{ TeamID: number; FullName: string }[]>([]);
-  const [leagues, setLeagues] = useState<{ LeagueID: number; LeagueName: string }[]>([]);
-  const [managers, setManagers] = useState<{ ManagerID: number; name: string }[]>([]);
-
+  // Debounced, server-side, on-demand search — the previous version eagerly
+  // preloaded every player (8,700), every player-season-minutes row
+  // (150,000+, just to compute a season range and "active" flag), every
+  // team, and every manager on first render of every page (this component
+  // lives in the header). That made the search bar unusable until that
+  // whole payload finished loading. Searching live per keystroke instead
+  // means each query only touches a handful of rows.
   useEffect(() => {
-    Promise.all([
-      fetchAllRows("players", { select: "PlayerID, PlayerName" }),
-      fetchAllRows("player_season_minutes", { select: "PlayerName, SeasonID" }),
-      fetchAllRows("teams", { select: "TeamID, FullName" }),
-      supabase.from("leagues").select("LeagueID, LeagueName").then(({ data }) => data || []),
-      fetchAllRows("managers", { select: "ManagerID, FirstName, LastName" }),
-    ]).then(([playerData, statsData, teamData, leagueData, managerData]) => {
-      const seasonMap = new Map<string, { min: number; max: number }>();
-      let globalMaxSeason = 0;
-      statsData.forEach((s: any) => {
-        if (!s.PlayerName || !s.SeasonID) return;
-        if (s.SeasonID > globalMaxSeason) globalMaxSeason = s.SeasonID;
-        const existing = seasonMap.get(s.PlayerName);
+    const q = query.trim();
+    if (!q) { setResults([]); setSearching(false); return; }
+
+    setSearching(true);
+    const handle = setTimeout(async () => {
+      const [playersRes, teamsRes, leaguesRes, managersRes] = await Promise.all([
+        supabase.from("players").select('"PlayerID","PlayerName","Position"').ilike("PlayerName", `%${q}%`).limit(5),
+        supabase.from("teams").select("TeamID, FullName").ilike("FullName", `%${q}%`).limit(4),
+        supabase.from("leagues").select("LeagueID, LeagueName").ilike("LeagueName", `%${q}%`).limit(3),
+        supabase.from("managers").select("ManagerID, FirstName, LastName")
+          .or(`FirstName.ilike.%${q}%,LastName.ilike.%${q}%`).limit(3),
+      ]);
+
+      const playerRows = playersRes.data || [];
+      const playerIds = playerRows.map((p: any) => p.PlayerID);
+
+      // Season range + active flag only for the handful of matched players
+      const [{ data: seasonRows }, { data: activeRows }] = playerIds.length > 0
+        ? await Promise.all([
+            supabase.from("player_numbers").select("PlayerID, SeasonID").in("PlayerID", playerIds),
+            supabase.from("active_players").select("PlayerID").in("PlayerID", playerIds),
+          ])
+        : [{ data: [] }, { data: [] }];
+
+      const seasonRangeMap = new Map<number, { min: number; max: number }>();
+      (seasonRows || []).forEach((r: any) => {
+        const existing = seasonRangeMap.get(r.PlayerID);
         if (existing) {
-          existing.min = Math.min(existing.min, s.SeasonID);
-          existing.max = Math.max(existing.max, s.SeasonID);
+          existing.min = Math.min(existing.min, r.SeasonID);
+          existing.max = Math.max(existing.max, r.SeasonID);
         } else {
-          seasonMap.set(s.PlayerName, { min: s.SeasonID, max: s.SeasonID });
+          seasonRangeMap.set(r.PlayerID, { min: r.SeasonID, max: r.SeasonID });
         }
       });
+      const activeSet = new Set((activeRows || []).map((r: any) => r.PlayerID));
 
-      setPlayers(
-        playerData.map((p: any) => {
-          const range = seasonMap.get(p.PlayerName);
-          const seasons = range
-            ? range.min === range.max
-              ? `${range.min - 1}–${String(range.min).slice(-2)}`
-              : `${range.min - 1}–${String(range.max)}`
-            : "";
-          const isActive = range ? range.max === globalMaxSeason : false;
-          return { PlayerID: p.PlayerID, PlayerName: p.PlayerName || "", seasons, isActive };
-        })
-      );
-      setTeams(teamData.map((t: any) => ({ TeamID: t.TeamID, FullName: t.FullName || "" })));
-      setLeagues(leagueData.map((l: any) => ({ LeagueID: l.LeagueID, LeagueName: l.LeagueName || "" })));
-      setManagers(managerData.map((m: any) => ({ ManagerID: m.ManagerID, name: `${m.FirstName || ""} ${m.LastName || ""}`.trim() })));
-    });
-  }, []);
+      const matched: SearchResult[] = [];
+      playerRows.forEach((p: any) => {
+        const range = seasonRangeMap.get(p.PlayerID);
+        const subtitle = range ? (range.min === range.max ? `${range.min - 1}–${String(range.min).slice(-2)}` : `${range.min - 1}–${range.max - 1}`) : (p.Position || "");
+        matched.push({ type: "player", id: p.PlayerID, name: p.PlayerName, subtitle, isActive: activeSet.has(p.PlayerID) });
+      });
+      (teamsRes.data || []).forEach((t: any) => matched.push({ type: "team", id: encodeURIComponent(t.FullName), name: t.FullName, subtitle: "Team" }));
+      (leaguesRes.data || []).forEach((l: any) => matched.push({ type: "league", id: l.LeagueID, name: l.LeagueName, subtitle: "League" }));
+      (managersRes.data || []).forEach((m: any) => matched.push({ type: "manager", id: m.ManagerID, name: `${m.FirstName || ""} ${m.LastName || ""}`.trim(), subtitle: "Manager" }));
 
-  useEffect(() => {
-    if (!query.trim()) {
-      setResults([]);
-      return;
-    }
-    const q = query.toLowerCase();
-    const matched: SearchResult[] = [];
+      setResults(matched);
+      setSelectedIndex(-1);
+      setSearching(false);
+    }, 250);
 
-    players
-      .filter((p) => p.PlayerName.toLowerCase().includes(q))
-      .slice(0, 5)
-      .forEach((p) =>
-        matched.push({ type: "player", id: p.PlayerID, name: p.PlayerName, subtitle: p.seasons, isActive: p.isActive })
-      );
-
-    teams
-      .filter((t) => t.FullName.toLowerCase().includes(q))
-      .slice(0, 3)
-      .forEach((t) =>
-        matched.push({ type: "team", id: encodeURIComponent(t.FullName), name: t.FullName, subtitle: "Team" })
-      );
-
-    leagues
-      .filter((l) => l.LeagueName.toLowerCase().includes(q))
-      .slice(0, 3)
-      .forEach((l) =>
-        matched.push({ type: "league", id: l.LeagueID, name: l.LeagueName, subtitle: "League" })
-      );
-
-    managers
-      .filter((m) => m.name.toLowerCase().includes(q))
-      .slice(0, 3)
-      .forEach((m) =>
-        matched.push({ type: "manager", id: m.ManagerID, name: m.name, subtitle: "Manager" })
-      );
-
-    setResults(matched);
-    setSelectedIndex(-1);
-  }, [query, players, teams, leagues, managers]);
+    return () => clearTimeout(handle);
+  }, [query]);
 
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -166,8 +143,11 @@ export function GlobalSearch() {
         />
       </div>
 
-      {open && results.length > 0 && (
+      {open && (searching || results.length > 0) && (
         <div className="absolute top-full mt-1 right-0 w-80 bg-popover border border-border rounded shadow-lg z-50 overflow-hidden">
+          {searching && results.length === 0 && (
+            <div className="px-3 py-2 text-xs text-muted-foreground font-sans">Searching…</div>
+          )}
           {results.map((r, i) => (
             <button
               key={`${r.type}-${r.id}`}
@@ -187,12 +167,14 @@ export function GlobalSearch() {
               </div>
             </button>
           ))}
-          <button
-            onClick={goToAdvancedSearch}
-            className="w-full text-left px-3 py-2 text-xs font-sans font-semibold text-accent hover:bg-accent/10 transition-colors border-t border-border"
-          >
-            Advanced search &amp; filters →
-          </button>
+          {results.length > 0 && (
+            <button
+              onClick={goToAdvancedSearch}
+              className="w-full text-left px-3 py-2 text-xs font-sans font-semibold text-accent hover:bg-accent/10 transition-colors border-t border-border"
+            >
+              Advanced search &amp; filters →
+            </button>
+          )}
         </div>
       )}
     </div>
